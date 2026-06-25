@@ -22,4 +22,5 @@ sha2 = { workspace = true }
 
 [dev-dependencies]
 pkm-core = { workspace = true, features = ["fixtures"] }
+pkm-agent = { workspace = true }
 tempfile = "3"

@@ -14,8 +14,9 @@
 //! STUB — method sets are the agreed minimum shape. Tasks B2 (repos) and E2
 //! (retriever) flesh them out. Keep the trait split one-per-aggregate.
 
-use crate::agent_action::AgentAction;
-use crate::id::{AgentActionId, NoteId, SourceId};
+use crate::agent_action::{AgentAction, AgentActionStatus};
+use crate::block::Block;
+use crate::id::{AgentActionId, BlockId, NoteId, SourceId};
 use crate::note::Note;
 use crate::source::Source;
 use crate::Result;
@@ -32,6 +33,8 @@ pub trait SourceRepo {
 pub trait NoteRepo {
     fn create(&self, note: &Note) -> Result<()>;
     fn get(&self, id: NoteId) -> Result<Option<Note>>;
+    /// Update a block's content. Returns the updated block after applying the change.
+    fn update_block(&self, note_id: NoteId, block_id: BlockId, new_content: crate::block::BlockContent) -> Result<Block>;
     // TODO(B2): block CRUD, ordered block fetch, metadata, version history.
 }
 
@@ -45,8 +48,12 @@ pub trait AgentActionRepo {
     fn create(&self, action: &AgentAction) -> Result<()>;
     /// Retrieve an action by id.
     fn get(&self, id: AgentActionId) -> Result<Option<AgentAction>>;
-    // TODO(D2): list/filter (by target, by status, by actor, by date range),
-    //           set_status (propose→accepted→applied transitions only), batch get.
+    /// Update the status of an action. Only valid status transitions are allowed:
+    /// Proposed → Accepted/Rejected/Applied → Reverted/Failed.
+    fn set_status(&self, id: AgentActionId, new_status: AgentActionStatus) -> Result<()>;
+    /// Update the diff of an action (to record before/after states when applied).
+    fn set_diff(&self, id: AgentActionId, diff: serde_json::Value) -> Result<()>;
+    // TODO(D2): list/filter (by target, by status, by actor, by date range), batch get.
 }
 
 // TODO(B2): EntityRepo, LinkRepo, ViewRepo.

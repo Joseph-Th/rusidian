@@ -300,6 +300,7 @@ dependencies = [
 name = "pkm-storage"
 version = "0.0.0"
 dependencies = [
+ "pkm-agent",
  "pkm-core",
  "rusqlite",
  "serde",

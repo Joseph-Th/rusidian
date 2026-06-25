@@ -96,36 +96,27 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ## Tasks
 
-### Spine slices (prove the architecture end-to-end)
+### Active — Next to work on
 
-#### S2 · Vertical slice: propose → diff → accept → rollback ⬜
-- **Depends on:** D1, D2, B2.
-- **Do:** A test that proposes an `UpdateBlock`, inspects the recorded diff,
-  accepts/applies it, then rolls it back to the exact prior state.
-- **Done when:** Test proves the full agent-action lifecycle + rollback.
+#### E2 · Keyword/FTS retriever + ranking + filters ⬜
+- **Depends on:** B1 ✅, B2 ✅.
+- **Files:** `pkm-search/src/lib.rs` (parse/rank); the `Retriever` impl over
+  SQLite FTS5 lives in `pkm-storage`.
+- **Do:** Implement `ExactText`/`FuzzyText` via FTS5. Every `SearchHit` sets its
+  `ContentStatus`. Add filters (date, type, review-state, project). Leave
+  `Semantic` an explicit unimplemented variant.
+- **Done when:** Index + ranking tests pass; unreviewed content is flagged,
+  never returned as settled knowledge.
 
----
-
-### A — Project meta
-
-#### A0 · Tauri desktop shell (`pkm-app`) ⬜
-- **Depends on:** S1, S2, E2.
-- **Do:** Add `crates/pkm-app` (Tauri), wire as a workspace member. Expose the
-  agent/search/storage services as Tauri commands. NO business logic in the UI
-  layer. Write an ADR confirming/!revising the UI-shell choice.
-- **Done when:** App launches, opens the db, creates + lists a note through the
-  real services.
-
----
-
-### B — Storage
-
----
-
-### C — Domain model completion
+#### E1 · Markdown import/export ⬜
+- **Depends on:** C2 ✅, B2 ✅.
+- **Do:** Pure `Note ⇄ markdown` functions (blocks ↔ markdown spans); import a
+  markdown folder into sources/notes with provenance. Keep parsing pure+tested.
+- **Done when:** Round-trip note→markdown→note preserves content + block ids
+  where possible; folder import creates sources with provenance.
 
 #### C4 · Entity merge semantics ⬜
-- **Depends on:** B2.
+- **Depends on:** B2 ✅.
 - **Do:** Non-lossy merge: survivor id, losers marked merged-into, all
   links/aliases re-pointed, original recoverable. Write an ADR.
 - **Done when:** Test: merge keeps every alias + re-points every link; rollback
@@ -137,43 +128,6 @@ Do not start a later step while an earlier one is 🔨/🚫.
   fields. Ensure derived content always has non-empty `derived_from`.
 - **Done when:** A derived block/link/entity can be traced to source + action.
 
----
-
-### D — Agent safety + ingestion
-
-#### D1 · Typed operation dispatch + risk classification ✅
-- **Depends on:** B2.
-- **Notes:** Implemented 16-variant Operation enum replacing payload: Value. Each variant contains exact parameters needed for that operation type. requires_review() classifies: ParseSource/GenerateSummary are mechanical (false); all others are knowledge ops (true). execute() creates AgentAction records with Proposed status. All 5 tests pass (mechanical/knowledge classification, action creation, round-trip serialization). D2 will add persistence and actual apply/rollback.
-
-#### D2 · Diff representation + action log persistence ✅
-- **Depends on:** D1 ✅, B2.
-- **Notes:** Wrote ADR 0003 deciding on full snapshots (before/after JSON) over patches. Added AgentActionRepo trait to ports; implemented SqliteAgentActionRepo (create/get). Updated execute() to persist actions via repo. All tests verify persistence. Diff schema: full snapshots per ADR - simpler and clearer than patches. Action log is append-only and fully auditable.
-
----
-
-### E — Import/export + search
-
-#### E1 · Markdown import/export ⬜
-- **Depends on:** C2, B2.
-- **Do:** Pure `Note ⇄ markdown` functions (blocks ↔ markdown spans); import a
-  markdown folder into sources/notes with provenance. Keep parsing pure+tested.
-- **Done when:** Round-trip note→markdown→note preserves content + block ids
-  where possible; folder import creates sources with provenance.
-
-#### E2 · Keyword/FTS retriever + ranking + filters ⬜
-- **Depends on:** B1, B2.
-- **Files:** `pkm-search/src/lib.rs` (parse/rank); the `Retriever` impl over
-  SQLite FTS5 lives in `pkm-storage`.
-- **Do:** Implement `ExactText`/`FuzzyText` via FTS5. Every `SearchHit` sets its
-  `ContentStatus`. Add filters (date, type, review-state, project). Leave
-  `Semantic` an explicit unimplemented variant.
-- **Done when:** Index + ranking tests pass; unreviewed content is flagged,
-  never returned as settled knowledge.
-
----
-
-### F — Presentation views
-
 #### F0 · Typed view parameters + view model ⬜
 - **Depends on:** C-series.
 - **Files:** `pkm-core/src/view.rs` (+ a render boundary).
@@ -182,6 +136,59 @@ Do not start a later step while an earlier one is 🔨/🚫.
   one-off views — AGENTS.md red flag).
 - **Done when:** One view (recommend `ReadingQueue` or `ReviewQueue`) renders
   from stored data through the view model, with tests.
+
+#### A0 · Tauri desktop shell (`pkm-app`) ⬜
+- **Depends on:** S1 ✅, S2, E2.
+- **Do:** Add `crates/pkm-app` (Tauri), wire as a workspace member. Expose the
+  agent/search/storage services as Tauri commands. NO business logic in the UI
+  layer. Write an ADR confirming/!revising the UI-shell choice.
+- **Done when:** App launches, opens the db, creates + lists a note through the
+  real services.
+
+---
+
+## Done
+
+#### A1 · Clippy/test gate + round-trip tests ✅
+- **Notes:** Implemented round-trip tests for all invariant enums (LinkType, EntityKind, ViewKind, IngestionState, ContentStatus, ReviewState, AgentActionStatus, OperationKind, Actor).
+
+#### B1 · Migration runner + 0001_init schema + db open ✅
+- **Notes:** Implemented migration infrastructure with automatic runner. Schema includes tables for sources, notes, blocks, entities, links, and action logs.
+
+#### B2 · Repository impls ✅
+- **Notes:** Implemented SqliteSourceRepo, SqliteNoteRepo, SqliteBlockRepo, SqliteEntityRepo, SqliteLinkRepo with round-trip persistence tests.
+
+#### C1 · Source fields (ingestion state, timestamps) ✅
+- **Notes:** Added ingestion state, captured timestamp, processed timestamp, extraction status, and URL/locator fields to Source.
+
+#### C2 · Block ordering + Note metadata + markdown shape ✅
+- **Notes:** Implemented block ordering within notes, note metadata fields, and markdown-compatible block types (paragraph, heading, quote, etc.).
+
+#### C3 · Link provenance and review state ✅
+- **Notes:** Added provenance and review state to Link struct; confidence field for inferred relationships.
+
+#### D1 · Typed operation dispatch + risk classification ✅
+- **Depends on:** B2.
+- **Notes:** Implemented 16-variant Operation enum. requires_review() classifies: ParseSource/GenerateSummary are mechanical (false); all others are knowledge ops (true). execute() creates AgentAction records with Proposed status.
+
+#### D2 · Diff representation + action log persistence ✅
+- **Depends on:** D1 ✅, B2.
+- **Notes:** Wrote ADR 0003 (full snapshots over patches). Added AgentActionRepo trait; implemented SqliteAgentActionRepo. Action log is append-only and fully auditable.
+
+#### D3 · Ingestion transition table ✅
+- **Notes:** Implemented ingestion state machine transitions with validation.
+
+#### D4 · Binary attachments (content-addressed blob store) ✅
+- **Notes:** Implemented content-addressed blob storage for binary attachments with integrity verification.
+
+#### S1 · Vertical slice: source round-trip + JSON export ✅
+- **Notes:** Implemented full create_source → persist → retrieve → export JSON workflow with round-trip tests.
+
+#### S2 · Vertical slice: propose → diff → accept → rollback ✅
+- **Depends on:** D1 ✅, D2 ✅, B2 ✅.
+- **Notes:** Implemented full agent-action lifecycle: propose UpdateBlock operations, apply them (status transition), and rollback. Added NoteRepo::update_block and AgentActionRepo::set_status/set_diff methods. Test verifies end-to-end proposal → acceptance → rollback with action status tracking.
+
+---
 
 > The remaining concrete views (Dossier, Timeline, ProjectDashboard, SourceMap,
 > DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions,

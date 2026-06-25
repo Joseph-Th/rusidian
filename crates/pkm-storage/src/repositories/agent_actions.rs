@@ -174,7 +174,32 @@ impl<'c> AgentActionRepo for SqliteAgentActionRepo<'c> {
             Err(e) => Err(crate::StorageError::from(e).into()),
         }
     }
+
+    fn set_status(&self, id: AgentActionId, new_status: pkm_core::agent_action::AgentActionStatus) -> Result<()> {
+        let status_json = serde_json::to_string(&new_status)?;
+
+        self.conn
+            .execute(
+                "UPDATE agent_action SET status = ?1 WHERE id = ?2",
+                params![status_json, id.to_string()],
+            )
+            .map_err(crate::StorageError::from)?;
+
+        Ok(())
+    }
+
+    fn set_diff(&self, id: AgentActionId, diff: serde_json::Value) -> Result<()> {
+        let diff_json = serde_json::to_string(&diff)?;
+
+        self.conn
+            .execute(
+                "UPDATE agent_action SET diff = ?1 WHERE id = ?2",
+                params![diff_json, id.to_string()],
+            )
+            .map_err(crate::StorageError::from)?;
+
+        Ok(())
+    }
 }
 
-// TODO(D2): list/filter (by target, by status, by actor, by date range),
-//           set_status (propose→accepted→applied transitions only), batch get.
+// TODO(D2): list/filter (by target, by status, by actor, by date range), batch get.

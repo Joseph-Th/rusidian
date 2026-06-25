@@ -24,7 +24,7 @@ pub mod migrations;
 pub mod repositories;
 
 pub use blob_store::BlobStore;
-pub use repositories::SqliteSourceRepo;
+pub use repositories::{SqliteSourceRepo, SqliteNoteRepo, SqliteAgentActionRepo};
 
 use thiserror::Error;
 
