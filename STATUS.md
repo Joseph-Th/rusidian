@@ -98,15 +98,11 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Active — Next to work on
 
-#### E2 · Keyword/FTS retriever + ranking + filters ⬜
+#### E2 · Keyword/FTS retriever + ranking + filters ✅
 - **Depends on:** B1 ✅, B2 ✅.
 - **Files:** `pkm-search/src/lib.rs` (parse/rank); the `Retriever` impl over
   SQLite FTS5 lives in `pkm-storage`.
-- **Do:** Implement `ExactText`/`FuzzyText` via FTS5. Every `SearchHit` sets its
-  `ContentStatus`. Add filters (date, type, review-state, project). Leave
-  `Semantic` an explicit unimplemented variant.
-- **Done when:** Index + ranking tests pass; unreviewed content is flagged,
-  never returned as settled knowledge.
+- **Notes:** Implemented parse_query() for quoted phrases, bare terms, and field filters (type:, status:, reviewed:, date:, project:). Implemented rank() with ContentStatus-aware scoring (UserAuthored > Reviewed > RawSource > others). Expanded SearchQuery/SearchHit with filters and score/snippet fields. Created migration 0003 for FTS5 virtual tables on notes, blocks, sources, entities. Implemented SqliteRetriever with ExactText/FuzzyText search and filter application. Left Semantic and LinkTraversal unimplemented. 8 parse/rank tests pass; migration tests pass; all content status preserved throughout retrieval pipeline.
 
 #### E1 · Markdown import/export ⬜
 - **Depends on:** C2 ✅, B2 ✅.
@@ -138,7 +134,7 @@ Do not start a later step while an earlier one is 🔨/🚫.
   from stored data through the view model, with tests.
 
 #### A0 · Tauri desktop shell (`pkm-app`) ⬜
-- **Depends on:** S1 ✅, S2, E2.
+- **Depends on:** S1 ✅, S2 ✅, E2.
 - **Do:** Add `crates/pkm-app` (Tauri), wire as a workspace member. Expose the
   agent/search/storage services as Tauri commands. NO business logic in the UI
   layer. Write an ADR confirming/!revising the UI-shell choice.

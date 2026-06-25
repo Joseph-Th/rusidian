@@ -22,9 +22,11 @@ pub mod blob_store;
 pub mod db;
 pub mod migrations;
 pub mod repositories;
+pub mod retriever;
 
 pub use blob_store::BlobStore;
 pub use repositories::{SqliteSourceRepo, SqliteNoteRepo, SqliteAgentActionRepo};
+pub use retriever::SqliteRetriever;
 
 use thiserror::Error;
 

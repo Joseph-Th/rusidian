@@ -302,6 +302,7 @@ version = "0.0.0"
 dependencies = [
  "pkm-agent",
  "pkm-core",
+ "pkm-search",
  "rusqlite",
  "serde",
  "serde_json",

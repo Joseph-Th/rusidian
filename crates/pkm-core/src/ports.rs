@@ -18,6 +18,7 @@ use crate::agent_action::{AgentAction, AgentActionStatus};
 use crate::block::Block;
 use crate::id::{AgentActionId, BlockId, NoteId, SourceId};
 use crate::note::Note;
+use crate::review::ReviewState;
 use crate::source::Source;
 use crate::Result;
 
@@ -79,16 +80,40 @@ pub enum SearchMode {
     LinkTraversal,
 }
 
-/// STUB — task E2 adds filters (date, type, review-state, project).
+/// A multi-mode search query with optional filters.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SearchQuery {
     pub mode: SearchMode,
     pub text: String,
+    /// Optional filters to narrow results.
+    pub filters: SearchFilters,
 }
 
-/// STUB — task E2 adds score, snippet, cited sources.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Optional filters to apply to search results.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SearchFilters {
+    /// Filter by object type (source, note, block, entity, link, view).
+    pub object_type: Option<String>,
+    /// Filter by content status (user_authored, raw_source, ai_summary, etc.).
+    pub content_status: Option<String>,
+    /// Filter by review state (proposed, accepted, rejected).
+    pub review_state: Option<ReviewState>,
+    /// Filter by date range (RFC3339 start, exclusive end).
+    pub date_range: Option<(String, String)>,
+    /// Filter by project/tag.
+    pub project: Option<String>,
+}
+
+/// A search result. Preserves content status so the UI can distinguish
+/// raw/reviewed/generated/unreviewed material.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SearchHit {
+    /// The object that matched.
     pub object: crate::id::ObjectRef,
+    /// Content status (for display and filtering).
     pub status: crate::provenance::ContentStatus,
+    /// Optional relevance score (0.0-1.0), higher is better.
+    pub score: Option<f64>,
+    /// Optional matched text snippet (first ~150 chars of matching context).
+    pub snippet: Option<String>,
 }
