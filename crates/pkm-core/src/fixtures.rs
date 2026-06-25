@@ -13,10 +13,13 @@
 //! are NOT deterministic. Use them for round-trip/shape tests, not for tests
 //! asserting exact ids/times.
 
-use crate::id::SourceId;
+use crate::block::{Block, BlockContent};
+use crate::id::{BlockId, NoteId, SourceId};
 use crate::ingestion::IngestionState;
+use crate::note::Note;
 use crate::source::{Source, SourceOrigin};
 use crate::{Actor, Timestamp};
+use std::collections::BTreeMap;
 
 /// A minimal example [`Source`] (a pasted-text capture).
 pub fn sample_source() -> Source {
@@ -33,7 +36,40 @@ pub fn sample_source() -> Source {
     }
 }
 
-// TODO(fixtures): add sample_note(), sample_block_tree(), sample_entity(),
-// sample_typed_link(), sample_summary_proposal(), sample_agent_action() as
-// those types gain their full fields (tasks C1-C5, D1-D2). Tests in storage,
-// agent, search, and ingestion should consume these.
+/// A minimal example [`Block`] (markdown text).
+pub fn sample_block() -> Block {
+    Block {
+        id: BlockId::new(),
+        note_id: NoteId::new(),
+        content: BlockContent::Markdown {
+            text: "Example block content".to_string(),
+        },
+        order: 1.0,
+        created_by: Actor::User,
+        created_at: Timestamp::now_utc(),
+        source_provenance_ref: None,
+    }
+}
+
+/// A minimal example [`Note`] with a single block.
+pub fn sample_note() -> Note {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "example_key".to_string(),
+        serde_json::json!("example_value"),
+    );
+
+    Note {
+        id: NoteId::new(),
+        title: "Example note".to_string(),
+        blocks: vec![BlockId::new()],
+        metadata,
+        created_by: Actor::User,
+        created_at: Timestamp::now_utc(),
+    }
+}
+
+// TODO(fixtures): add sample_entity(), sample_typed_link(),
+// sample_summary_proposal(), sample_agent_action() as those types gain
+// their full fields (tasks C5, D1-D2). Tests in storage, agent, search,
+// and ingestion should consume these.

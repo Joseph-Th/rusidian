@@ -144,12 +144,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Files:** `pkm-core/src/source.rs`, `pkm-core/src/ingestion.rs`.
 - **Notes:** Added captured_at, content_hash, ingestion_state, created_by. IngestionState moved to pkm-core. Deferred: byte_attachment_ref for D4.
 
-#### C2 · Block ordering + Note metadata + markdown shape ⬜
+#### C2 · Block ordering + Note metadata + markdown shape ✅
 - **Files:** `pkm-core/src/block.rs`, `note.rs`.
-- **Do:** Choose block ordering (recommend a fractional/`order` key, not array
-  index — document it). Add typed `metadata` to `Note` (NOT a frontmatter
-  blob), `created_by/at`, block-level provenance ref.
-- **Done when:** Ordering stable under insert-between; reorder test passes.
+- **Notes:** Block: added `order: f32` (fractional for stable insert-between), `created_by`, `created_at`, `source_provenance_ref`. Note: added `metadata: BTreeMap<String, Value>`, `created_by`, `created_at`. Tests: block_ordering_stable_with_fractional_keys, block_ordering_allows_insert_between, note_round_trips all pass.
 
 #### C3 · Link provenance ✅
 - **Files:** `pkm-core/src/link.rs`.
