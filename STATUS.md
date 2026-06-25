@@ -189,11 +189,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Files:** `pkm-core/src/ingestion.rs`.
 - **Notes:** Implemented `can_transition_to` with all legal edges: linear pipeline Captured→...→AwaitingReview, then {Promoted|Archived|Rejected}. Any state→Failed allowed. Failed→earlier_states allowed (retry). Terminal states immutable. Tests: 10 tests covering all legal + all illegal transitions.
 
-#### D4 · Binary attachments ⬜
+#### D4 · Binary attachments ✅
 - **Depends on:** B1.
-- **Do:** Content-addressed local blob store (hash→file under app data dir);
-  `Source` references attachments by hash. No DB blobs for large files.
-- **Done when:** Store + fetch by hash round-trips; dedupe by hash works.
+- **Notes:** Created `BlobStore` (content-addressed, SHA256). Methods: new, store (returns hash), fetch, exists. Dedup by hash automatic (store checks existence first). Tests: round-trip, dedup verification, error handling. New dependency: sha2 0.10.
 
 ---
 

@@ -18,10 +18,12 @@
 //!   tests/                 migration + round-trip tests
 //! See SCHEMA.md for the current schema overview.
 
+pub mod blob_store;
 pub mod db;
 pub mod migrations;
 pub mod repositories;
 
+pub use blob_store::BlobStore;
 pub use repositories::SqliteSourceRepo;
 
 use thiserror::Error;
