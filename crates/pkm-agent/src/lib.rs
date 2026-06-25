@@ -481,6 +481,15 @@ mod tests {
     }
 
     #[test]
+    fn merge_entities_requires_review() {
+        let merge_op = Operation::MergeEntities {
+            survivor_id: EntityId::new(),
+            loser_ids: vec![EntityId::new(), EntityId::new()],
+        };
+        assert!(requires_review(&merge_op));
+    }
+
+    #[test]
     fn operation_round_trips() {
         let ops = [
             Operation::CreateSource {
@@ -508,6 +517,15 @@ mod tests {
                 new_content: BlockContent::Markdown {
                     text: "Updated".to_string(),
                 },
+            },
+            Operation::CreateEntity {
+                entity_id: EntityId::new(),
+                entity_kind: pkm_core::entity::EntityKind::Person,
+                name: "Alice".to_string(),
+            },
+            Operation::MergeEntities {
+                survivor_id: EntityId::new(),
+                loser_ids: vec![EntityId::new()],
             },
             Operation::CreateTypedLink {
                 from: ObjectRef::Note(NoteId::new()),

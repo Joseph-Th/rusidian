@@ -117,11 +117,8 @@ Do not start a later step while an earlier one is 🔨/🚫.
 #### C4b · Entity merge: SqliteEntityRepo persistence ✅
 - **Notes:** Added EntityRepo trait to ports.rs with create(), get(), set_merged_into(). Implemented SqliteEntityRepo in entities.rs with full SQL persistence for all Entity fields including merged_into. Added 2 round-trip tests: entity_create_and_get_round_trip and entity_merge_sets_merged_into. Both tests pass; all entity fields survive persist/retrieve cycle.
 
-#### C4c · Entity merge: Operation enum + MergeEntity ⬜
-- **Depends on:** C4b.
-- **Do:** Add MergeEntity variant to Operation enum (with survivor_id and loser_id).
-  Requires review (knowledge operation). Update execute() dispatcher.
-- **Done when:** Operation serializes; requires_review() returns true; tests pass.
+#### C4c · Entity merge: Operation enum + MergeEntity ✅
+- **Notes:** MergeEntities operation was already defined in Operation enum with (survivor_id, loser_ids). Verified requires_review() returns true (knowledge operation). Added merge_entities_requires_review() test and included MergeEntities in operation_round_trips() serialization test. All 6 agent tests pass.
 
 #### C4d · Entity merge: Link re-pointing ⬜
 - **Depends on:** C4c.
