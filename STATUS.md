@@ -167,11 +167,16 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### C — Domain model completion
 
-#### C1 · Flesh out `Source` ⬜
-- **Files:** `pkm-core/src/source.rs`.
-- **Do:** Add `captured_at`, `content_hash`, `ingestion_state: IngestionState`,
-  attachment reference (see D4). Document raw-content write-once.
-- **Done when:** serde round-trip test; no existing field removed.
+#### C1 · Flesh out `Source` ✅
+- **Files:** `pkm-core/src/source.rs`, `pkm-core/src/ingestion.rs`.
+- **Completed:** Added `captured_at: Timestamp`, `content_hash: String`,
+  `ingestion_state: IngestionState`, `created_by: Actor` fields. Moved
+  IngestionState from pkm-ingestion to pkm-core (domain type, not impl detail).
+  Updated fixtures and added round-trip test.
+- **Notes:** Architectural: IngestionState now lives in pkm-core as a product
+  invariant (alongside ReviewState, ContentStatus, etc.). pkm-ingestion re-exports
+  it. Deferred: byte_attachment_ref for D4.
+- **Tests:** source_round_trips test passes; all 11 pkm-core tests pass.
 
 #### C2 · Block ordering + Note metadata + markdown shape ⬜
 - **Files:** `pkm-core/src/block.rs`, `note.rs`.

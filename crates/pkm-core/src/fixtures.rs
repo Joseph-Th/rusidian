@@ -15,14 +15,21 @@
 
 use crate::id::SourceId;
 use crate::source::{Source, SourceOrigin};
+use crate::{Actor, Timestamp};
+use crate::ingestion::IngestionState;
 
 /// A minimal example [`Source`] (a pasted-text capture).
 pub fn sample_source() -> Source {
+    let raw = "Raw captured text that must never be overwritten.";
     Source {
         id: SourceId::new(),
         origin: SourceOrigin::PastedText,
         title: Some("Example source".to_string()),
-        raw_content: "Raw captured text that must never be overwritten.".to_string(),
+        raw_content: raw.to_string(),
+        captured_at: Timestamp::now_utc(),
+        content_hash: "5b2c6b6c1d5e0a1b7c9d3e8f2a4c6e9a".to_string(),
+        ingestion_state: IngestionState::Captured,
+        created_by: Actor::User,
     }
 }
 

@@ -33,6 +33,7 @@ pub mod agent_action;
 
 pub mod provenance;
 pub mod review;
+pub mod ingestion;
 pub mod ports;
 
 #[cfg(any(test, feature = "fixtures"))]
