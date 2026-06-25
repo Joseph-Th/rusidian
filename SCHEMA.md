@@ -18,16 +18,29 @@ bug — fix it.
 
 ## Current schema
 
-Nothing is persisted yet. The initial schema lands in migration `0001_init`
-(STATUS task B1). When B1 is implemented, document each table here:
+Migration `0001_init` (STATUS task B1) creates the initial schema:
 
 | Table | Backs (core type) | Key columns | Notes |
 |-------|-------------------|-------------|-------|
-| `schema_version` | — | `version`, `applied_at` | migration ledger |
-| `source` | `source::Source` | TBD (B1) | raw content write-once |
-| `note` | `note::Note` | TBD | |
-| `block` | `block::Block` | TBD | ordered within note |
-| `entity` | `entity::Entity` | TBD | aliases, merge target |
-| `link` | `link::Link` | TBD | typed; from/to are ObjectRef |
-| `view` | `view::View` | TBD | kind + params |
-| `agent_action` | `agent_action::AgentAction` | TBD | append-only audit log |
+| `schema_version` | — | `version` (PK), `applied_at` | migration ledger; every migration records itself |
+| `source` | `source::Source` | `id` (PK) | raw content write-once; `origin` (TEXT, enum), `title`, `raw_content`, `created_at` (RFC3339), `created_by` |
+| `note` | `note::Note` | `id` (PK) | `title`, `created_at` (RFC3339), `created_by` |
+| `block` | `block::Block` | `id` (PK), `note_id` (FK) | `block_type` (enum), `content`, `order` (REAL, fractional for insert-between), `created_at`, `created_by` |
+| `entity` | `entity::Entity` | `id` (PK) | `kind` (enum), `name`, `aliases` (JSON), `created_at`, `created_by` |
+| `link` | `link::Link` | `id` (PK) | `from_type`/`from_id` (ObjectRef), `to_type`/`to_id` (ObjectRef), `link_type` (enum), `created_at`, `created_by` |
+| `view` | `view::View` | `id` (PK) | `kind` (enum), `title`, `params` (JSON), `created_at`, `created_by` |
+| `agent_action` | `agent_action::AgentAction` | `id` (PK) | `actor` (JSON), `operation` (enum), `target_type`/`target_id` (ObjectRef), `status` (enum), `rationale`, `created_at`, `diff` (JSON), `rollback_of` (FK or NULL) |
+
+### Storage notes
+
+- **UUIDs:** TEXT (RFC4122 string format, e.g., `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+- **Timestamps:** TEXT (RFC3339 format, e.g., `2025-06-25T14:26:00Z`)
+- **Enums:** TEXT (snake_case per serde serialization, e.g., `related_to`, `proposed`, `user_authored`)
+- **JSON:** TEXT (serde_json; used for complex types like aliases, params, actor, diff)
+- **Foreign keys:** PRAGMA foreign_keys=ON enforced; soft deletes preserve recovery
+- **Concurrency:** PRAGMA journal_mode=WAL for better concurrent access
+- **Busy timeout:** 5 seconds to avoid immediate failures under contention
+
+### What is NOT yet persisted
+
+Tasks C1-C5, D1-D4, E1 will add fields (e.g., `captured_at`, `content_hash`, `ingestion_state` on Source; provenance/review state on blocks/links; etc.). Schema evolves via new migrations.

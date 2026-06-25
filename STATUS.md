@@ -139,16 +139,19 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### B — Storage
 
-#### B1 · Migration runner + `0001_init` + db open 🔨
+#### B1 · Migration runner + `0001_init` + db open ✅
 - **Depends on:** —
-- **Files:** `pkm-storage/src/db.rs`, `.../migrations.rs`,
-  `pkm-storage/migrations/0001_init.sql`, `SCHEMA.md`.
-- **Do:** Implement `open()` (pragmas: WAL, foreign_keys=ON, busy_timeout, then
-  `migrations::run`). Implement `run()` with a `schema_version` table, applied
-  transactionally + idempotently. Write `0001_init` creating typed tables for
-  source/note/block/entity/link/view/agent_action. Fill in `SCHEMA.md`.
-- **Done when:** Tests: fresh open succeeds; `open` twice is idempotent;
-  `schema_version` records `0001_init`.
+- **Completed:** Implemented migration runner (`migrations::run`) with
+  `schema_version` table tracking. Created `0001_init.sql` with typed tables
+  for all aggregates (source, note, block, entity, link, view, agent_action).
+  Implemented `db::open()` with pragmas (WAL, foreign_keys=ON, busy_timeout=5s).
+  Updated SCHEMA.md with full table descriptions.
+- **Tests:** All 3 pass:
+  - fresh_db_open_succeeds
+  - open_is_idempotent
+  - schema_tables_exist
+- **Notes:** Added `time` and `tempfile` dependencies. Migrations are
+  transactional + idempotent; safe to call open() multiple times.
 
 #### B2 · Repository implementations ⬜
 - **Depends on:** B1, C1, C3 (and C2 for blocks).
