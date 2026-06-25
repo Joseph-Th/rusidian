@@ -98,10 +98,6 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Spine slices (prove the architecture end-to-end)
 
-#### S1 · Vertical slice: source round-trip + JSON export ✅
-- **Depends on:** B1, B2, C1.
-- **Notes:** Integration test `s1_source_round_trip_with_json_export` covers create→persist→get→export JSON. All assertions pass; source round-trips correctly through DB and JSON serialization.
-
 #### S2 · Vertical slice: propose → diff → accept → rollback ⬜
 - **Depends on:** D1, D2, B2.
 - **Do:** A test that proposes an `UpdateBlock`, inspects the recorded diff,
@@ -111,10 +107,6 @@ Do not start a later step while an earlier one is 🔨/🚫.
 ---
 
 ### A — Project meta
-
-#### A1 · Dev gate + first tests ✅
-- **Depends on:** —
-- **Notes:** All 10 invariant enums have snake_case round-trip tests; clippy clean.
 
 #### A0 · Tauri desktop shell (`pkm-app`) ⬜
 - **Depends on:** S1, S2, E2.
@@ -128,29 +120,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### B — Storage
 
-#### B1 · Migration runner + `0001_init` + db open ✅
-- **Depends on:** —
-- **Notes:** Migration runner, schema_version tracking, db::open() with WAL; all 3 tests pass.
-
-#### B2 · Repository implementations (Phase 1: SourceRepo) ✅
-- **Depends on:** B1 ✅, C1 ✅, C3 ✅.
-- **Notes:** SqliteSourceRepo (create + get), migration 0002_extend_source, round-trip tests pass. Deferred: NoteRepo, EntityRepo, LinkRepo, ViewRepo, AgentActionRepo.
-
 ---
 
 ### C — Domain model completion
-
-#### C1 · Flesh out `Source` ✅
-- **Files:** `pkm-core/src/source.rs`, `pkm-core/src/ingestion.rs`.
-- **Notes:** Added captured_at, content_hash, ingestion_state, created_by. IngestionState moved to pkm-core. Deferred: byte_attachment_ref for D4.
-
-#### C2 · Block ordering + Note metadata + markdown shape ✅
-- **Files:** `pkm-core/src/block.rs`, `note.rs`.
-- **Notes:** Block: added `order: f32` (fractional for stable insert-between), `created_by`, `created_at`, `source_provenance_ref`. Note: added `metadata: BTreeMap<String, Value>`, `created_by`, `created_at`. Tests: block_ordering_stable_with_fractional_keys, block_ordering_allows_insert_between, note_round_trips all pass.
-
-#### C3 · Link provenance ✅
-- **Files:** `pkm-core/src/link.rs`.
-- **Notes:** Added created_by, created_at, reviewed, confidence. Inferred vs. confirmed links now distinguishable.
 
 #### C4 · Entity merge semantics ⬜
 - **Depends on:** B2.
@@ -169,7 +141,7 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### D — Agent safety + ingestion
 
-#### D1 · Typed operation dispatch + risk classification ⬜
+#### D1 · Typed operation dispatch + risk classification 🔨
 - **Depends on:** B2.
 - **Files:** `pkm-agent/src/lib.rs`.
 - **Do:** Replace `payload: Value` with a typed `Operation` enum (one variant
@@ -184,14 +156,6 @@ Do not start a later step while an earlier one is 🔨/🚫.
   **write `docs/adr/0003-agent-diff.md`**. Persist via `AgentActionRepo`.
   Implement `RollbackAction`.
 - **Done when:** apply→rollback restores prior state exactly; log is append-only.
-
-#### D3 · Ingestion transition table ✅
-- **Files:** `pkm-core/src/ingestion.rs`.
-- **Notes:** Implemented `can_transition_to` with all legal edges: linear pipeline Captured→...→AwaitingReview, then {Promoted|Archived|Rejected}. Any state→Failed allowed. Failed→earlier_states allowed (retry). Terminal states immutable. Tests: 10 tests covering all legal + all illegal transitions.
-
-#### D4 · Binary attachments ✅
-- **Depends on:** B1.
-- **Notes:** Created `BlobStore` (content-addressed, SHA256). Methods: new, store (returns hash), fetch, exists. Dedup by hash automatic (store checks existence first). Tests: round-trip, dedup verification, error handling. New dependency: sha2 0.10.
 
 ---
 
