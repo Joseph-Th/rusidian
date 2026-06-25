@@ -1,0 +1,9 @@
+-- Migration 0001_init  (STATUS.md task B1)
+-- APPEND-ONLY: once this migration has shipped, never edit it; add 0002_*.sql.
+--
+-- TODO(B1): create the initial schema. One table per aggregate, typed columns
+-- (TEXT for ids/JSON, not one opaque blob). Suggested tables:
+--   schema_version(version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)
+--   source, note, block, entity, link, view, agent_action
+-- Persist the invariant enums as their snake_case serde strings.
+-- Document the resulting schema in ../../../SCHEMA.md.

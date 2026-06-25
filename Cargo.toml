@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pkm-core",
+    "crates/pkm-storage",
+    "crates/pkm-search",
+    "crates/pkm-agent",
+    "crates/pkm-ingestion",
+]
+
+# The Tauri desktop shell (`crates/pkm-app`) is intentionally NOT a member yet.
+# It is heavy and depends on every other crate through service interfaces.
+# Add it only after the foundation crates have real behavior + tests.
+# See STATUS.md tasks A0 / the vertical-slice spine.
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.94"
+
+[workspace.dependencies]
+# Shared versions. Add a dependency here ONLY after answering the
+# Dependency Policy questions in AGENTS.md. Keep this list small.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v7", "serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Internal crates referenced by path. Dependency direction is strict and
+# acyclic (see README "Dependency graph"):
+#   pkm-core       <- no internal deps
+#   pkm-storage    <- pkm-core            (implements core ports; owns SQL)
+#   pkm-search     <- pkm-core            (pure query/ranking logic)
+#   pkm-agent      <- pkm-core            (operates via core ports)
+#   pkm-ingestion  <- pkm-core
+#   pkm-app        <- all (wires concrete impls to ports)  [later]
+pkm-core = { path = "crates/pkm-core" }
+pkm-storage = { path = "crates/pkm-storage" }
+pkm-search = { path = "crates/pkm-search" }
+pkm-agent = { path = "crates/pkm-agent" }
+pkm-ingestion = { path = "crates/pkm-ingestion" }

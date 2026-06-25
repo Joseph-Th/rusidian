@@ -1,0 +1,18 @@
+[package]
+name = "pkm-ingestion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Ingestion pipeline state machine. Depends ONLY on pkm-core. Persistence of
+# ingestion items goes through the core repository ports, not SQLite directly.
+
+[dependencies]
+pkm-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pkm-core = { workspace = true, features = ["fixtures"] }
+serde_json = { workspace = true }

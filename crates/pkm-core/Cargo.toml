@@ -1,0 +1,24 @@
+[package]
+name = "pkm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Pure domain crate. NO io, NO database, NO tauri. Has NO internal deps.
+# It owns: the domain types, the invariant enums, provenance/review/content
+# status, and the PORTS (repository + retriever traits) other crates depend on.
+# Parsing/transform/ranking logic lives in the relevant crate; the *types*
+# they operate on live here. See AGENTS.md "Core Domain Model".
+
+[features]
+# Enables `pkm_core::fixtures` for use in other crates' tests. Always available
+# inside this crate's own tests.
+fixtures = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }

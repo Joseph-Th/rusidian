@@ -1,0 +1,21 @@
+[package]
+name = "pkm-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# The agent-safety layer. Turns typed operations into audited, reversible
+# mutations. It is the ONLY sanctioned path for agent-originated changes to
+# user-facing knowledge. Depends ONLY on pkm-core and operates against the core
+# repository PORTS (&dyn SourceRepo, etc.) — it must not depend on pkm-storage
+# or touch SQLite directly.
+
+[dependencies]
+pkm-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pkm-core = { workspace = true, features = ["fixtures"] }

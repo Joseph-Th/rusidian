@@ -1,0 +1,18 @@
+[package]
+name = "pkm-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Pure query-parsing + ranking logic. Depends ONLY on pkm-core. The concrete
+# SQLite/FTS Retriever implementation lives in pkm-storage (it owns SQL); this
+# crate must not depend on storage or touch SQLite.
+
+[dependencies]
+pkm-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pkm-core = { workspace = true, features = ["fixtures"] }
