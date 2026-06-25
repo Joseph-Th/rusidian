@@ -27,7 +27,11 @@ mod tests {
 
     #[test]
     fn review_state_round_trips_as_snake_case() {
-        for state in [ReviewState::Proposed, ReviewState::Accepted, ReviewState::Rejected] {
+        for state in [
+            ReviewState::Proposed,
+            ReviewState::Accepted,
+            ReviewState::Rejected,
+        ] {
             let json = serde_json::to_string(&state).unwrap();
             let back: ReviewState = serde_json::from_str(&json).unwrap();
             assert_eq!(back, state);

@@ -47,8 +47,8 @@ pub struct Link {
 mod tests {
     use super::*;
     use crate::id::NoteId;
-    use crate::{Actor, Timestamp};
     use crate::review::ReviewState;
+    use crate::{Actor, Timestamp};
 
     #[test]
     fn link_type_round_trips_as_snake_case() {

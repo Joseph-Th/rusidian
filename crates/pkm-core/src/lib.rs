@@ -20,21 +20,21 @@
 //! - Cross-cutting concepts (provenance, review, content status, actor) live
 //!   HERE, so storage/search/agent/ingestion all share one definition.
 
-pub mod id;
 pub mod error;
+pub mod id;
 
-pub mod source;
-pub mod note;
+pub mod agent_action;
 pub mod block;
 pub mod entity;
 pub mod link;
+pub mod note;
+pub mod source;
 pub mod view;
-pub mod agent_action;
 
-pub mod provenance;
-pub mod review;
 pub mod ingestion;
 pub mod ports;
+pub mod provenance;
+pub mod review;
 
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures;

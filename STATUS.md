@@ -98,12 +98,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Spine slices (prove the architecture end-to-end)
 
-#### S1 · Vertical slice: source round-trip + JSON export ⬜
+#### S1 · Vertical slice: source round-trip + JSON export ✅
 - **Depends on:** B1, B2, C1.
-- **Do:** A test (and a thin service fn) that creates a `Source`, persists it
-  via `SourceRepo`, reads it back equal, and exports it to JSON. Use
-  `pkm_core::fixtures::sample_source`.
-- **Done when:** One integration test green covering create→persist→get→export.
+- **Notes:** Integration test `s1_source_round_trip_with_json_export` covers create→persist→get→export JSON. All assertions pass; source round-trips correctly through DB and JSON serialization.
 
 #### S2 · Vertical slice: propose → diff → accept → rollback ⬜
 - **Depends on:** D1, D2, B2.
@@ -117,15 +114,7 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 #### A1 · Dev gate + first tests ✅
 - **Depends on:** —
-- **Done so far:** serde round-trip smoke test in `pkm-core/src/link.rs`;
-  `clippy --all-targets -- -D warnings` is clean.
-- **Completed:** Added round-trip tests for EntityKind, ViewKind, ReviewState,
-  AgentActionStatus, OperationKind, Actor, ContentStatus, ObjectRef, and
-  IngestionState. All 10 invariant enums now have snake_case round-trip tests.
-  All tests pass; clippy is clean.
-- **Notes:** Needed to add serde_json as dev-dependency to pkm-ingestion.
-  Each test verifies serialize→deserialize round-trip with correct snake_case
-  format per AGENTS.md invariant enum policy.
+- **Notes:** All 10 invariant enums have snake_case round-trip tests; clippy clean.
 
 #### A0 · Tauri desktop shell (`pkm-app`) ⬜
 - **Depends on:** S1, S2, E2.
@@ -141,34 +130,11 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 #### B1 · Migration runner + `0001_init` + db open ✅
 - **Depends on:** —
-- **Completed:** Implemented migration runner (`migrations::run`) with
-  `schema_version` table tracking. Created `0001_init.sql` with typed tables
-  for all aggregates (source, note, block, entity, link, view, agent_action).
-  Implemented `db::open()` with pragmas (WAL, foreign_keys=ON, busy_timeout=5s).
-  Updated SCHEMA.md with full table descriptions.
-- **Tests:** All 3 pass:
-  - fresh_db_open_succeeds
-  - open_is_idempotent
-  - schema_tables_exist
-- **Notes:** Added `time` and `tempfile` dependencies. Migrations are
-  transactional + idempotent; safe to call open() multiple times.
+- **Notes:** Migration runner, schema_version tracking, db::open() with WAL; all 3 tests pass.
 
 #### B2 · Repository implementations (Phase 1: SourceRepo) ✅
 - **Depends on:** B1 ✅, C1 ✅, C3 ✅.
-- **Completed:** Implemented `SqliteSourceRepo` with create + get methods.
-  Added migration 0002_extend_source to persist C1 fields (captured_at,
-  content_hash, ingestion_state). Pure mapping function (build_source_from_fields)
-  for row↔Source conversion, unit-tested. All 5 migration tests pass; round-trip
-  verified create→get equality for Source.
-- **Notes:** Created `0002_extend_source.sql` migration to add columns that C1
-  introduced to domain model. Migration runner updated to include it. Timestamps
-  formatted as RFC3339 for consistent parsing. Error types correctly mapped from
-  StorageError to CoreError at port boundary. SqliteSourceRepo now exported from
-  lib root.
-- **Tests:** 3 unit tests for parsing helpers; 2 integration tests for round-trip
-  + non-existent get. All pass; migration tracking verified idempotent.
-- **Deferred:** SqliteNoteRepo, EntityRepo, LinkRepo, ViewRepo, AgentActionRepo
-  (append-only); soft/recoverable deletes. Next phase addresses full set.
+- **Notes:** SqliteSourceRepo (create + get), migration 0002_extend_source, round-trip tests pass. Deferred: NoteRepo, EntityRepo, LinkRepo, ViewRepo, AgentActionRepo.
 
 ---
 
@@ -176,14 +142,7 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 #### C1 · Flesh out `Source` ✅
 - **Files:** `pkm-core/src/source.rs`, `pkm-core/src/ingestion.rs`.
-- **Completed:** Added `captured_at: Timestamp`, `content_hash: String`,
-  `ingestion_state: IngestionState`, `created_by: Actor` fields. Moved
-  IngestionState from pkm-ingestion to pkm-core (domain type, not impl detail).
-  Updated fixtures and added round-trip test.
-- **Notes:** Architectural: IngestionState now lives in pkm-core as a product
-  invariant (alongside ReviewState, ContentStatus, etc.). pkm-ingestion re-exports
-  it. Deferred: byte_attachment_ref for D4.
-- **Tests:** source_round_trips test passes; all 11 pkm-core tests pass.
+- **Notes:** Added captured_at, content_hash, ingestion_state, created_by. IngestionState moved to pkm-core. Deferred: byte_attachment_ref for D4.
 
 #### C2 · Block ordering + Note metadata + markdown shape ⬜
 - **Files:** `pkm-core/src/block.rs`, `note.rs`.
@@ -194,12 +153,7 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 #### C3 · Link provenance ✅
 - **Files:** `pkm-core/src/link.rs`.
-- **Completed:** Added `created_by: Actor`, `created_at: Timestamp`,
-  `reviewed: ReviewState`, `confidence: Option<f32>` fields. Kept `from/to/link_type`
-  stable as required. Removed Eq derive (f32 doesn't implement Eq due to NaN).
-- **Tests:** link_round_trips test verifies serialization; all 12 pkm-core tests pass.
-- **Notes:** Inferred links (Proposed review state + confidence) are now clearly
-  distinguishable from user-confirmed knowledge (Accepted review state).
+- **Notes:** Added created_by, created_at, reviewed, confidence. Inferred vs. confirmed links now distinguishable.
 
 #### C4 · Entity merge semantics ⬜
 - **Depends on:** B2.

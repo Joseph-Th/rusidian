@@ -13,7 +13,10 @@ use crate::Result;
 /// shipped. Add new ones to the end. See STATUS.md task B1 (and task B2 for C1 ext).
 pub const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init", include_str!("../migrations/0001_init.sql")),
-    ("0002_extend_source", include_str!("../migrations/0002_extend_source.sql")),
+    (
+        "0002_extend_source",
+        include_str!("../migrations/0002_extend_source.sql"),
+    ),
 ];
 
 /// Apply all pending migrations inside a transaction. Idempotent: safe to call

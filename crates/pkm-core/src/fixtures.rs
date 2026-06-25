@@ -14,9 +14,9 @@
 //! asserting exact ids/times.
 
 use crate::id::SourceId;
+use crate::ingestion::IngestionState;
 use crate::source::{Source, SourceOrigin};
 use crate::{Actor, Timestamp};
-use crate::ingestion::IngestionState;
 
 /// A minimal example [`Source`] (a pasted-text capture).
 pub fn sample_source() -> Source {

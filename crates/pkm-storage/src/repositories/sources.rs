@@ -4,11 +4,11 @@ use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 use pkm_core::id::SourceId;
+use pkm_core::ingestion::IngestionState;
 use pkm_core::ports::SourceRepo;
 use pkm_core::source::{Source, SourceOrigin};
-use pkm_core::{Actor, CoreError};
-use pkm_core::ingestion::IngestionState;
 use pkm_core::Result;
+use pkm_core::{Actor, CoreError};
 
 /// Source persistence backed by SQLite.
 pub struct SqliteSourceRepo<'c> {
@@ -17,49 +17,55 @@ pub struct SqliteSourceRepo<'c> {
 
 impl SourceRepo for SqliteSourceRepo<'_> {
     fn create(&self, source: &Source) -> Result<()> {
-        let origin_json = serde_json::to_string(&source.origin)
-            .map_err(crate::StorageError::from)?;
-        let created_by_json = serde_json::to_string(&source.created_by)
-            .map_err(crate::StorageError::from)?;
+        let origin_json =
+            serde_json::to_string(&source.origin).map_err(crate::StorageError::from)?;
+        let created_by_json =
+            serde_json::to_string(&source.created_by).map_err(crate::StorageError::from)?;
         let state_str = ingestion_state_to_string(source.ingestion_state);
 
         // Format timestamps as RFC3339 for storage and parsing consistency.
-        let captured_at_str = source.captured_at
+        let captured_at_str = source
+            .captured_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
 
-        self.conn.execute(
-            "INSERT INTO source (id, origin, title, raw_content, created_at, created_by,
+        self.conn
+            .execute(
+                "INSERT INTO source (id, origin, title, raw_content, created_at, created_by,
                                 captured_at, content_hash, ingestion_state)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params![
-                source.id.to_string(),
-                origin_json,
-                source.title,
-                source.raw_content,
-                captured_at_str.clone(), // created_at and captured_at are the same for now
-                created_by_json,
-                captured_at_str,
-                source.content_hash,
-                state_str,
-            ],
-        ).map_err(|e| {
-            let se = crate::StorageError::from(e);
-            let ce: CoreError = se.into();
-            ce
-        })?;
+                params![
+                    source.id.to_string(),
+                    origin_json,
+                    source.title,
+                    source.raw_content,
+                    captured_at_str.clone(), // created_at and captured_at are the same for now
+                    created_by_json,
+                    captured_at_str,
+                    source.content_hash,
+                    state_str,
+                ],
+            )
+            .map_err(|e| {
+                let se = crate::StorageError::from(e);
+                let ce: CoreError = se.into();
+                ce
+            })?;
         Ok(())
     }
 
     fn get(&self, id: SourceId) -> Result<Option<Source>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, origin, title, raw_content, created_at, created_by,
-                    captured_at, content_hash, ingestion_state FROM source WHERE id = ?"
-        ).map_err(|e| {
-            let se = crate::StorageError::from(e);
-            let ce: CoreError = se.into();
-            ce
-        })?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, origin, title, raw_content, created_at, created_by,
+                    captured_at, content_hash, ingestion_state FROM source WHERE id = ?",
+            )
+            .map_err(|e| {
+                let se = crate::StorageError::from(e);
+                let ce: CoreError = se.into();
+                ce
+            })?;
 
         // Note: query_row's closure must return rusqlite::Error, so we manually
         // unwrap the mapping result and propagate errors later.
@@ -110,24 +116,48 @@ impl SourceRepo for SqliteSourceRepo<'_> {
 /// Pure mapping function: builds a Source from extracted fields.
 /// Separated for clarity and testability.
 fn build_source_from_fields(
-    fields: (String, String, Option<String>, String, String, String, String, String, String),
+    fields: (
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+    ),
 ) -> crate::Result<Source> {
-    let (id_str, origin_json, title, raw_content, _created_at_str, created_by_json, captured_at_str, content_hash, ingestion_state_str) = fields;
+    let (
+        id_str,
+        origin_json,
+        title,
+        raw_content,
+        _created_at_str,
+        created_by_json,
+        captured_at_str,
+        content_hash,
+        ingestion_state_str,
+    ) = fields;
 
-    let id = Uuid::parse_str(&id_str)
-        .map(SourceId)
-        .map_err(|e| {
-            crate::StorageError::Core(CoreError::Invariant(format!("invalid source id: {}", e)))
-        })?;
+    let id = Uuid::parse_str(&id_str).map(SourceId).map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!("invalid source id: {}", e)))
+    })?;
 
     let origin: SourceOrigin = serde_json::from_str(&origin_json)?;
     let created_by = parse_actor(&created_by_json);
     let ingestion_state = parse_ingestion_state(&ingestion_state_str);
 
-    let captured_at = time::OffsetDateTime::parse(&captured_at_str, &time::format_description::well_known::Rfc3339)
-        .map_err(|e| {
-            crate::StorageError::Core(CoreError::Invariant(format!("invalid timestamp: {}: {}", captured_at_str, e)))
-        })?;
+    let captured_at = time::OffsetDateTime::parse(
+        &captured_at_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!(
+            "invalid timestamp: {}: {}",
+            captured_at_str, e
+        )))
+    })?;
 
     Ok(Source {
         id,
@@ -191,7 +221,10 @@ mod tests {
     fn parse_ingestion_states() {
         assert_eq!(parse_ingestion_state("captured"), IngestionState::Captured);
         assert_eq!(parse_ingestion_state("parsed"), IngestionState::Parsed);
-        assert_eq!(parse_ingestion_state("awaiting_review"), IngestionState::AwaitingReview);
+        assert_eq!(
+            parse_ingestion_state("awaiting_review"),
+            IngestionState::AwaitingReview
+        );
         assert_eq!(parse_ingestion_state("invalid"), IngestionState::Captured);
     }
 
