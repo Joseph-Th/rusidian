@@ -185,11 +185,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
   Implement `RollbackAction`.
 - **Done when:** apply→rollback restores prior state exactly; log is append-only.
 
-#### D3 · Ingestion transition table ⬜
-- **Files:** `pkm-ingestion/src/lib.rs`.
-- **Do:** Implement `IngestionState::can_transition_to` with the real allowed
-  edges; reject illegal jumps. Raw capture immutable; failures keep diagnostics.
-- **Done when:** Tests cover every legal transition + a sample of rejected ones.
+#### D3 · Ingestion transition table ✅
+- **Files:** `pkm-core/src/ingestion.rs`.
+- **Notes:** Implemented `can_transition_to` with all legal edges: linear pipeline Captured→...→AwaitingReview, then {Promoted|Archived|Rejected}. Any state→Failed allowed. Failed→earlier_states allowed (retry). Terminal states immutable. Tests: 10 tests covering all legal + all illegal transitions.
 
 #### D4 · Binary attachments ⬜
 - **Depends on:** B1.
