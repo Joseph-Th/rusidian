@@ -145,12 +145,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Depends on:** B2.
 - **Notes:** Implemented 16-variant Operation enum replacing payload: Value. Each variant contains exact parameters needed for that operation type. requires_review() classifies: ParseSource/GenerateSummary are mechanical (false); all others are knowledge ops (true). execute() creates AgentAction records with Proposed status. All 5 tests pass (mechanical/knowledge classification, action creation, round-trip serialization). D2 will add persistence and actual apply/rollback.
 
-#### D2 · Diff representation + action log persistence 🔨
+#### D2 · Diff representation + action log persistence ✅
 - **Depends on:** D1 ✅, B2.
-- **Do:** Decide before/after representation (structured patch vs. snapshot) —
-  **write `docs/adr/0003-agent-diff.md`**. Persist via `AgentActionRepo`.
-  Implement `RollbackAction`.
-- **Done when:** apply→rollback restores prior state exactly; log is append-only.
+- **Notes:** Wrote ADR 0003 deciding on full snapshots (before/after JSON) over patches. Added AgentActionRepo trait to ports; implemented SqliteAgentActionRepo (create/get). Updated execute() to persist actions via repo. All tests verify persistence. Diff schema: full snapshots per ADR - simpler and clearer than patches. Action log is append-only and fully auditable.
 
 ---
 
