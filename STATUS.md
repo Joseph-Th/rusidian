@@ -139,7 +139,7 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### B — Storage
 
-#### B1 · Migration runner + `0001_init` + db open ⬜
+#### B1 · Migration runner + `0001_init` + db open 🔨
 - **Depends on:** —
 - **Files:** `pkm-storage/src/db.rs`, `.../migrations.rs`,
   `pkm-storage/migrations/0001_init.sql`, `SCHEMA.md`.
