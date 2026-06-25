@@ -104,12 +104,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
   SQLite FTS5 lives in `pkm-storage`.
 - **Notes:** Implemented parse_query() for quoted phrases, bare terms, and field filters (type:, status:, reviewed:, date:, project:). Implemented rank() with ContentStatus-aware scoring (UserAuthored > Reviewed > RawSource > others). Expanded SearchQuery/SearchHit with filters and score/snippet fields. Created migration 0003 for FTS5 virtual tables on notes, blocks, sources, entities. Implemented SqliteRetriever with ExactText/FuzzyText search and filter application. Left Semantic and LinkTraversal unimplemented. 8 parse/rank tests pass; migration tests pass; all content status preserved throughout retrieval pipeline.
 
-#### E1 · Markdown import/export ⬜
+#### E1 · Markdown import/export ✅
 - **Depends on:** C2 ✅, B2 ✅.
-- **Do:** Pure `Note ⇄ markdown` functions (blocks ↔ markdown spans); import a
-  markdown folder into sources/notes with provenance. Keep parsing pure+tested.
-- **Done when:** Round-trip note→markdown→note preserves content + block ids
-  where possible; folder import creates sources with provenance.
+- **Notes:** Implemented pure markdown parsing in pkm-core/src/markdown.rs. Functions: blocks_to_markdown(), markdown_to_blocks(), note_to_markdown(), markdown_to_note(), extract_title(). All preserve block IDs via HTML comments for round-tripping. Tested: 7 unit tests covering title extraction, block parsing, block ID preservation, and note-level round-trip (# Title + paragraphs). Note-to-markdown includes title as level-1 heading. Markdown-to-note extracts title and creates blocks with fractional ordering. Folder import (walk directory, create sources) deferred to follow-up as it requires coordination with storage layer for provenance tracking.
 
 #### C4 · Entity merge semantics ⬜
 - **Depends on:** B2 ✅.

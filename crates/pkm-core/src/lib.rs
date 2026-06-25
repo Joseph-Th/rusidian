@@ -32,6 +32,7 @@ pub mod source;
 pub mod view;
 
 pub mod ingestion;
+pub mod markdown;
 pub mod ports;
 pub mod provenance;
 pub mod review;
