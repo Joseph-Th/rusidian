@@ -221,14 +221,18 @@ pub fn requires_review(op: &Operation) -> bool {
     }
 }
 
-/// Execute a typed operation, producing an auditable `AgentAction`.
-/// Task D1 creates the action record. Task D2 adds persistence and actual apply/rollback.
+/// Execute a typed operation, producing and persisting an auditable `AgentAction`.
 ///
-/// The returned `AgentAction` has:
-/// - status: `Proposed` if `requires_review(op)`, else (placeholder, D2 applies)
-/// - diff: empty JSON for now (D2 defines the schema)
-/// - rollback_of: None (D2 implements actual rollback)
-pub fn execute(req: OperationRequest) -> Result<AgentAction> {
+/// The action is persisted to the provided `AgentActionRepo`. Knowledge ops are
+/// created with `Proposed` status and don't apply until accepted; mechanical ops
+/// are created with `Proposed` status (D2 implements auto-apply logic).
+///
+/// The diff uses full snapshots (before/after JSON) per ADR 0003. For now,
+/// diff is empty {} since actual object mutations happen in D2+.
+pub fn execute(
+    req: OperationRequest,
+    action_repo: &dyn pkm_core::ports::AgentActionRepo,
+) -> Result<AgentAction> {
     let now = Timestamp::now_utc();
     let status = if requires_review(&req.operation) {
         AgentActionStatus::Proposed
@@ -250,12 +254,42 @@ pub fn execute(req: OperationRequest) -> Result<AgentAction> {
         rollback_of: None,
     };
 
+    // Persist the action to the audit log.
+    action_repo.create(&action)?;
+
     Ok(action)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pkm_core::ports::AgentActionRepo;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    /// A simple in-memory mock AgentActionRepo for testing.
+    struct MockActionRepo {
+        actions: RefCell<HashMap<AgentActionId, AgentAction>>,
+    }
+
+    impl MockActionRepo {
+        fn new() -> Self {
+            Self {
+                actions: RefCell::new(HashMap::new()),
+            }
+        }
+    }
+
+    impl pkm_core::ports::AgentActionRepo for MockActionRepo {
+        fn create(&self, action: &AgentAction) -> pkm_core::Result<()> {
+            self.actions.borrow_mut().insert(action.id, action.clone());
+            Ok(())
+        }
+
+        fn get(&self, id: AgentActionId) -> pkm_core::Result<Option<AgentAction>> {
+            Ok(self.actions.borrow().get(&id).cloned())
+        }
+    }
 
     #[test]
     fn mechanical_ops_require_no_review() {
@@ -296,6 +330,7 @@ mod tests {
 
     #[test]
     fn execute_creates_proposed_action_for_knowledge_ops() {
+        let repo = MockActionRepo::new();
         let req = OperationRequest {
             actor: Actor::User,
             operation: Operation::CreateNote {
@@ -305,15 +340,19 @@ mod tests {
             rationale: "User created a note".to_string(),
         };
 
-        let action = execute(req).unwrap();
+        let action = execute(req, &repo).unwrap();
         assert_eq!(action.status, AgentActionStatus::Proposed);
         assert_eq!(action.operation, OperationKind::CreateNote);
+
+        // Verify the action was persisted
+        let retrieved = repo.get(action.id).unwrap();
+        assert!(retrieved.is_some());
     }
 
     #[test]
     fn execute_creates_proposed_action_for_mechanical_ops() {
-        // D1 creates Proposed for all; D2 implements the apply logic to
-        // transition mechanical ops to Applied. This is the safety default.
+        // D1/D2 creates Proposed for all; future phases implement auto-apply logic.
+        let repo = MockActionRepo::new();
         let req = OperationRequest {
             actor: Actor::System,
             operation: Operation::ParseSource {
@@ -322,10 +361,13 @@ mod tests {
             rationale: "Automatic indexing".to_string(),
         };
 
-        let action = execute(req).unwrap();
-        // D1 creates all as Proposed; D2 applies mechanical ones automatically
+        let action = execute(req, &repo).unwrap();
         assert_eq!(action.status, AgentActionStatus::Proposed);
         assert_eq!(action.operation, OperationKind::ParseSource);
+
+        // Verify the action was persisted
+        let retrieved = repo.get(action.id).unwrap();
+        assert!(retrieved.is_some());
     }
 
     #[test]

@@ -14,7 +14,8 @@
 //! STUB — method sets are the agreed minimum shape. Tasks B2 (repos) and E2
 //! (retriever) flesh them out. Keep the trait split one-per-aggregate.
 
-use crate::id::{NoteId, SourceId};
+use crate::agent_action::AgentAction;
+use crate::id::{AgentActionId, NoteId, SourceId};
 use crate::note::Note;
 use crate::source::Source;
 use crate::Result;
@@ -34,7 +35,21 @@ pub trait NoteRepo {
     // TODO(B2): block CRUD, ordered block fetch, metadata, version history.
 }
 
-// TODO(B2): EntityRepo, LinkRepo, ViewRepo, AgentActionRepo (append-only).
+/// Append-only persistence for agent action audit trail (AGENTS.md "Agent Action").
+/// Actions record what agents changed, who/what triggered it, before/after state,
+/// and rollback references. The log is append-only: statuses advance (Proposed →
+/// Accepted → Applied), but actions are never deleted or modified in place.
+pub trait AgentActionRepo {
+    /// Persist a new action record. Returns the action as persisted (with any DB-
+    /// generated fields like id, created_at).
+    fn create(&self, action: &AgentAction) -> Result<()>;
+    /// Retrieve an action by id.
+    fn get(&self, id: AgentActionId) -> Result<Option<AgentAction>>;
+    // TODO(D2): list/filter (by target, by status, by actor, by date range),
+    //           set_status (propose→accepted→applied transitions only), batch get.
+}
+
+// TODO(B2): EntityRepo, LinkRepo, ViewRepo.
 
 /// Multi-mode retrieval boundary. The SQLite/FTS implementation lives in
 /// `pkm-storage`; pure query-parsing/ranking helpers live in `pkm-search`.
