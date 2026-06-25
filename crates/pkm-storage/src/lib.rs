@@ -25,7 +25,7 @@ pub mod repositories;
 pub mod retriever;
 
 pub use blob_store::BlobStore;
-pub use repositories::{SqliteSourceRepo, SqliteNoteRepo, SqliteAgentActionRepo};
+pub use repositories::{SqliteAgentActionRepo, SqliteNoteRepo, SqliteSourceRepo};
 pub use retriever::SqliteRetriever;
 
 use thiserror::Error;

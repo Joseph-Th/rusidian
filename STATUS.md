@@ -108,20 +108,41 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Depends on:** C2 ✅, B2 ✅.
 - **Notes:** Implemented pure markdown parsing in pkm-core/src/markdown.rs. Functions: blocks_to_markdown(), markdown_to_blocks(), note_to_markdown(), markdown_to_note(), extract_title(). All preserve block IDs via HTML comments for round-tripping. Tested: 7 unit tests covering title extraction, block parsing, block ID preservation, and note-level round-trip (# Title + paragraphs). Note-to-markdown includes title as level-1 heading. Markdown-to-note extracts title and creates blocks with fractional ordering. Folder import (walk directory, create sources) deferred to follow-up as it requires coordination with storage layer for provenance tracking.
 
-#### C4 · Entity merge semantics ⬜
+#### C4a · Entity merge: schema migration 0004 ✅
 - **Depends on:** B2 ✅.
-- **Progress:** Entity struct updated with merged_into, created_by, created_at fields. Tests pass.
-- **Do:** Non-lossy merge: survivor id, losers marked merged-into, all
-  links/aliases re-pointed, original recoverable. Write an ADR.
-- **Remaining work:**
-  - C4a: Schema migration 0004 for entity table (add merged_into, created_by, created_at columns)
-  - C4b: SqliteEntityRepo impl + round-trip tests
-  - C4c: Entity merge operation (MergeEntity in Operation enum)
-  - C4d: Link re-pointing logic (move links from loser to survivor)
-  - C4e: Rollback for merge (via AgentAction)
-  - C4f: Write ADR 0004 for merge semantics
-- **Done when:** Test: merge keeps every alias + re-points every link; rollback
-  restores pre-merge state.
+- **Do:** Add merged_into (nullable EntityId), created_by, created_at columns to entity table.
+  Update schema version. Backfill created_at/created_by from existing data.
+- **Done when:** Migration runs; existing entities load with new fields; schema.md updated.
+
+#### C4b · Entity merge: SqliteEntityRepo persistence ⬜
+- **Depends on:** C4a.
+- **Do:** Update SqliteEntityRepo to persist/retrieve merged_into, created_by, created_at.
+  Add round-trip test: create, merge, verify merged_into set, list still finds both.
+- **Done when:** Test passes; all entity fields survive persist/retrieve cycle.
+
+#### C4c · Entity merge: Operation enum + MergeEntity ⬜
+- **Depends on:** C4b.
+- **Do:** Add MergeEntity variant to Operation enum (with survivor_id and loser_id).
+  Requires review (knowledge operation). Update execute() dispatcher.
+- **Done when:** Operation serializes; requires_review() returns true; tests pass.
+
+#### C4d · Entity merge: Link re-pointing ⬜
+- **Depends on:** C4c.
+- **Do:** When merge is accepted, re-point all links pointing to loser_id → survivor_id.
+  Preserve link provenance/review state. Update AgentAction.apply().
+- **Done when:** Test: merge creates AgentAction; applying it re-points all links.
+
+#### C4e · Entity merge: Rollback path ⬜
+- **Depends on:** C4d.
+- **Do:** Implement rollback_merge in AgentActionRepo. Restore merged_into→NULL,
+  re-point links back to loser. Verify pre-merge state is fully recoverable.
+- **Done when:** Test: merge → accept → rollback restores all state.
+
+#### C4f · ADR 0004: Entity merge semantics ⬜
+- **Depends on:** C4e.
+- **Do:** Document merge design (non-lossy, survivor/loser, re-pointing strategy,
+  rollback mechanics). Link to tests.
+- **Done when:** ADR written; answers why this design over alternatives.
 
 #### C5 · Finalize `Provenance` ✅
 - **Notes:** Added `originating_action: Option<AgentActionId>` and `extraction_span: Option<ExtractionSpan>` fields to Provenance. ExtractionSpan tracks byte offsets (start/end) for precise source location. Added invariant documentation that derived content must have non-empty `derived_from`. 7 tests verify round-trip serialization, span arithmetic, and provenance traceability.

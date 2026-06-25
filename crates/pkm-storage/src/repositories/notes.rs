@@ -28,7 +28,12 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .execute(
                 "INSERT INTO note (id, title, created_at, created_by)
              VALUES (?1, ?2, ?3, ?4)",
-                params![note.id.to_string(), note.title, created_at_str, created_by_json],
+                params![
+                    note.id.to_string(),
+                    note.title,
+                    created_at_str,
+                    created_by_json
+                ],
             )
             .map_err(crate::StorageError::from)?;
 
@@ -38,9 +43,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     fn get(&self, id: NoteId) -> Result<Option<Note>> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT title, created_at, created_by FROM note WHERE id = ?1",
-            )
+            .prepare("SELECT title, created_at, created_by FROM note WHERE id = ?1")
             .map_err(crate::StorageError::from)?;
 
         let result = stmt.query_row(params![id.to_string()], |row| {
@@ -63,9 +66,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 // Fetch block IDs for this note
                 let mut block_stmt = self
                     .conn
-                    .prepare(
-                        "SELECT id FROM block WHERE note_id = ?1 ORDER BY \"order\"",
-                    )
+                    .prepare("SELECT id FROM block WHERE note_id = ?1 ORDER BY \"order\"")
                     .map_err(crate::StorageError::from)?;
 
                 let block_ids: Result<Vec<BlockId>> = block_stmt
@@ -76,8 +77,9 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     .map_err(crate::StorageError::from)?
                     .map(|result| {
                         let block_id_str = result.map_err(crate::StorageError::from)?;
-                        let uuid = uuid::Uuid::parse_str(&block_id_str)
-                            .map_err(|_| pkm_core::CoreError::Invariant("invalid block uuid".into()))?;
+                        let uuid = uuid::Uuid::parse_str(&block_id_str).map_err(|_| {
+                            pkm_core::CoreError::Invariant("invalid block uuid".into())
+                        })?;
                         Ok(BlockId(uuid))
                     })
                     .collect();
@@ -118,9 +120,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         // Retrieve the updated block to return it
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT \"order\", created_at, created_by FROM block WHERE id = ?1",
-            )
+            .prepare("SELECT \"order\", created_at, created_by FROM block WHERE id = ?1")
             .map_err(crate::StorageError::from)?;
 
         let (order, created_at_str, created_by_json) = stmt

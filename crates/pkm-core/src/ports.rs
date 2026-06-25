@@ -35,7 +35,12 @@ pub trait NoteRepo {
     fn create(&self, note: &Note) -> Result<()>;
     fn get(&self, id: NoteId) -> Result<Option<Note>>;
     /// Update a block's content. Returns the updated block after applying the change.
-    fn update_block(&self, note_id: NoteId, block_id: BlockId, new_content: crate::block::BlockContent) -> Result<Block>;
+    fn update_block(
+        &self,
+        note_id: NoteId,
+        block_id: BlockId,
+        new_content: crate::block::BlockContent,
+    ) -> Result<Block>;
     // TODO(B2): block CRUD, ordered block fetch, metadata, version history.
 }
 

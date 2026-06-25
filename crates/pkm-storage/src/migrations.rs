@@ -21,6 +21,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0003_fts5_indexing",
         include_str!("../migrations/0003_fts5_indexing.sql"),
     ),
+    (
+        "0004_entity_merge",
+        include_str!("../migrations/0004_entity_merge.sql"),
+    ),
 ];
 
 /// Apply all pending migrations inside a transaction. Idempotent: safe to call

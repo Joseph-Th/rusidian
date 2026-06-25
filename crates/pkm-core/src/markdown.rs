@@ -51,7 +51,9 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
     for line in lines {
         // Check for block ID comment
         if line.starts_with("<!-- block:") && line.ends_with(" -->") {
-            let id_str = line.trim_start_matches("<!-- block:").trim_end_matches(" -->");
+            let id_str = line
+                .trim_start_matches("<!-- block:")
+                .trim_end_matches(" -->");
             if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
                 block_id = Some(BlockId(uuid));
             }
@@ -288,8 +290,8 @@ mod tests {
 
         let original_text = "# Test Note\n\nFirst paragraph\n\nSecond paragraph";
 
-        let (note, blocks) = markdown_to_note(original_text, note_id, Actor::User, now)
-            .expect("parse note");
+        let (note, blocks) =
+            markdown_to_note(original_text, note_id, Actor::User, now).expect("parse note");
 
         assert_eq!(note.title, "Test Note");
         assert_eq!(blocks.len(), 2);

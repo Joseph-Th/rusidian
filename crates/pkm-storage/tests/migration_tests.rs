@@ -53,8 +53,8 @@ fn open_is_idempotent() {
 
     // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    // There are now 3 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing.
-    assert_eq!(version1, "3");
+    // There are now 4 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge.
+    assert_eq!(version1, "4");
 }
 
 #[test]
@@ -187,13 +187,13 @@ fn s1_source_round_trip_with_json_export() {
 /// capture before/after diff, and rollback to prior state.
 #[test]
 fn s2_propose_apply_and_rollback_block_update() {
-    use pkm_agent::{execute, apply_action, rollback_action, Operation, OperationRequest};
+    use pkm_agent::{apply_action, execute, rollback_action, Operation, OperationRequest};
     use pkm_core::block::{Block, BlockContent};
+    use pkm_core::id::{BlockId, NoteId};
     use pkm_core::note::Note;
     use pkm_core::ports::{AgentActionRepo, NoteRepo};
-    use pkm_core::id::{BlockId, NoteId};
     use pkm_core::{Actor, Timestamp};
-    use pkm_storage::{open, SqliteNoteRepo, SqliteAgentActionRepo};
+    use pkm_storage::{open, SqliteAgentActionRepo, SqliteNoteRepo};
     use std::collections::BTreeMap;
 
     let temp_dir = tempfile::TempDir::new().unwrap();
@@ -235,7 +235,9 @@ fn s2_propose_apply_and_rollback_block_update() {
         source_provenance_ref: None,
     };
 
-    note_repo.insert_block(&block).expect("failed to insert block");
+    note_repo
+        .insert_block(&block)
+        .expect("failed to insert block");
 
     // Verify the note was created
     let retrieved_note = note_repo
@@ -265,8 +267,14 @@ fn s2_propose_apply_and_rollback_block_update() {
     let action = execute(req, &action_repo).expect("failed to execute operation");
     let action_id = action.id;
 
-    assert_eq!(action.status, pkm_core::agent_action::AgentActionStatus::Proposed);
-    assert_eq!(action.operation, pkm_core::agent_action::OperationKind::UpdateBlock);
+    assert_eq!(
+        action.status,
+        pkm_core::agent_action::AgentActionStatus::Proposed
+    );
+    assert_eq!(
+        action.operation,
+        pkm_core::agent_action::OperationKind::UpdateBlock
+    );
 
     // Step 3: Verify the action was recorded
     let retrieved_action = action_repo
@@ -274,20 +282,32 @@ fn s2_propose_apply_and_rollback_block_update() {
         .expect("failed to get action")
         .expect("action should exist");
 
-    assert_eq!(retrieved_action.status, pkm_core::agent_action::AgentActionStatus::Proposed);
+    assert_eq!(
+        retrieved_action.status,
+        pkm_core::agent_action::AgentActionStatus::Proposed
+    );
 
     // Step 4: Apply the action
-    let applied_action = apply_action(action_id, &action_repo, &note_repo)
-        .expect("failed to apply action");
+    let applied_action =
+        apply_action(action_id, &action_repo, &note_repo).expect("failed to apply action");
 
-    assert_eq!(applied_action.status, pkm_core::agent_action::AgentActionStatus::Applied);
+    assert_eq!(
+        applied_action.status,
+        pkm_core::agent_action::AgentActionStatus::Applied
+    );
 
     // Step 5: Rollback the action
-    let rollback_action = rollback_action(action_id, &action_repo, &note_repo)
-        .expect("failed to rollback action");
+    let rollback_action =
+        rollback_action(action_id, &action_repo, &note_repo).expect("failed to rollback action");
 
-    assert_eq!(rollback_action.status, pkm_core::agent_action::AgentActionStatus::Applied);
-    assert_eq!(rollback_action.operation, pkm_core::agent_action::OperationKind::RollbackAction);
+    assert_eq!(
+        rollback_action.status,
+        pkm_core::agent_action::AgentActionStatus::Applied
+    );
+    assert_eq!(
+        rollback_action.operation,
+        pkm_core::agent_action::OperationKind::RollbackAction
+    );
 
     // Verify original action is marked as Reverted
     let reverted_action = action_repo
@@ -295,7 +315,10 @@ fn s2_propose_apply_and_rollback_block_update() {
         .expect("failed to get reverted action")
         .expect("action should exist");
 
-    assert_eq!(reverted_action.status, pkm_core::agent_action::AgentActionStatus::Reverted);
+    assert_eq!(
+        reverted_action.status,
+        pkm_core::agent_action::AgentActionStatus::Reverted
+    );
 
     // Verify the rollback action was created with correct metadata
     let retrieved_rollback = action_repo
@@ -304,5 +327,8 @@ fn s2_propose_apply_and_rollback_block_update() {
         .expect("rollback action should exist");
 
     assert_eq!(retrieved_rollback.rollback_of, Some(action_id));
-    assert_eq!(retrieved_rollback.operation, pkm_core::agent_action::OperationKind::RollbackAction);
+    assert_eq!(
+        retrieved_rollback.operation,
+        pkm_core::agent_action::OperationKind::RollbackAction
+    );
 }

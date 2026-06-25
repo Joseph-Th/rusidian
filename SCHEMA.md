@@ -22,6 +22,8 @@ Migrations applied in order:
 
 1. `0001_init` (STATUS task B1): initial aggregates
 2. `0002_extend_source` (STATUS task B2 / task C1): adds source ingestion pipeline fields
+3. `0003_fts5_indexing` (STATUS task E2): adds FTS5 virtual tables
+4. `0004_entity_merge` (STATUS task C4a): adds merged_into column to entity table
 
 | Table | Backs (core type) | Key columns | Notes |
 |-------|-------------------|-------------|-------|
@@ -29,7 +31,7 @@ Migrations applied in order:
 | `source` | `source::Source` | `id` (PK) | raw content write-once; `origin` (TEXT, enum), `title`, `raw_content`, `created_at` (RFC3339), `created_by`, `captured_at` (RFC3339), `content_hash`, `ingestion_state` (enum) |
 | `note` | `note::Note` | `id` (PK) | `title`, `created_at` (RFC3339), `created_by` |
 | `block` | `block::Block` | `id` (PK), `note_id` (FK) | `block_type` (enum), `content`, `order` (REAL, fractional for insert-between), `created_at`, `created_by` |
-| `entity` | `entity::Entity` | `id` (PK) | `kind` (enum), `name`, `aliases` (JSON), `created_at`, `created_by` |
+| `entity` | `entity::Entity` | `id` (PK) | `kind` (enum), `name`, `aliases` (JSON), `created_at`, `created_by`, `merged_into` (TEXT NULL, references `entity(id)`) |
 | `link` | `link::Link` | `id` (PK) | `from_type`/`from_id` (ObjectRef), `to_type`/`to_id` (ObjectRef), `link_type` (enum), `created_at`, `created_by` |
 | `view` | `view::View` | `id` (PK) | `kind` (enum), `title`, `params` (JSON), `created_at`, `created_by` |
 | `agent_action` | `agent_action::AgentAction` | `id` (PK) | `actor` (JSON), `operation` (enum), `target_type`/`target_id` (ObjectRef), `status` (enum), `rationale`, `created_at`, `diff` (JSON), `rollback_of` (FK or NULL) |

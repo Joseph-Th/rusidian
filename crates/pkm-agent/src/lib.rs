@@ -382,7 +382,11 @@ mod tests {
             Ok(self.actions.borrow().get(&id).cloned())
         }
 
-        fn set_status(&self, id: AgentActionId, new_status: pkm_core::agent_action::AgentActionStatus) -> pkm_core::Result<()> {
+        fn set_status(
+            &self,
+            id: AgentActionId,
+            new_status: pkm_core::agent_action::AgentActionStatus,
+        ) -> pkm_core::Result<()> {
             if let Some(action) = self.actions.borrow_mut().get_mut(&id) {
                 action.status = new_status;
             }

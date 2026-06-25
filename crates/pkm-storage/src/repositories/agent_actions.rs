@@ -127,22 +127,16 @@ impl<'c> AgentActionRepo for SqliteAgentActionRepo<'c> {
                     let uuid = uuid::Uuid::parse_str(&target_id)
                         .map_err(|_| pkm_core::CoreError::Invariant("invalid uuid".into()))?;
                     match target_type.as_str() {
-                        "source" => pkm_core::id::ObjectRef::Source(
-                            pkm_core::id::SourceId(uuid),
-                        ),
+                        "source" => pkm_core::id::ObjectRef::Source(pkm_core::id::SourceId(uuid)),
                         "note" => pkm_core::id::ObjectRef::Note(pkm_core::id::NoteId(uuid)),
-                        "block" => {
-                            pkm_core::id::ObjectRef::Block(pkm_core::id::BlockId(uuid))
-                        }
-                        "entity" => {
-                            pkm_core::id::ObjectRef::Entity(pkm_core::id::EntityId(uuid))
-                        }
+                        "block" => pkm_core::id::ObjectRef::Block(pkm_core::id::BlockId(uuid)),
+                        "entity" => pkm_core::id::ObjectRef::Entity(pkm_core::id::EntityId(uuid)),
                         "link" => pkm_core::id::ObjectRef::Link(pkm_core::id::LinkId(uuid)),
                         "view" => pkm_core::id::ObjectRef::View(pkm_core::id::ViewId(uuid)),
                         _ => {
-                            return Err(
-                                pkm_core::CoreError::Invariant("invalid target type".into()),
-                            )
+                            return Err(pkm_core::CoreError::Invariant(
+                                "invalid target type".into(),
+                            ))
                         }
                     }
                 };
@@ -175,7 +169,11 @@ impl<'c> AgentActionRepo for SqliteAgentActionRepo<'c> {
         }
     }
 
-    fn set_status(&self, id: AgentActionId, new_status: pkm_core::agent_action::AgentActionStatus) -> Result<()> {
+    fn set_status(
+        &self,
+        id: AgentActionId,
+        new_status: pkm_core::agent_action::AgentActionStatus,
+    ) -> Result<()> {
         let status_json = serde_json::to_string(&new_status)?;
 
         self.conn

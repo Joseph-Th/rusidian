@@ -26,7 +26,8 @@ impl SqliteRetriever {
 impl pkm_core::ports::Retriever for SqliteRetriever {
     fn search(&self, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
         let mut results = Vec::new();
-        let conn = self.conn
+        let conn = self
+            .conn
             .lock()
             .map_err(|_| pkm_core::CoreError::Invariant("failed to lock connection".to_string()))?;
 
@@ -75,19 +76,23 @@ impl pkm_core::ports::Retriever for SqliteRetriever {
 
 /// Search notes with exact phrase matching.
 fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn.prepare(
-        "SELECT rowid FROM note_fts WHERE note_fts MATCH ? LIMIT 100"
-    ).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt.query_map([&query.text], |row| {
-        let note_id: String = row.get(0)?;
-        Ok(SearchHit {
-            object: ObjectRef::Note(pkm_core::id::NoteId(uuid::Uuid::parse_str(&note_id).unwrap())),
-            status: ContentStatus::UserAuthored,
-            score: None,
-            snippet: None,
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&query.text], |row| {
+            let note_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Note(pkm_core::id::NoteId(
+                    uuid::Uuid::parse_str(&note_id).unwrap(),
+                )),
+                status: ContentStatus::UserAuthored,
+                score: None,
+                snippet: None,
+            })
         })
-    }).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
@@ -96,19 +101,23 @@ fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
 
 /// Search blocks with exact phrase matching.
 fn search_blocks_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn.prepare(
-        "SELECT rowid FROM block_fts WHERE block_fts MATCH ? LIMIT 100"
-    ).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt.query_map([&query.text], |row| {
-        let block_id: String = row.get(0)?;
-        Ok(SearchHit {
-            object: ObjectRef::Block(pkm_core::id::BlockId(uuid::Uuid::parse_str(&block_id).unwrap())),
-            status: ContentStatus::UserAuthored,
-            score: None,
-            snippet: None,
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&query.text], |row| {
+            let block_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Block(pkm_core::id::BlockId(
+                    uuid::Uuid::parse_str(&block_id).unwrap(),
+                )),
+                status: ContentStatus::UserAuthored,
+                score: None,
+                snippet: None,
+            })
         })
-    }).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
@@ -116,20 +125,27 @@ fn search_blocks_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
 }
 
 /// Search sources with exact phrase matching.
-fn search_sources_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn.prepare(
-        "SELECT rowid FROM source_fts WHERE source_fts MATCH ? LIMIT 100"
-    ).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+fn search_sources_exact(
+    conn: &Connection,
+    query: &SearchQuery,
+) -> pkm_core::Result<Vec<SearchHit>> {
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM source_fts WHERE source_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt.query_map([&query.text], |row| {
-        let source_id: String = row.get(0)?;
-        Ok(SearchHit {
-            object: ObjectRef::Source(pkm_core::id::SourceId(uuid::Uuid::parse_str(&source_id).unwrap())),
-            status: ContentStatus::RawSource,
-            score: None,
-            snippet: None,
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&query.text], |row| {
+            let source_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Source(pkm_core::id::SourceId(
+                    uuid::Uuid::parse_str(&source_id).unwrap(),
+                )),
+                status: ContentStatus::RawSource,
+                score: None,
+                snippet: None,
+            })
         })
-    }).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
@@ -137,20 +153,27 @@ fn search_sources_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Res
 }
 
 /// Search entities with exact phrase matching.
-fn search_entities_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn.prepare(
-        "SELECT rowid FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100"
-    ).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+fn search_entities_exact(
+    conn: &Connection,
+    query: &SearchQuery,
+) -> pkm_core::Result<Vec<SearchHit>> {
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt.query_map([&query.text], |row| {
-        let entity_id: String = row.get(0)?;
-        Ok(SearchHit {
-            object: ObjectRef::Entity(pkm_core::id::EntityId(uuid::Uuid::parse_str(&entity_id).unwrap())),
-            status: ContentStatus::ExtractedMetadata,
-            score: None,
-            snippet: None,
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&query.text], |row| {
+            let entity_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Entity(pkm_core::id::EntityId(
+                    uuid::Uuid::parse_str(&entity_id).unwrap(),
+                )),
+                status: ContentStatus::ExtractedMetadata,
+                score: None,
+                snippet: None,
+            })
         })
-    }).map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
@@ -168,12 +191,18 @@ fn search_blocks_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
 }
 
 /// Search sources with fuzzy matching (FTS5 default).
-fn search_sources_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
+fn search_sources_fuzzy(
+    conn: &Connection,
+    query: &SearchQuery,
+) -> pkm_core::Result<Vec<SearchHit>> {
     search_sources_exact(conn, query)
 }
 
 /// Search entities with fuzzy matching (FTS5 default).
-fn search_entities_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
+fn search_entities_fuzzy(
+    conn: &Connection,
+    query: &SearchQuery,
+) -> pkm_core::Result<Vec<SearchHit>> {
     search_entities_exact(conn, query)
 }
 
@@ -202,7 +231,9 @@ fn apply_filters(results: &mut Vec<SearchHit>, query: &SearchQuery) {
             match (hit.status, review_state) {
                 (ContentStatus::Reviewed, pkm_core::review::ReviewState::Accepted) => true,
                 (ContentStatus::UserAuthored, pkm_core::review::ReviewState::Accepted) => true,
-                (ContentStatus::UnreviewedSuggestion, pkm_core::review::ReviewState::Proposed) => true,
+                (ContentStatus::UnreviewedSuggestion, pkm_core::review::ReviewState::Proposed) => {
+                    true
+                }
                 _ => false,
             }
         });
@@ -219,10 +250,8 @@ mod tests {
     fn basic_retriever_initialization() {
         // This is a placeholder test that ensures the retriever can be instantiated.
         // Full integration tests should use the migration test infrastructure.
-        let _ = SqliteRetriever::new(
-            std::sync::Arc::new(std::sync::Mutex::new(
-                rusqlite::Connection::open_in_memory().unwrap()
-            ))
-        );
+        let _ = SqliteRetriever::new(std::sync::Arc::new(std::sync::Mutex::new(
+            rusqlite::Connection::open_in_memory().unwrap(),
+        )));
     }
 }
