@@ -153,14 +153,16 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Notes:** Added `time` and `tempfile` dependencies. Migrations are
   transactional + idempotent; safe to call open() multiple times.
 
-#### B2 · Repository implementations ⬜
+#### B2 · Repository implementations 🔨
 - **Depends on:** B1, C1, C3 (and C2 for blocks).
 - **Files:** `pkm-storage/src/repositories/*`; add ports to `pkm_core::ports`.
 - **Do:** Implement `SqliteSourceRepo`, `SqliteNoteRepo`; add + implement
   `EntityRepo`, `LinkRepo`, `ViewRepo`, `AgentActionRepo` (append-only). Raw
   source content write-once except an explicit audited user edit. Soft/
   recoverable deletes. Pure row↔type mapping fns, unit-tested.
-- **Done when:** Round-trip tests (create→get equal) pass for every aggregate;
+- **Approach:** Start with SqliteSourceRepo + ports; defer full multi-repo impl.
+  Focus on create→read round-trips with write-once invariant.
+- **Done when:** Round-trip tests (create→get equal) pass for Source;
   soft-delete keeps a recovery path.
 
 ---
