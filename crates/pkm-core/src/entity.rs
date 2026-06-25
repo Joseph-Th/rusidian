@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::EntityId;
+use crate::{Actor, Timestamp};
 
 /// Entity classification. Product invariant set — extend via ADR only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,15 +23,24 @@ pub enum EntityKind {
     Decision,
 }
 
-/// STUB. Merge semantics (which id survives, how aliases/links re-point) is a
-/// dedicated task — see STATUS.md C4. Do not implement a lossy merge.
+/// A normalized object the system can recognize, link, and retrieve.
+///
+/// Entities support non-lossy merges: when merging A into B, A is marked
+/// merged-into B (preserving history), all links are re-pointed, and all
+/// aliases are preserved. Merges are reversible via rollback.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entity {
     pub id: EntityId,
     pub kind: EntityKind,
     pub name: String,
     pub aliases: Vec<String>,
-    // TODO(C4): canonical/merged-into ref, created_by, created_at.
+    /// If Some(entity_id), this entity was merged into that entity. Used to
+    /// preserve history and enable rollback. The survivor keeps this as None.
+    pub merged_into: Option<EntityId>,
+    /// Who created this entity (user or agent).
+    pub created_by: Actor,
+    /// When this entity was created.
+    pub created_at: Timestamp,
 }
 
 #[cfg(test)]

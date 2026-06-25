@@ -108,7 +108,7 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Depends on:** C2 ✅, B2 ✅.
 - **Notes:** Implemented pure markdown parsing in pkm-core/src/markdown.rs. Functions: blocks_to_markdown(), markdown_to_blocks(), note_to_markdown(), markdown_to_note(), extract_title(). All preserve block IDs via HTML comments for round-tripping. Tested: 7 unit tests covering title extraction, block parsing, block ID preservation, and note-level round-trip (# Title + paragraphs). Note-to-markdown includes title as level-1 heading. Markdown-to-note extracts title and creates blocks with fractional ordering. Folder import (walk directory, create sources) deferred to follow-up as it requires coordination with storage layer for provenance tracking.
 
-#### C4 · Entity merge semantics ⬜
+#### C4 · Entity merge semantics 🔨
 - **Depends on:** B2 ✅.
 - **Do:** Non-lossy merge: survivor id, losers marked merged-into, all
   links/aliases re-pointed, original recoverable. Write an ADR.
