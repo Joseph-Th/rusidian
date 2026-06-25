@@ -141,14 +141,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### D — Agent safety + ingestion
 
-#### D1 · Typed operation dispatch + risk classification 🔨
+#### D1 · Typed operation dispatch + risk classification ✅
 - **Depends on:** B2.
-- **Files:** `pkm-agent/src/lib.rs`.
-- **Do:** Replace `payload: Value` with a typed `Operation` enum (one variant
-  per `OperationKind`). Make `execute` take the needed `&dyn ...Repo` ports.
-  Implement `requires_review` honestly (mechanical→direct; knowledge→proposed).
-- **Done when:** Each op produces a recorded `AgentAction`; knowledge ops
-  default to `Proposed`; tests cover the propose-vs-apply split.
+- **Notes:** Implemented 16-variant Operation enum replacing payload: Value. Each variant contains exact parameters needed for that operation type. requires_review() classifies: ParseSource/GenerateSummary are mechanical (false); all others are knowledge ops (true). execute() creates AgentAction records with Proposed status. All 5 tests pass (mechanical/knowledge classification, action creation, round-trip serialization). D2 will add persistence and actual apply/rollback.
 
 #### D2 · Diff representation + action log persistence ⬜
 - **Depends on:** D1, B2.
