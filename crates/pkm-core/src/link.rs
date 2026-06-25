@@ -28,30 +28,58 @@ pub enum LinkType {
 
 /// A directed, typed edge from `from` to `to`.
 ///
-/// STUB: fields are the agreed minimum. Lesser agents may extend with
-/// provenance/confidence per STATUS.md task C3 — but keep `from`, `to`,
-/// `link_type` stable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Links carry provenance so the system can distinguish inferred suggestions
+/// from user-confirmed knowledge. Keep `from`, `to`, `link_type` stable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {
     pub id: LinkId,
     pub from: ObjectRef,
     pub to: ObjectRef,
     pub link_type: LinkType,
-    // TODO(C3): created_by: crate::Actor, created_at: crate::Timestamp,
-    //           reviewed: review::ReviewState, confidence: Option<f32>.
+    pub created_by: crate::Actor,
+    pub created_at: crate::Timestamp,
+    pub reviewed: crate::review::ReviewState,
+    /// Optional confidence score (0.0-1.0) for inferred links.
+    pub confidence: Option<f32>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::NoteId;
+    use crate::{Actor, Timestamp};
+    use crate::review::ReviewState;
 
-    // Smoke test that the invariant enum survives a serde round-trip with the
-    // snake_case wire format the storage layer relies on. Extend per task A1.
     #[test]
     fn link_type_round_trips_as_snake_case() {
         let json = serde_json::to_string(&LinkType::DerivedFrom).unwrap();
         assert_eq!(json, "\"derived_from\"");
         let back: LinkType = serde_json::from_str(&json).unwrap();
         assert_eq!(back, LinkType::DerivedFrom);
+    }
+
+    #[test]
+    fn link_round_trips() {
+        let link = Link {
+            id: LinkId::new(),
+            from: ObjectRef::Note(NoteId::new()),
+            to: ObjectRef::Note(NoteId::new()),
+            link_type: LinkType::RelatedTo,
+            created_by: Actor::User,
+            created_at: Timestamp::now_utc(),
+            reviewed: ReviewState::Proposed,
+            confidence: Some(0.85),
+        };
+
+        let json = serde_json::to_string(&link).expect("serialize");
+        let back: Link = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(back.id, link.id);
+        assert_eq!(back.from, link.from);
+        assert_eq!(back.to, link.to);
+        assert_eq!(back.link_type, link.link_type);
+        assert_eq!(back.created_by, link.created_by);
+        assert_eq!(back.reviewed, link.reviewed);
+        assert_eq!(back.confidence, link.confidence);
     }
 }

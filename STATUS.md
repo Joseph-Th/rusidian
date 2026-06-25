@@ -185,11 +185,14 @@ Do not start a later step while an earlier one is 🔨/🚫.
   blob), `created_by/at`, block-level provenance ref.
 - **Done when:** Ordering stable under insert-between; reorder test passes.
 
-#### C3 · Link provenance ⬜
+#### C3 · Link provenance ✅
 - **Files:** `pkm-core/src/link.rs`.
-- **Do:** Add `created_by: Actor`, `created_at`, `reviewed: ReviewState`,
-  optional `confidence`. Keep `from/to/link_type` stable.
-- **Done when:** Inferred vs. user-confirmed links are distinguishable.
+- **Completed:** Added `created_by: Actor`, `created_at: Timestamp`,
+  `reviewed: ReviewState`, `confidence: Option<f32>` fields. Kept `from/to/link_type`
+  stable as required. Removed Eq derive (f32 doesn't implement Eq due to NaN).
+- **Tests:** link_round_trips test verifies serialization; all 12 pkm-core tests pass.
+- **Notes:** Inferred links (Proposed review state + confidence) are now clearly
+  distinguishable from user-confirmed knowledge (Accepted review state).
 
 #### C4 · Entity merge semantics ⬜
 - **Depends on:** B2.
