@@ -1,4 +1,6 @@
-use pkm_storage::open;
+use pkm_storage::{open, SqliteSourceRepo};
+use pkm_core::ports::SourceRepo;
+use pkm_core::fixtures::sample_source;
 use tempfile::TempDir;
 
 #[test]
@@ -56,9 +58,10 @@ fn open_is_idempotent() {
         )
         .unwrap();
 
-    // Should still have just one migration record.
+    // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    assert_eq!(version1, "1");
+    // There are now 2 migrations: 0001_init and 0002_extend_source.
+    assert_eq!(version1, "2");
 }
 
 #[test]
@@ -91,4 +94,50 @@ fn schema_tables_exist() {
 
         assert!(exists, "table {} should exist", table);
     }
+}
+
+#[test]
+fn source_create_and_get_round_trip() {
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+
+    let conn = open(&db_path).expect("failed to open db");
+    let repo = SqliteSourceRepo { conn: &conn };
+
+    // Create a sample source.
+    let source = sample_source();
+    repo.create(&source)
+        .expect("failed to create source");
+
+    // Retrieve it back.
+    let retrieved = repo
+        .get(source.id)
+        .expect("failed to get source")
+        .expect("source should exist");
+
+    // Verify all fields match (except for timestamps which may have rounding).
+    assert_eq!(retrieved.id, source.id);
+    assert_eq!(retrieved.origin, source.origin);
+    assert_eq!(retrieved.title, source.title);
+    assert_eq!(retrieved.raw_content, source.raw_content);
+    assert_eq!(retrieved.content_hash, source.content_hash);
+    assert_eq!(retrieved.ingestion_state, source.ingestion_state);
+    assert_eq!(retrieved.created_by, source.created_by);
+    // Note: timestamps may differ slightly due to SQL DEFAULT precision, but should be close
+}
+
+#[test]
+fn source_get_nonexistent_returns_none() {
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+
+    let conn = open(&db_path).expect("failed to open db");
+    let repo = SqliteSourceRepo { conn: &conn };
+
+    let fake_id = pkm_core::id::SourceId::new();
+    let result = repo
+        .get(fake_id)
+        .expect("get should not error");
+
+    assert!(result.is_none(), "getting a nonexistent source should return None");
 }

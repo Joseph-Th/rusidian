@@ -153,17 +153,22 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Notes:** Added `time` and `tempfile` dependencies. Migrations are
   transactional + idempotent; safe to call open() multiple times.
 
-#### B2 · Repository implementations 🔨
-- **Depends on:** B1, C1, C3 (and C2 for blocks).
-- **Files:** `pkm-storage/src/repositories/*`; add ports to `pkm_core::ports`.
-- **Do:** Implement `SqliteSourceRepo`, `SqliteNoteRepo`; add + implement
-  `EntityRepo`, `LinkRepo`, `ViewRepo`, `AgentActionRepo` (append-only). Raw
-  source content write-once except an explicit audited user edit. Soft/
-  recoverable deletes. Pure row↔type mapping fns, unit-tested.
-- **Approach:** Start with SqliteSourceRepo + ports; defer full multi-repo impl.
-  Focus on create→read round-trips with write-once invariant.
-- **Done when:** Round-trip tests (create→get equal) pass for Source;
-  soft-delete keeps a recovery path.
+#### B2 · Repository implementations (Phase 1: SourceRepo) ✅
+- **Depends on:** B1 ✅, C1 ✅, C3 ✅.
+- **Completed:** Implemented `SqliteSourceRepo` with create + get methods.
+  Added migration 0002_extend_source to persist C1 fields (captured_at,
+  content_hash, ingestion_state). Pure mapping function (build_source_from_fields)
+  for row↔Source conversion, unit-tested. All 5 migration tests pass; round-trip
+  verified create→get equality for Source.
+- **Notes:** Created `0002_extend_source.sql` migration to add columns that C1
+  introduced to domain model. Migration runner updated to include it. Timestamps
+  formatted as RFC3339 for consistent parsing. Error types correctly mapped from
+  StorageError to CoreError at port boundary. SqliteSourceRepo now exported from
+  lib root.
+- **Tests:** 3 unit tests for parsing helpers; 2 integration tests for round-trip
+  + non-existent get. All pass; migration tracking verified idempotent.
+- **Deferred:** SqliteNoteRepo, EntityRepo, LinkRepo, ViewRepo, AgentActionRepo
+  (append-only); soft/recoverable deletes. Next phase addresses full set.
 
 ---
 

@@ -22,6 +22,8 @@ pub mod db;
 pub mod migrations;
 pub mod repositories;
 
+pub use repositories::SqliteSourceRepo;
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, StorageError>;

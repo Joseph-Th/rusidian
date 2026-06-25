@@ -18,12 +18,15 @@ bug — fix it.
 
 ## Current schema
 
-Migration `0001_init` (STATUS task B1) creates the initial schema:
+Migrations applied in order:
+
+1. `0001_init` (STATUS task B1): initial aggregates
+2. `0002_extend_source` (STATUS task B2 / task C1): adds source ingestion pipeline fields
 
 | Table | Backs (core type) | Key columns | Notes |
 |-------|-------------------|-------------|-------|
 | `schema_version` | — | `version` (PK), `applied_at` | migration ledger; every migration records itself |
-| `source` | `source::Source` | `id` (PK) | raw content write-once; `origin` (TEXT, enum), `title`, `raw_content`, `created_at` (RFC3339), `created_by` |
+| `source` | `source::Source` | `id` (PK) | raw content write-once; `origin` (TEXT, enum), `title`, `raw_content`, `created_at` (RFC3339), `created_by`, `captured_at` (RFC3339), `content_hash`, `ingestion_state` (enum) |
 | `note` | `note::Note` | `id` (PK) | `title`, `created_at` (RFC3339), `created_by` |
 | `block` | `block::Block` | `id` (PK), `note_id` (FK) | `block_type` (enum), `content`, `order` (REAL, fractional for insert-between), `created_at`, `created_by` |
 | `entity` | `entity::Entity` | `id` (PK) | `kind` (enum), `name`, `aliases` (JSON), `created_at`, `created_by` |
