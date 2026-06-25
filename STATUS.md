@@ -123,11 +123,8 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Done when:** Test: merge keeps every alias + re-points every link; rollback
   restores pre-merge state.
 
-#### C5 · Finalize `Provenance` ⬜
-- **Files:** `pkm-core/src/provenance.rs`.
-- **Do:** Add `originating_action: Option<AgentActionId>` and extraction span
-  fields. Ensure derived content always has non-empty `derived_from`.
-- **Done when:** A derived block/link/entity can be traced to source + action.
+#### C5 · Finalize `Provenance` ✅
+- **Notes:** Added `originating_action: Option<AgentActionId>` and `extraction_span: Option<ExtractionSpan>` fields to Provenance. ExtractionSpan tracks byte offsets (start/end) for precise source location. Added invariant documentation that derived content must have non-empty `derived_from`. 7 tests verify round-trip serialization, span arithmetic, and provenance traceability.
 
 #### F0 · Typed view parameters + view model ⬜
 - **Depends on:** C-series.
@@ -148,48 +145,15 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done
+## Done (14 tasks)
 
-#### A1 · Clippy/test gate + round-trip tests ✅
-- **Notes:** Implemented round-trip tests for all invariant enums (LinkType, EntityKind, ViewKind, IngestionState, ContentStatus, ReviewState, AgentActionStatus, OperationKind, Actor).
-
-#### B1 · Migration runner + 0001_init schema + db open ✅
-- **Notes:** Implemented migration infrastructure with automatic runner. Schema includes tables for sources, notes, blocks, entities, links, and action logs.
-
-#### B2 · Repository impls ✅
-- **Notes:** Implemented SqliteSourceRepo, SqliteNoteRepo, SqliteBlockRepo, SqliteEntityRepo, SqliteLinkRepo with round-trip persistence tests.
-
-#### C1 · Source fields (ingestion state, timestamps) ✅
-- **Notes:** Added ingestion state, captured timestamp, processed timestamp, extraction status, and URL/locator fields to Source.
-
-#### C2 · Block ordering + Note metadata + markdown shape ✅
-- **Notes:** Implemented block ordering within notes, note metadata fields, and markdown-compatible block types (paragraph, heading, quote, etc.).
-
-#### C3 · Link provenance and review state ✅
-- **Notes:** Added provenance and review state to Link struct; confidence field for inferred relationships.
-
-#### D1 · Typed operation dispatch + risk classification ✅
-- **Depends on:** B2.
-- **Notes:** Implemented 16-variant Operation enum. requires_review() classifies: ParseSource/GenerateSummary are mechanical (false); all others are knowledge ops (true). execute() creates AgentAction records with Proposed status.
-
-#### D2 · Diff representation + action log persistence ✅
-- **Depends on:** D1 ✅, B2.
-- **Notes:** Wrote ADR 0003 (full snapshots over patches). Added AgentActionRepo trait; implemented SqliteAgentActionRepo. Action log is append-only and fully auditable.
-
-#### D3 · Ingestion transition table ✅
-- **Notes:** Implemented ingestion state machine transitions with validation.
-
-#### D4 · Binary attachments (content-addressed blob store) ✅
-- **Notes:** Implemented content-addressed blob storage for binary attachments with integrity verification.
-
-#### S1 · Vertical slice: source round-trip + JSON export ✅
-- **Notes:** Implemented full create_source → persist → retrieve → export JSON workflow with round-trip tests.
-
-#### S2 · Vertical slice: propose → diff → accept → rollback ✅
-- **Depends on:** D1 ✅, D2 ✅, B2 ✅.
-- **Notes:** Implemented full agent-action lifecycle: propose UpdateBlock operations, apply them (status transition), and rollback. Added NoteRepo::update_block and AgentActionRepo::set_status/set_diff methods. Test verifies end-to-end proposal → acceptance → rollback with action status tracking.
+All foundation and vertical-slice work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2.
 
 ---
+
+## Deferred
+
+These will become tasks once C4, C5, F0 land:
 
 > The remaining concrete views (Dossier, Timeline, ProjectDashboard, SourceMap,
 > DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions,
