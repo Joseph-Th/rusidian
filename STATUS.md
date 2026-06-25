@@ -108,10 +108,18 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Depends on:** C2 ✅, B2 ✅.
 - **Notes:** Implemented pure markdown parsing in pkm-core/src/markdown.rs. Functions: blocks_to_markdown(), markdown_to_blocks(), note_to_markdown(), markdown_to_note(), extract_title(). All preserve block IDs via HTML comments for round-tripping. Tested: 7 unit tests covering title extraction, block parsing, block ID preservation, and note-level round-trip (# Title + paragraphs). Note-to-markdown includes title as level-1 heading. Markdown-to-note extracts title and creates blocks with fractional ordering. Folder import (walk directory, create sources) deferred to follow-up as it requires coordination with storage layer for provenance tracking.
 
-#### C4 · Entity merge semantics 🔨
+#### C4 · Entity merge semantics ⬜
 - **Depends on:** B2 ✅.
+- **Progress:** Entity struct updated with merged_into, created_by, created_at fields. Tests pass.
 - **Do:** Non-lossy merge: survivor id, losers marked merged-into, all
   links/aliases re-pointed, original recoverable. Write an ADR.
+- **Remaining work:**
+  - C4a: Schema migration 0004 for entity table (add merged_into, created_by, created_at columns)
+  - C4b: SqliteEntityRepo impl + round-trip tests
+  - C4c: Entity merge operation (MergeEntity in Operation enum)
+  - C4d: Link re-pointing logic (move links from loser to survivor)
+  - C4e: Rollback for merge (via AgentAction)
+  - C4f: Write ADR 0004 for merge semantics
 - **Done when:** Test: merge keeps every alias + re-points every link; rollback
   restores pre-merge state.
 
