@@ -16,7 +16,8 @@
 
 use crate::agent_action::{AgentAction, AgentActionStatus};
 use crate::block::Block;
-use crate::id::{AgentActionId, BlockId, NoteId, SourceId};
+use crate::entity::Entity;
+use crate::id::{AgentActionId, BlockId, EntityId, NoteId, SourceId};
 use crate::note::Note;
 use crate::review::ReviewState;
 use crate::source::Source;
@@ -44,6 +45,17 @@ pub trait NoteRepo {
     // TODO(B2): block CRUD, ordered block fetch, metadata, version history.
 }
 
+/// Persistence for [`Entity`] (a normalized, referenceable object).
+/// Entities support non-lossy merges: when merging, the loser is marked
+/// merged_into the survivor, preserving history and enabling rollback.
+pub trait EntityRepo {
+    fn create(&self, entity: &Entity) -> Result<()>;
+    fn get(&self, id: EntityId) -> Result<Option<Entity>>;
+    /// Mark an entity as merged into another, preserving the loser's history.
+    fn set_merged_into(&self, loser_id: EntityId, survivor_id: EntityId) -> Result<()>;
+    // TODO(C4): list/filter, search by alias, count by kind.
+}
+
 /// Append-only persistence for agent action audit trail (AGENTS.md "Agent Action").
 /// Actions record what agents changed, who/what triggered it, before/after state,
 /// and rollback references. The log is append-only: statuses advance (Proposed →
@@ -62,7 +74,7 @@ pub trait AgentActionRepo {
     // TODO(D2): list/filter (by target, by status, by actor, by date range), batch get.
 }
 
-// TODO(B2): EntityRepo, LinkRepo, ViewRepo.
+// TODO(B2): LinkRepo, ViewRepo.
 
 /// Multi-mode retrieval boundary. The SQLite/FTS implementation lives in
 /// `pkm-storage`; pure query-parsing/ranking helpers live in `pkm-search`.

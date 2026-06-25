@@ -1,7 +1,7 @@
 use pkm_core::fixtures::sample_source;
-use pkm_core::ports::SourceRepo;
+use pkm_core::ports::{EntityRepo, SourceRepo};
 use pkm_core::source::Source;
-use pkm_storage::{open, SqliteSourceRepo};
+use pkm_storage::{open, SqliteEntityRepo, SqliteSourceRepo};
 use tempfile::TempDir;
 
 #[test]
@@ -133,6 +133,108 @@ fn source_get_nonexistent_returns_none() {
         result.is_none(),
         "getting a nonexistent source should return None"
     );
+}
+
+#[test]
+fn entity_create_and_get_round_trip() {
+    use pkm_core::entity::{Entity, EntityKind};
+    use pkm_core::id::EntityId;
+    use pkm_core::{Actor, Timestamp};
+
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+
+    let conn = open(&db_path).expect("failed to open db");
+    let repo = SqliteEntityRepo { conn: &conn };
+
+    // Create a sample entity
+    let entity = Entity {
+        id: EntityId::new(),
+        kind: EntityKind::Person,
+        name: "Alice".to_string(),
+        aliases: vec!["Alice Smith".to_string(), "A.S.".to_string()],
+        created_by: Actor::User,
+        created_at: Timestamp::now_utc(),
+        merged_into: None,
+    };
+
+    let original_id = entity.id;
+
+    // Create the entity
+    repo.create(&entity).expect("failed to create entity");
+
+    // Retrieve it back
+    let retrieved = repo
+        .get(original_id)
+        .expect("failed to get entity")
+        .expect("entity should exist");
+
+    // Verify all fields match
+    assert_eq!(retrieved.id, entity.id);
+    assert_eq!(retrieved.kind, entity.kind);
+    assert_eq!(retrieved.name, entity.name);
+    assert_eq!(retrieved.aliases, entity.aliases);
+    assert_eq!(retrieved.created_by, entity.created_by);
+    assert_eq!(retrieved.merged_into, entity.merged_into);
+}
+
+#[test]
+fn entity_merge_sets_merged_into() {
+    use pkm_core::entity::{Entity, EntityKind};
+    use pkm_core::id::EntityId;
+    use pkm_core::{Actor, Timestamp};
+
+    let temp_dir = TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+
+    let conn = open(&db_path).expect("failed to open db");
+    let repo = SqliteEntityRepo { conn: &conn };
+
+    // Create survivor and loser entities
+    let survivor = Entity {
+        id: EntityId::new(),
+        kind: EntityKind::Person,
+        name: "Alice".to_string(),
+        aliases: vec!["Alice Smith".to_string()],
+        created_by: Actor::User,
+        created_at: Timestamp::now_utc(),
+        merged_into: None,
+    };
+
+    let loser = Entity {
+        id: EntityId::new(),
+        kind: EntityKind::Person,
+        name: "Alice S".to_string(),
+        aliases: vec!["A.S.".to_string()],
+        created_by: Actor::User,
+        created_at: Timestamp::now_utc(),
+        merged_into: None,
+    };
+
+    let survivor_id = survivor.id;
+    let loser_id = loser.id;
+
+    // Create both entities
+    repo.create(&survivor).expect("failed to create survivor");
+    repo.create(&loser).expect("failed to create loser");
+
+    // Mark loser as merged into survivor
+    repo.set_merged_into(loser_id, survivor_id)
+        .expect("failed to set merged_into");
+
+    // Verify survivor still has no merged_into
+    let retrieved_survivor = repo
+        .get(survivor_id)
+        .expect("failed to get survivor")
+        .expect("survivor should exist");
+    assert_eq!(retrieved_survivor.merged_into, None);
+
+    // Verify loser is now marked as merged
+    let retrieved_loser = repo
+        .get(loser_id)
+        .expect("failed to get loser")
+        .expect("loser should exist");
+    assert_eq!(retrieved_loser.merged_into, Some(survivor_id));
 }
 
 /// S1: Vertical slice: source round-trip + JSON export.

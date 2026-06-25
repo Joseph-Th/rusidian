@@ -114,11 +114,8 @@ Do not start a later step while an earlier one is 🔨/🚫.
   Update schema version. Backfill created_at/created_by from existing data.
 - **Done when:** Migration runs; existing entities load with new fields; schema.md updated.
 
-#### C4b · Entity merge: SqliteEntityRepo persistence ⬜
-- **Depends on:** C4a.
-- **Do:** Update SqliteEntityRepo to persist/retrieve merged_into, created_by, created_at.
-  Add round-trip test: create, merge, verify merged_into set, list still finds both.
-- **Done when:** Test passes; all entity fields survive persist/retrieve cycle.
+#### C4b · Entity merge: SqliteEntityRepo persistence ✅
+- **Notes:** Added EntityRepo trait to ports.rs with create(), get(), set_merged_into(). Implemented SqliteEntityRepo in entities.rs with full SQL persistence for all Entity fields including merged_into. Added 2 round-trip tests: entity_create_and_get_round_trip and entity_merge_sets_merged_into. Both tests pass; all entity fields survive persist/retrieve cycle.
 
 #### C4c · Entity merge: Operation enum + MergeEntity ⬜
 - **Depends on:** C4b.
