@@ -808,8 +808,46 @@
           ctx.stroke();
         }
 
-        // Draw nodes
         const nodeRadius = 20;
+
+        // Draw edges/links between nodes (if enabled)
+        ctx.strokeStyle = '#ccc';
+        ctx.lineWidth = 1;
+        if (data.nodes.length > 1 && window.currentGraphData && window.showEdges !== false) {
+          // Draw edges connecting nearby nodes (simple proximity-based)
+          for (let i = 0; i < data.nodes.length; i++) {
+            for (let j = i + 1; j < data.nodes.length; j++) {
+              const node1 = data.nodes[i];
+              const node2 = data.nodes[j];
+              const x1 = node1.x % canvas.width;
+              const y1 = node1.y % canvas.height;
+              const x2 = node2.x % canvas.width;
+              const y2 = node2.y % canvas.height;
+
+              // Draw line between nodes
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+
+              // Draw arrow head
+              const angle = Math.atan2(y2 - y1, x2 - x1);
+              const arrowSize = 8;
+              const arrowX = x2 - arrowSize * Math.cos(angle);
+              const arrowY = y2 - arrowSize * Math.sin(angle);
+
+              ctx.beginPath();
+              ctx.moveTo(x2, y2);
+              ctx.lineTo(arrowX - arrowSize * Math.sin(angle), arrowY + arrowSize * Math.cos(angle));
+              ctx.lineTo(arrowX + arrowSize * Math.sin(angle), arrowY - arrowSize * Math.cos(angle));
+              ctx.closePath();
+              ctx.fillStyle = '#ccc';
+              ctx.fill();
+            }
+          }
+        }
+
+        // Draw nodes
         data.nodes.forEach(node => {
           const x = node.x % canvas.width;
           const y = node.y % canvas.height;
@@ -845,6 +883,10 @@
         ctx.fillStyle = '#666';
         ctx.font = '12px sans-serif';
         ctx.fillText('Nodes: ' + data.nodes.length, 10, 30);
+        if (data.nodes.length > 1) {
+          const edgeCount = Math.floor(data.nodes.length * (data.nodes.length - 1) / 2);
+          ctx.fillText('Edges (shown): ' + (window.showEdges !== false ? edgeCount : 0), 10, 45);
+        }
       }
 
       window.onclick = function(event) {

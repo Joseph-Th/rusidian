@@ -381,4 +381,17 @@ impl AppService {
             None => Ok(None),
         }
     }
+
+    /// Get show_edges setting for a graph view (for link visualization).
+    pub fn get_graph_show_edges(&self, view_id: &str) -> Result<bool, String> {
+        let view = self
+            .get_view(view_id)?
+            .ok_or_else(|| format!("View not found: {}", view_id))?;
+
+        if let ViewParams::GraphView(params) = view.params {
+            Ok(params.show_edges)
+        } else {
+            Err("View is not a graph view".to_string())
+        }
+    }
 }
