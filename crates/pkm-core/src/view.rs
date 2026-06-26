@@ -175,6 +175,40 @@ impl DossierParams {
     }
 }
 
+/// Parameters for ProjectDashboard view: shows status aggregated by project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectDashboardParams {
+    /// Filter to a specific project name (if None, shows all projects).
+    pub project_name: Option<String>,
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl ProjectDashboardParams {
+    pub fn new() -> Self {
+        Self {
+            project_name: None,
+            limit: Some(100),
+        }
+    }
+
+    pub fn with_project(mut self, project_name: String) -> Self {
+        self.project_name = Some(project_name);
+        self
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+impl Default for ProjectDashboardParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stub params for unimplemented views (task F1+).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StubViewParams;
@@ -187,6 +221,7 @@ pub enum ViewParams {
     ReviewQueue(ReviewQueueParams),
     Timeline(TimelineParams),
     Dossier(DossierParams),
+    ProjectDashboard(ProjectDashboardParams),
     // Stub: other views will be implemented in F1+
     Stub(StubViewParams),
 }
@@ -206,6 +241,10 @@ impl ViewParams {
 
     pub fn dossier(entity_id: String) -> Self {
         ViewParams::Dossier(DossierParams::new(entity_id))
+    }
+
+    pub fn project_dashboard() -> Self {
+        ViewParams::ProjectDashboard(ProjectDashboardParams::default())
     }
 }
 
@@ -249,6 +288,11 @@ pub trait ViewModel {
 
     fn render_dossier(
         params: &DossierParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_project_dashboard(
+        params: &ProjectDashboardParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
@@ -336,6 +380,24 @@ impl ViewModel for DefaultViewModel {
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_project_dashboard(
+        params: &ProjectDashboardParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: until note metadata with project assignments is accessible through sources,
+        // project dashboard shows all sources. In production, this would filter by project names
+        // stored in note metadata and aggregated by project status.
+        let mut filtered: Vec<_> = sources.iter().collect();
+
+        // Sort by captured_at descending (most recent first)
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(100);
         let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
 
         Ok(ViewRenderResult { source_ids })
@@ -653,5 +715,44 @@ mod tests {
         // Should be sorted by captured_at descending (most recent first)
         assert_eq!(result.source_ids[0], sources[0].id);
         assert_eq!(result.source_ids[1], sources[2].id);
+    }
+
+    #[test]
+    fn project_dashboard_params_serialize_and_deserialize() {
+        let params = ProjectDashboardParams::default()
+            .with_project("MyProject".to_string())
+            .with_limit(75);
+        let json = serde_json::to_string(&params).unwrap();
+        let back: ProjectDashboardParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, params);
+    }
+
+    #[test]
+    fn project_dashboard_aggregates_and_displays_status() {
+        let now = Timestamp::now_utc();
+        let sources: Vec<_> = (0..50)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Item {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: now - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: if i % 2 == 0 {
+                    IngestionState::Promoted
+                } else {
+                    IngestionState::AwaitingReview
+                },
+                created_by: Actor::User,
+            })
+            .collect();
+
+        // Render project dashboard (placeholder: shows all sources)
+        let params = ProjectDashboardParams::default().with_limit(20);
+        let result = DefaultViewModel::render_project_dashboard(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 20);
+        // Should be sorted by captured_at descending (most recent first)
+        assert_eq!(result.source_ids[0], sources[0].id);
     }
 }

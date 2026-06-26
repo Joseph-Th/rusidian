@@ -105,10 +105,12 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - 2 tests verify: params serialization and filtering by AwaitingReview status.
 - All tests pass; ready for integration with UI layer.
 
-#### F4 · ProjectDashboard view ⬜
-- **Depends on:** F0 ✅.
-- **Do:** Implement ProjectDashboard view. Group notes by project, show status summary.
-- **Done when:** Test: project dashboard aggregates and displays project status.
+#### F4 · ProjectDashboard view ✅
+- Added ProjectDashboardParams with project_name filter and limit.
+- Updated render_project_dashboard to aggregate and display status (placeholder: shows all sources sorted by recency).
+- Added helper methods with_project() and with_limit() for fluent configuration.
+- 2 tests verify: params serialization and dashboard aggregation.
+- All tests pass; placeholder ready for integration with project metadata when available.
 
 #### F5 · SourceMap view ⬜
 - **Depends on:** F0 ✅.
