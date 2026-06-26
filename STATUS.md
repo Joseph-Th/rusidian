@@ -98,18 +98,15 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Current
 
-1. **H0** ✅ — ViewRepo trait + SqliteViewRepo impl.
-   - Added ViewRepo trait to pkm-core/src/ports.rs
-   - Implemented SqliteViewRepo in pkm-storage/src/repositories/views.rs
-   - Schema migration 0001_init already included view table
-   - 6 new tests added; all pass
-   - Notes: ViewParams uses untagged serde; specific variant preservation not 100% reliable on deserialization, but ViewKind is always correct (the render-determining field)
+1. **H1** 🔨 — Export as publishable markdown.
+   Create a markdown folder hierarchy from note tree suitable for static-site generation.
+   Depends on: none (⬜).
 
 ---
 
-## Done (42 tasks)
+## Done (43 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, view implementations, UI shell, and Phase 6 retrieval complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv, G1, G2, G3, G4a, G4b, G5.
+All foundation, vertical-slice, entity merge, view model, app service, view implementations, UI shell, Phase 6 retrieval, and Phase 7 foundation complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv, G1, G2, G3, G4a, G4b, G5, H0.
 
 ---
 

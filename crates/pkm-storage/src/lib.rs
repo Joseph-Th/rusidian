@@ -20,11 +20,13 @@
 
 pub mod blob_store;
 pub mod db;
+pub mod exporter;
 pub mod migrations;
 pub mod repositories;
 pub mod retriever;
 
 pub use blob_store::BlobStore;
+pub use exporter::ExportConfig;
 pub use repositories::{SqliteAgentActionRepo, SqliteEntityRepo, SqliteNoteRepo, SqliteSourceRepo};
 pub use retriever::SqliteRetriever;
 
