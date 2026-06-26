@@ -98,31 +98,35 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Current
 
-Phase 7 tasks — implement in order for breadth and user value:
+Phase 7 tasks — expansion beyond the core system:
 
 ### Phase 7: Expansion
 
-1. **H0** — ViewRepo trait + SqliteViewRepo impl + 0006_views schema migration.
-   Foundation for persisting custom views. Depends on: none (✅).
-
-2. **H1** — Export as publishable markdown. Create a markdown folder hierarchy
-   from a note tree that's suitable for static-site generation. Depends on: none (✅).
-
-3. **H2** — Local versioning foundation. Add version numbers to entities; track
-   object history for sync/rollback. Depends on: none (✅).
-   
-   Notes: Core implementation complete with version and updated_at fields on all domain
-   types. Migration 0007_add_versioning fixed to properly set updated_at values. All
-   repositories (Source, Entity, Link, Note, View, Block) now persist and retrieve
-   version/updated_at correctly. All 98+ tests passing, clippy clean.
-
-4. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
+1. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
    transport contract. Depends on: none (⬜).
+   
+   Subtasks:
+   - H3a: Design conflict detection rules (version/timestamp based)
+   - H3b: Define merge algorithm for diverged states
+   - H3c: Design transport contract (sync request/response format)
+   - H3d: Implement versioning checks for sync eligibility
 
-5. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
-   browsers. Depends on: none (⬜).
+2. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
+   browsers. Depends on: A0 (Tauri shell), H0 (views) (⬜).
+   
+   Subtasks:
+   - H4a: Responsive layout for capture form
+   - H4b: Touch-friendly edit controls
+   - H4c: Mobile-optimized search interface
+   - H4d: Test on mobile browsers
 
-6. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
-   and notes. Depends on: H0 (⬜).
+3. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
+   and notes. Depends on: H0 (view system) (⬜).
+   
+   Subtasks:
+   - H5a: Graph data model for spatial layout
+   - H5b: Canvas rendering with position persistence
+   - H5c: Interactive node dragging
+   - H5d: Link visualization on canvas
 
-Further: sync, mobile editor (native), publishing, collaboration, plugin API.
+Further: mobile native editor, public publishing, collaboration, plugin API.
