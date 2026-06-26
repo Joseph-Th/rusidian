@@ -49,7 +49,7 @@ mod tests {
             blocks: vec![BlockId::new(), BlockId::new()],
             metadata,
             created_by: Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };

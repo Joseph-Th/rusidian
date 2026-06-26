@@ -25,11 +25,15 @@ impl EntityRepo for SqliteEntityRepo<'_> {
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
+        let updated_at_str = entity
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
 
         self.conn
             .execute(
-                "INSERT INTO entity (id, kind, name, aliases, created_at, created_by, merged_into)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO entity (id, kind, name, aliases, created_at, created_by, merged_into, version, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     entity.id.to_string(),
                     kind_str,
@@ -38,6 +42,8 @@ impl EntityRepo for SqliteEntityRepo<'_> {
                     created_at_str,
                     created_by_json,
                     entity.merged_into.map(|id| id.to_string()),
+                    entity.version,
+                    updated_at_str,
                 ],
             )
             .map_err(|e| {

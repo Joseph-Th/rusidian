@@ -64,10 +64,10 @@ mod tests {
                 },
                 order: 1.0,
                 created_by: Actor::User,
-                created_at: now.clone(),
+                created_at: now,
                 source_provenance_ref: None,
                 version: 1,
-                updated_at: now.clone(),
+                updated_at: now,
             },
             Block {
                 id: BlockId::new(),
@@ -77,10 +77,10 @@ mod tests {
                 },
                 order: 3.0,
                 created_by: Actor::User,
-                created_at: now.clone(),
+                created_at: now,
                 source_provenance_ref: None,
                 version: 1,
-                updated_at: now.clone(),
+                updated_at: now,
             },
             Block {
                 id: BlockId::new(),
@@ -90,7 +90,7 @@ mod tests {
                 },
                 order: 2.0,
                 created_by: Actor::User,
-                created_at: now.clone(),
+                created_at: now,
                 source_provenance_ref: None,
                 version: 1,
                 updated_at: now,
@@ -120,10 +120,10 @@ mod tests {
             },
             order: 1.0,
             created_by: Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             source_provenance_ref: None,
             version: 1,
-            updated_at: now.clone(),
+            updated_at: now,
         };
 
         let last = Block {
@@ -134,10 +134,10 @@ mod tests {
             },
             order: 3.0,
             created_by: Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             source_provenance_ref: None,
             version: 1,
-            updated_at: now.clone(),
+            updated_at: now,
         };
 
         // Insert a new block between them (order = 2.0, which is between 1.0 and 3.0).
@@ -149,7 +149,7 @@ mod tests {
             },
             order: 2.0,
             created_by: Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             source_provenance_ref: None,
             version: 1,
             updated_at: now,

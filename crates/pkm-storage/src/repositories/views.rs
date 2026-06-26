@@ -332,7 +332,7 @@ mod tests {
             created_by: pkm_core::Actor::User,
             created_at: now,
             version: 1,
-            updated_at: now.clone(),
+            updated_at: now,
         };
 
         let now = pkm_core::Timestamp::now_utc();

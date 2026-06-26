@@ -24,6 +24,10 @@ impl LinkRepo for SqliteLinkRepo<'_> {
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
+        let updated_at_str = link
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
         let reviewed_str = review_state_to_string(link.reviewed);
 
         // Decompose ObjectRef into type and id
@@ -32,8 +36,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
 
         self.conn
             .execute(
-                "INSERT INTO link (id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO link (id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence, version, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     link.id.to_string(),
                     from_type,
@@ -45,6 +49,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
                     created_by_json,
                     reviewed_str,
                     link.confidence,
+                    link.version,
+                    updated_at_str,
                 ],
             )
             .map_err(|e| {
@@ -317,6 +323,7 @@ fn parts_to_object_ref(type_str: &str, id_str: &str) -> crate::Result<ObjectRef>
 }
 
 /// Pure mapping function: builds a Link from extracted fields.
+#[allow(clippy::type_complexity)]
 fn build_link_from_fields(
     fields: (
         String,

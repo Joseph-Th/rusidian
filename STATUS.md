@@ -110,11 +110,6 @@ Phase 7 tasks — implement in order for breadth and user value:
 
 3. **H2** — Local versioning foundation. Add version numbers to entities; track
    object history for sync/rollback. Depends on: none (✅).
-   
-   COMPLETE: Core implementation with versioning fields (version, updated_at) added to all
-   domain types. Migration 0007_add_versioning created and registered. All test instantiations
-   fixed (Entity, Link, Source, View). SqliteViewRepo::create updated to persist version fields.
-   All 98 tests pass (pkm-core 56, pkm-storage 26, pkm-agent 8, pkm-search 8).
 
 4. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
    transport contract. Depends on: none (⬜).

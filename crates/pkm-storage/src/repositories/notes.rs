@@ -21,18 +21,24 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
+        let updated_at_str = note
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
 
         let created_by_json = serde_json::to_string(&note.created_by)?;
 
         self.conn
             .execute(
-                "INSERT INTO note (id, title, created_at, created_by)
-             VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO note (id, title, created_at, created_by, version, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     note.id.to_string(),
                     note.title,
                     created_at_str,
-                    created_by_json
+                    created_by_json,
+                    note.version,
+                    updated_at_str,
                 ],
             )
             .map_err(crate::StorageError::from)?;
@@ -43,22 +49,37 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     fn get(&self, id: NoteId) -> Result<Option<Note>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT title, created_at, created_by FROM note WHERE id = ?1")
+            .prepare(
+                "SELECT title, created_at, created_by, version, updated_at FROM note WHERE id = ?1",
+            )
             .map_err(crate::StorageError::from)?;
 
         let result = stmt.query_row(params![id.to_string()], |row| {
             let title: String = row.get(0)?;
             let created_at_str: String = row.get(1)?;
             let created_by_json: String = row.get(2)?;
+            let version: i64 = row.get(3)?;
+            let updated_at_str: String = row.get(4)?;
 
-            Ok((title, created_at_str, created_by_json))
+            Ok((
+                title,
+                created_at_str,
+                created_by_json,
+                version,
+                updated_at_str,
+            ))
         });
 
         match result {
-            Ok((title, created_at_str, created_by_json)) => {
+            Ok((title, created_at_str, created_by_json, version, updated_at_str)) => {
                 let created_by = serde_json::from_str(&created_by_json)?;
                 let created_at = time::OffsetDateTime::parse(
                     &created_at_str,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+                let updated_at = time::OffsetDateTime::parse(
+                    &updated_at_str,
                     &time::format_description::well_known::Rfc3339,
                 )
                 .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
@@ -91,10 +112,10 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     title,
                     blocks,
                     metadata: BTreeMap::new(), // TODO(S2): add metadata to schema
-                    created_at: created_at.clone(),
+                    created_at,
                     created_by,
-                    version: 1,
-                    updated_at: created_at,
+                    version: version as u32,
+                    updated_at,
                 }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -103,7 +124,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     }
 
     fn list(&self, limit: Option<usize>) -> Result<Vec<Note>> {
-        let query = "SELECT id, title, created_at, created_by FROM note ORDER BY created_at DESC";
+        let query = "SELECT id, title, created_at, created_by, version, updated_at FROM note ORDER BY created_at DESC";
         let mut stmt = self
             .conn
             .prepare(query)
@@ -115,13 +136,22 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 let title: String = row.get(1)?;
                 let created_at_str: String = row.get(2)?;
                 let created_by_json: String = row.get(3)?;
+                let version: i64 = row.get(4)?;
+                let updated_at_str: String = row.get(5)?;
 
-                Ok((id_str, title, created_at_str, created_by_json))
+                Ok((
+                    id_str,
+                    title,
+                    created_at_str,
+                    created_by_json,
+                    version,
+                    updated_at_str,
+                ))
             })
             .map_err(crate::StorageError::from)?
             .take(limit.unwrap_or(usize::MAX))
             .map(|result| {
-                let (id_str, title, created_at_str, created_by_json) =
+                let (id_str, title, created_at_str, created_by_json, version, updated_at_str) =
                     result.map_err(crate::StorageError::from)?;
 
                 let uuid = uuid::Uuid::parse_str(&id_str)
@@ -134,16 +164,21 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     &time::format_description::well_known::Rfc3339,
                 )
                 .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+                let updated_at = time::OffsetDateTime::parse(
+                    &updated_at_str,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
 
                 Ok(Note {
                     id,
                     title,
                     blocks: vec![],
                     metadata: BTreeMap::new(),
-                    created_at: created_at.clone(),
+                    created_at,
                     created_by,
-                    version: 1,
-                    updated_at: created_at,
+                    version: version as u32,
+                    updated_at,
                 })
             })
             .collect();
@@ -197,7 +232,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             content: new_content,
             order,
             created_by,
-            created_at: created_at.clone(),
+            created_at,
             source_provenance_ref: None,
             version: 1,
             updated_at: created_at,
@@ -211,14 +246,18 @@ impl SqliteNoteRepo<'_> {
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
+        let updated_at_str = block
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
 
         let created_by_json = serde_json::to_string(&block.created_by)?;
         let content_json = serde_json::to_string(&block.content)?;
 
         self.conn
             .execute(
-                "INSERT INTO block (id, note_id, block_type, content, \"order\", created_at, created_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO block (id, note_id, block_type, content, \"order\", created_at, created_by, version, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     block.id.to_string(),
                     block.note_id.to_string(),
@@ -227,6 +266,8 @@ impl SqliteNoteRepo<'_> {
                     block.order,
                     created_at_str,
                     created_by_json,
+                    block.version,
+                    updated_at_str,
                 ],
             )
             .map_err(crate::StorageError::from)?;

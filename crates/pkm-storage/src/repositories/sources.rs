@@ -28,22 +28,32 @@ impl SourceRepo for SqliteSourceRepo<'_> {
             .captured_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
+        let created_at_str = source
+            .created_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
+        let updated_at_str = source
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
 
         self.conn
             .execute(
                 "INSERT INTO source (id, origin, title, raw_content, created_at, created_by,
-                                captured_at, content_hash, ingestion_state)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                captured_at, content_hash, ingestion_state, version, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     source.id.to_string(),
                     origin_json,
                     source.title,
                     source.raw_content,
-                    captured_at_str.clone(), // created_at and captured_at are the same for now
+                    created_at_str,
                     created_by_json,
                     captured_at_str,
                     source.content_hash,
                     state_str,
+                    source.version,
+                    updated_at_str,
                 ],
             )
             .map_err(|e| {
@@ -119,6 +129,7 @@ impl SourceRepo for SqliteSourceRepo<'_> {
 
 /// Pure mapping function: builds a Source from extracted fields.
 /// Separated for clarity and testability.
+#[allow(clippy::type_complexity)]
 fn build_source_from_fields(
     fields: (
         String,

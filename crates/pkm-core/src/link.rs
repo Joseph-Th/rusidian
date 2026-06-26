@@ -71,7 +71,7 @@ mod tests {
             to: ObjectRef::Note(NoteId::new()),
             link_type: LinkType::RelatedTo,
             created_by: Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             reviewed: ReviewState::Proposed,
             confidence: Some(0.85),
             version: 1,

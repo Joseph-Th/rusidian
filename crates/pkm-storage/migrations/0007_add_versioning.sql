@@ -4,29 +4,32 @@
 -- Adds version tracking to all entities and creates an object_history table
 -- for tracking changes, rollbacks, and sync operations.
 
--- Add version and updated_at to source table
+-- Add version to all tables
 ALTER TABLE source ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE source ADD COLUMN updated_at TEXT NOT NULL DEFAULT created_at;
-
--- Add version and updated_at to note table
 ALTER TABLE note ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE note ADD COLUMN updated_at TEXT NOT NULL DEFAULT created_at;
-
--- Add version and updated_at to block table
 ALTER TABLE block ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE block ADD COLUMN updated_at TEXT NOT NULL DEFAULT created_at;
-
--- Add version and updated_at to entity table
 ALTER TABLE entity ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE entity ADD COLUMN updated_at TEXT NOT NULL DEFAULT created_at;
-
--- Add version and updated_at to link table
 ALTER TABLE link ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE link ADD COLUMN updated_at TEXT NOT NULL DEFAULT created_at;
-
--- Add version and updated_at to view table
 ALTER TABLE view ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE view ADD COLUMN updated_at TEXT NOT NULL DEFAULT created_at;
+
+-- Add updated_at to all tables (initially set to created_at for existing rows)
+ALTER TABLE source ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2024-01-01T00:00:00Z';
+UPDATE source SET updated_at = created_at;
+
+ALTER TABLE note ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2024-01-01T00:00:00Z';
+UPDATE note SET updated_at = created_at;
+
+ALTER TABLE block ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2024-01-01T00:00:00Z';
+UPDATE block SET updated_at = created_at;
+
+ALTER TABLE entity ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2024-01-01T00:00:00Z';
+UPDATE entity SET updated_at = created_at;
+
+ALTER TABLE link ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2024-01-01T00:00:00Z';
+UPDATE link SET updated_at = created_at;
+
+ALTER TABLE view ADD COLUMN updated_at TEXT NOT NULL DEFAULT '2024-01-01T00:00:00Z';
+UPDATE view SET updated_at = created_at;
 
 -- object_history: tracks all changes to entities for rollback, sync, and audit.
 -- Records when each version was created, by whom, and what changed.

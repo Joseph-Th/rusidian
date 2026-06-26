@@ -53,8 +53,8 @@ fn open_is_idempotent() {
 
     // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    // There are now 5 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge, 0005_link_review_state.
-    assert_eq!(version1, "5");
+    // There are now 7 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge, 0005_link_review_state, 0006_add_project_field, 0007_add_versioning.
+    assert_eq!(version1, "7");
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn entity_create_and_get_round_trip() {
         name: "Alice".to_string(),
         aliases: vec!["Alice Smith".to_string(), "A.S.".to_string()],
         created_by: Actor::User,
-        created_at: now.clone(),
+        created_at: now,
         merged_into: None,
         version: 1,
         updated_at: now,
@@ -201,10 +201,10 @@ fn entity_merge_sets_merged_into() {
         name: "Alice".to_string(),
         aliases: vec!["Alice Smith".to_string()],
         created_by: Actor::User,
-        created_at: now.clone(),
+        created_at: now,
         merged_into: None,
         version: 1,
-        updated_at: now.clone(),
+        updated_at: now,
     };
 
     let loser = Entity {
@@ -213,7 +213,7 @@ fn entity_merge_sets_merged_into() {
         name: "Alice S".to_string(),
         aliases: vec!["A.S.".to_string()],
         created_by: Actor::User,
-        created_at: now.clone(),
+        created_at: now,
         merged_into: None,
         version: 1,
         updated_at: now,
@@ -329,10 +329,10 @@ fn s2_propose_apply_and_rollback_block_update() {
         title: "Test Note".to_string(),
         blocks: vec![block_id],
         metadata: BTreeMap::new(),
-        created_at: now.clone(),
+        created_at: now,
         created_by: Actor::User,
         version: 1,
-        updated_at: now.clone(),
+        updated_at: now,
     };
 
     note_repo.create(&note).expect("failed to create note");
@@ -344,7 +344,7 @@ fn s2_propose_apply_and_rollback_block_update() {
         content: original_content.clone(),
         order: 1.0,
         created_by: Actor::User,
-        created_at: now.clone(),
+        created_at: now,
         source_provenance_ref: None,
         version: 1,
         updated_at: now,

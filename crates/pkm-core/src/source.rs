@@ -60,11 +60,11 @@ mod tests {
             },
             title: Some("Example Article".to_string()),
             raw_content: "Some content".to_string(),
-            captured_at: now.clone(),
+            captured_at: now,
             content_hash: "abc123def456".to_string(),
             ingestion_state: IngestionState::Captured,
             created_by: Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };

@@ -82,7 +82,7 @@ mod tests {
             aliases: vec!["J. Doe".to_string()],
             merged_into: None,
             created_by: Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };
