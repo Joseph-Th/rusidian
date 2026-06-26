@@ -101,14 +101,13 @@ Do not start a later step while an earlier one is 🔨/🚫.
 #### C4f · ADR 0004: Entity merge semantics ✅
 - Created `docs/adr/0004-entity-merge-semantics.md`. Documents non-lossy merge design, survivor/loser pattern, link re-pointing, rollback mechanics, and alternatives considered. All tests pass.
 
-#### F0 · Typed view parameters + view model ⬜
-- **Depends on:** C-series.
-- **Files:** `pkm-core/src/view.rs` (+ a render boundary).
-- **Do:** Replace `params: Value` with typed params per `ViewKind`. Define a
-  `ViewModel`/render trait so every view goes through the shared model (no
-  one-off views — AGENTS.md red flag).
-- **Done when:** One view (recommend `ReadingQueue` or `ReviewQueue`) renders
-  from stored data through the view model, with tests.
+#### F0 · Typed view parameters + view model ✅
+- Replaced `params: Value` with typed params: `ReadingQueueParams`, `ReviewQueueParams`, and a `ViewParams` enum.
+- Created `ViewModel` trait with `DefaultViewModel` implementation.
+- `ReadingQueueParams` supports filtering by ingestion state and limit; renders sources sorted by captured_at.
+- `ReviewQueueParams` provides basic review queue rendering.
+- 6 tests verify: params serialization, view round-trips, filtering, limits, and full rendering pipeline.
+- All tests pass; ready for F1+ to extend with additional view types.
 
 #### A0 · Tauri desktop shell (`pkm-app`) ⬜
 - **Depends on:** S1 ✅, S2 ✅, E2.
@@ -120,9 +119,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (21 tasks)
+## Done (22 tasks)
 
-All foundation, vertical-slice, and entity merge work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f.
+All foundation, vertical-slice, entity merge, and view model work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0.
 
 ---
 
