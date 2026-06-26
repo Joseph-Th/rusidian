@@ -200,8 +200,7 @@ fn build_view_from_fields(
     })?;
 
     let kind = parse_view_kind(&kind_str);
-    let params: pkm_core::view::ViewParams =
-        serde_json::from_str(&params_json).map_err(crate::StorageError::from)?;
+    let params = parse_view_params(&kind_str, &params_json)?;
     let created_by = parse_actor(&created_by_json);
 
     let created_at = time::OffsetDateTime::parse(
@@ -238,6 +237,55 @@ fn build_view_from_fields(
     })
 }
 
+/// Deserialize ViewParams using the stored kind string as a discriminator.
+/// This avoids the `#[serde(untagged)]` ambiguity where all-optional param
+/// structs (ReadingQueueParams) would match any variant's JSON first.
+fn parse_view_params(kind_str: &str, params_json: &str) -> crate::Result<pkm_core::view::ViewParams> {
+    use pkm_core::view::*;
+    match kind_str {
+        "reading_queue" => serde_json::from_str::<ReadingQueueParams>(params_json)
+            .map(ViewParams::ReadingQueue)
+            .map_err(crate::StorageError::from),
+        "review_queue" => serde_json::from_str::<ReviewQueueParams>(params_json)
+            .map(ViewParams::ReviewQueue)
+            .map_err(crate::StorageError::from),
+        "timeline" => serde_json::from_str::<TimelineParams>(params_json)
+            .map(ViewParams::Timeline)
+            .map_err(crate::StorageError::from),
+        "dossier" => serde_json::from_str::<DossierParams>(params_json)
+            .map(ViewParams::Dossier)
+            .map_err(crate::StorageError::from),
+        "project_dashboard" => serde_json::from_str::<ProjectDashboardParams>(params_json)
+            .map(ViewParams::ProjectDashboard)
+            .map_err(crate::StorageError::from),
+        "source_map" => serde_json::from_str::<SourceMapParams>(params_json)
+            .map(ViewParams::SourceMap)
+            .map_err(crate::StorageError::from),
+        "decision_log" => serde_json::from_str::<DecisionLogParams>(params_json)
+            .map(ViewParams::DecisionLog)
+            .map_err(crate::StorageError::from),
+        "person_profile" => serde_json::from_str::<PersonProfileParams>(params_json)
+            .map(ViewParams::PersonProfile)
+            .map_err(crate::StorageError::from),
+        "entity_page" => serde_json::from_str::<EntityPageParams>(params_json)
+            .map(ViewParams::EntityPage)
+            .map_err(crate::StorageError::from),
+        "briefing_page" => serde_json::from_str::<BriefingPageParams>(params_json)
+            .map(ViewParams::BriefingPage)
+            .map_err(crate::StorageError::from),
+        "open_questions" => serde_json::from_str::<OpenQuestionsParams>(params_json)
+            .map(ViewParams::OpenQuestions)
+            .map_err(crate::StorageError::from),
+        "action_list" => serde_json::from_str::<ActionListParams>(params_json)
+            .map(ViewParams::ActionList)
+            .map_err(crate::StorageError::from),
+        "graph_view" => serde_json::from_str::<GraphViewParams>(params_json)
+            .map(ViewParams::GraphView)
+            .map_err(crate::StorageError::from),
+        _ => Ok(ViewParams::Stub(StubViewParams)),
+    }
+}
+
 /// Parse a view kind string (from DB) into a ViewKind.
 fn parse_view_kind(s: &str) -> pkm_core::view::ViewKind {
     use pkm_core::view::ViewKind;
@@ -255,7 +303,12 @@ fn parse_view_kind(s: &str) -> pkm_core::view::ViewKind {
         "open_questions" => ViewKind::OpenQuestions,
         "action_list" => ViewKind::ActionList,
         "graph_view" => ViewKind::GraphView,
-        _ => ViewKind::ReadingQueue, // Fallback to safest default
+        other => {
+            // Unknown kind stored in DB — this indicates schema drift or corruption.
+            // Log and fall back rather than silently serving wrong data.
+            eprintln!("pkm-storage: unknown view kind {:?}, defaulting to ReadingQueue", other);
+            ViewKind::ReadingQueue
+        }
     }
 }
 
@@ -378,6 +431,43 @@ mod tests {
 
         let list = repo.list(Some(5)).expect("Failed to list views");
         assert_eq!(list.len(), 5);
+    }
+
+    #[test]
+    fn graph_view_params_round_trip_through_db() {
+        let conn = test_db();
+        let repo = SqliteViewRepo { conn: &conn };
+
+        let now = pkm_core::Timestamp::now_utc();
+        let positions = vec![NodePosition { id: "n1".to_string(), x: 10.0, y: 20.0 }];
+        let params = GraphViewParams::default()
+            .with_layout(GraphLayoutType::Circular)
+            .with_positions(positions)
+            .with_edges(false);
+        let view = View {
+            id: ViewId::new(),
+            kind: ViewKind::GraphView,
+            title: "My Graph".to_string(),
+            params: ViewParams::GraphView(params.clone()),
+            created_by: pkm_core::Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        let view_id = view.id;
+        repo.create(&view).expect("Failed to create graph view");
+
+        let retrieved = repo.get(view_id).expect("Failed to get graph view").unwrap();
+        assert_eq!(retrieved.kind, ViewKind::GraphView);
+        match retrieved.params {
+            ViewParams::GraphView(p) => {
+                assert_eq!(p.layout_type, GraphLayoutType::Circular);
+                assert_eq!(p.node_positions.len(), 1);
+                assert!(!p.show_edges);
+            }
+            other => panic!("Expected GraphView params, got {:?}", other),
+        }
     }
 
     #[test]

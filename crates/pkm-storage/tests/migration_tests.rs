@@ -53,8 +53,8 @@ fn open_is_idempotent() {
 
     // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    // There are now 8 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge, 0005_link_review_state, 0006_add_project_field, 0007_add_versioning, 0008_add_note_metadata.
-    assert_eq!(version1, "8");
+    // There are now 9 migrations through 0009_fix_fts5_indexes.
+    assert_eq!(version1, "9");
 }
 
 #[test]
@@ -290,6 +290,52 @@ fn s1_source_round_trip_with_json_export() {
     assert_eq!(from_json.content_hash, source.content_hash);
     assert_eq!(from_json.ingestion_state, source.ingestion_state);
     assert_eq!(from_json.created_by, source.created_by);
+}
+
+/// FTS5 search round-trip: create a note, then find it by keyword.
+/// This test would have failed with the old content_rowid=id FTS5 schema.
+#[test]
+fn fts5_note_search_finds_created_notes() {
+    use pkm_core::note::Note;
+    use pkm_core::ports::{NoteRepo, Retriever};
+    use pkm_core::{Actor, Timestamp};
+    use pkm_search::parse_query;
+    use pkm_storage::{open, SqliteNoteRepo, SqliteRetriever};
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("fts_test.db");
+
+    let conn = open(&db_path).expect("failed to open db");
+
+    let note_repo = SqliteNoteRepo { conn: &conn };
+    let now = Timestamp::now_utc();
+    let note = Note {
+        id: pkm_core::id::NoteId::new(),
+        title: "Rusidian knowledge workbench".to_string(),
+        blocks: vec![],
+        metadata: BTreeMap::new(),
+        created_by: Actor::User,
+        created_at: now,
+        version: 1,
+        updated_at: now,
+    };
+    note_repo.create(&note).expect("failed to create note");
+
+    let retriever = SqliteRetriever::new(Arc::new(Mutex::new(
+        open(&db_path).expect("second conn"),
+    )));
+
+    let query = parse_query(pkm_core::ports::SearchMode::FuzzyText, "rusidian");
+    let hits = retriever.search(&query).expect("search failed");
+
+    assert!(
+        !hits.is_empty(),
+        "FTS5 search should find the created note"
+    );
+    let found_note = hits.iter().any(|h| matches!(h.object, pkm_core::id::ObjectRef::Note(id) if id == note.id));
+    assert!(found_note, "search should find the specific note we created");
 }
 
 /// S2: Vertical slice: propose → diff → accept → rollback.

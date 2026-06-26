@@ -148,6 +148,7 @@ pub async fn create_view(
         "briefing_page" => ViewKind::BriefingPage,
         "open_questions" => ViewKind::OpenQuestions,
         "action_list" => ViewKind::ActionList,
+        "graph_view" => ViewKind::GraphView,
         _ => return Err(format!("Unknown view kind: {}", kind)),
     };
 

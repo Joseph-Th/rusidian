@@ -901,6 +901,7 @@ mod tests {
             ViewKind::ReviewQueue,
             ViewKind::OpenQuestions,
             ViewKind::ActionList,
+            ViewKind::GraphView,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: ViewKind = serde_json::from_str(&json).unwrap();

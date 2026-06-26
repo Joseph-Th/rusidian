@@ -35,16 +35,16 @@ impl pkm_core::ports::Retriever for SqliteRetriever {
 
         match query.mode {
             SearchMode::ExactText => {
-                results.extend(search_notes_exact(&conn, query)?);
-                results.extend(search_blocks_exact(&conn, query)?);
-                results.extend(search_sources_exact(&conn, query)?);
-                results.extend(search_entities_exact(&conn, query)?);
+                results.extend(search_notes_fts(&conn, &query.text, false)?);
+                results.extend(search_blocks_fts(&conn, &query.text, false)?);
+                results.extend(search_sources_fts(&conn, &query.text, false)?);
+                results.extend(search_entities_fts(&conn, &query.text, false)?);
             }
             SearchMode::FuzzyText => {
-                results.extend(search_notes_fuzzy(&conn, query)?);
-                results.extend(search_blocks_fuzzy(&conn, query)?);
-                results.extend(search_sources_fuzzy(&conn, query)?);
-                results.extend(search_entities_fuzzy(&conn, query)?);
+                results.extend(search_notes_fts(&conn, &query.text, true)?);
+                results.extend(search_blocks_fts(&conn, &query.text, true)?);
+                results.extend(search_sources_fts(&conn, &query.text, true)?);
+                results.extend(search_entities_fts(&conn, &query.text, true)?);
             }
             SearchMode::Semantic => {
                 return Err(pkm_core::CoreError::Invariant(
@@ -55,10 +55,10 @@ impl pkm_core::ports::Retriever for SqliteRetriever {
                 ));
             }
             SearchMode::Entity => {
-                results.extend(search_entities_fuzzy(&conn, query)?);
+                results.extend(search_entities_fts(&conn, &query.text, true)?);
             }
             SearchMode::Source => {
-                results.extend(search_sources_fuzzy(&conn, query)?);
+                results.extend(search_sources_fts(&conn, &query.text, true)?);
             }
             SearchMode::LinkTraversal => {
                 results.extend(search_link_traversal(&conn, query)?);
@@ -322,6 +322,195 @@ fn create_hit_for_object(
     }
 }
 
+/// Build a safe FTS5 MATCH expression. Double-quotes the token to prevent
+/// special characters (-, ", (, ), :, ^) from being interpreted as operators.
+/// Fuzzy mode appends '*' outside the quotes for prefix matching.
+fn fts_expr(text: &str, fuzzy: bool) -> String {
+    // Escape inner double-quotes per FTS5 spec (double them).
+    let escaped = text.replace('"', "\"\"");
+    if fuzzy {
+        format!("\"{}\"*", escaped)
+    } else {
+        format!("\"{}\"", escaped)
+    }
+}
+
+/// Search notes via FTS5. Returns hits with note-level metadata.
+fn search_notes_fts(
+    conn: &Connection,
+    text: &str,
+    fuzzy: bool,
+) -> pkm_core::Result<Vec<SearchHit>> {
+    let expr = fts_expr(text, fuzzy);
+    let mut stmt = conn
+        .prepare("SELECT id FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let note_ids: Vec<String> = stmt
+        .query_map([&expr], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for note_id in note_ids {
+        let mut stmt = conn
+            .prepare("SELECT title, created_at, project FROM note WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok((title, created_at, project)) = stmt.query_row([&note_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        }) {
+            let snippet = extract_snippet(&title, text, 150);
+            hits.push(SearchHit {
+                object: pkm_core::id::ObjectRef::Note(pkm_core::id::NoteId(
+                    uuid::Uuid::parse_str(&note_id)
+                        .map_err(|_| pkm_core::CoreError::Invariant("invalid note uuid in fts".into()))?,
+                )),
+                status: pkm_core::provenance::ContentStatus::UserAuthored,
+                score: None,
+                snippet,
+                created_at: Some(created_at),
+                project,
+            });
+        }
+    }
+    Ok(hits)
+}
+
+/// Search blocks via FTS5.
+fn search_blocks_fts(
+    conn: &Connection,
+    text: &str,
+    fuzzy: bool,
+) -> pkm_core::Result<Vec<SearchHit>> {
+    let expr = fts_expr(text, fuzzy);
+    let mut stmt = conn
+        .prepare("SELECT id FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let block_ids: Vec<String> = stmt
+        .query_map([&expr], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for block_id in block_ids {
+        let mut stmt = conn
+            .prepare("SELECT content, created_at FROM block WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok((content, created_at)) =
+            stmt.query_row([&block_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        {
+            let snippet = extract_snippet(&content, text, 150);
+            hits.push(SearchHit {
+                object: pkm_core::id::ObjectRef::Block(pkm_core::id::BlockId(
+                    uuid::Uuid::parse_str(&block_id)
+                        .map_err(|_| pkm_core::CoreError::Invariant("invalid block uuid in fts".into()))?,
+                )),
+                status: pkm_core::provenance::ContentStatus::UserAuthored,
+                score: None,
+                snippet,
+                created_at: Some(created_at),
+                project: None,
+            });
+        }
+    }
+    Ok(hits)
+}
+
+/// Search sources via FTS5.
+fn search_sources_fts(
+    conn: &Connection,
+    text: &str,
+    fuzzy: bool,
+) -> pkm_core::Result<Vec<SearchHit>> {
+    let expr = fts_expr(text, fuzzy);
+    let mut stmt = conn
+        .prepare("SELECT id FROM source_fts WHERE source_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let source_ids: Vec<String> = stmt
+        .query_map([&expr], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for source_id in source_ids {
+        let mut stmt = conn
+            .prepare("SELECT title, created_at FROM source WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok((title, created_at)) =
+            stmt.query_row([&source_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        {
+            let snippet = extract_snippet(&title, text, 150);
+            hits.push(SearchHit {
+                object: pkm_core::id::ObjectRef::Source(pkm_core::id::SourceId(
+                    uuid::Uuid::parse_str(&source_id)
+                        .map_err(|_| pkm_core::CoreError::Invariant("invalid source uuid in fts".into()))?,
+                )),
+                status: pkm_core::provenance::ContentStatus::RawSource,
+                score: None,
+                snippet,
+                created_at: Some(created_at),
+                project: None,
+            });
+        }
+    }
+    Ok(hits)
+}
+
+/// Search entities via FTS5.
+fn search_entities_fts(
+    conn: &Connection,
+    text: &str,
+    fuzzy: bool,
+) -> pkm_core::Result<Vec<SearchHit>> {
+    let expr = fts_expr(text, fuzzy);
+    let mut stmt = conn
+        .prepare("SELECT id FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let entity_ids: Vec<String> = stmt
+        .query_map([&expr], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for entity_id in entity_ids {
+        let mut stmt = conn
+            .prepare("SELECT name, created_at FROM entity WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok((name, created_at)) =
+            stmt.query_row([&entity_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        {
+            let snippet = extract_snippet(&name, text, 150);
+            hits.push(SearchHit {
+                object: pkm_core::id::ObjectRef::Entity(pkm_core::id::EntityId(
+                    uuid::Uuid::parse_str(&entity_id)
+                        .map_err(|_| pkm_core::CoreError::Invariant("invalid entity uuid in fts".into()))?,
+                )),
+                status: pkm_core::provenance::ContentStatus::ExtractedMetadata,
+                score: None,
+                snippet,
+                created_at: Some(created_at),
+                project: None,
+            });
+        }
+    }
+    Ok(hits)
+}
+
 /// Extract snippet around first occurrence of search term.
 /// Returns ~50 chars before + match + ~50 chars after, centered on the match.
 fn extract_snippet(text: &str, search_term: &str, max_len: usize) -> Option<String> {
@@ -336,331 +525,18 @@ fn extract_snippet(text: &str, search_term: &str, max_len: usize) -> Option<Stri
         if snippet.len() <= max_len {
             Some(format!("...{}...", snippet.trim()))
         } else {
-            Some(format!("...{}...", &snippet[..max_len].trim()))
+            // Find the largest byte index <= max_len that falls on a char boundary.
+            let safe_end = snippet
+                .char_indices()
+                .map(|(i, c)| i + c.len_utf8())
+                .take_while(|&end| end <= max_len)
+                .last()
+                .unwrap_or(0);
+            Some(format!("...{}...", snippet[..safe_end].trim()))
         }
     } else {
         None
     }
-}
-
-/// Search notes with exact phrase matching.
-fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let note_ids: Vec<String> = stmt
-        .query_map([&query.text], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-
-    // For each note, fetch title, created_at, and project, create snippet
-    for note_id in note_ids {
-        let mut title_stmt = conn
-            .prepare("SELECT title, created_at, project FROM note WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-        if let Ok((title, created_at, project)) = title_stmt.query_row([&note_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        }) {
-            let snippet = extract_snippet(&title, &query.text, 150);
-
-            hits.push(SearchHit {
-                object: ObjectRef::Note(pkm_core::id::NoteId(
-                    uuid::Uuid::parse_str(&note_id).unwrap(),
-                )),
-                status: ContentStatus::UserAuthored,
-                score: None,
-                snippet,
-                created_at: Some(created_at),
-                project,
-            });
-        }
-    }
-
-    Ok(hits)
-}
-
-/// Search blocks with exact phrase matching.
-fn search_blocks_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let block_ids: Vec<String> = stmt
-        .query_map([&query.text], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-
-    for block_id in block_ids {
-        let mut content_stmt = conn
-            .prepare("SELECT content, created_at FROM block WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-        if let Ok((content, created_at)) = content_stmt.query_row([&block_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }) {
-            let snippet = extract_snippet(&content, &query.text, 150);
-
-            hits.push(SearchHit {
-                object: ObjectRef::Block(pkm_core::id::BlockId(
-                    uuid::Uuid::parse_str(&block_id).unwrap(),
-                )),
-                status: ContentStatus::UserAuthored,
-                score: None,
-                snippet,
-                created_at: Some(created_at),
-                project: None,
-            });
-        }
-    }
-
-    Ok(hits)
-}
-
-/// Search sources with exact phrase matching.
-fn search_sources_exact(
-    conn: &Connection,
-    query: &SearchQuery,
-) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM source_fts WHERE source_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let source_ids: Vec<String> = stmt
-        .query_map([&query.text], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-
-    for source_id in source_ids {
-        let mut title_stmt = conn
-            .prepare("SELECT title, created_at FROM source WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-        if let Ok((title, created_at)) = title_stmt.query_row([&source_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }) {
-            let snippet = extract_snippet(&title, &query.text, 150);
-
-            hits.push(SearchHit {
-                object: ObjectRef::Source(pkm_core::id::SourceId(
-                    uuid::Uuid::parse_str(&source_id).unwrap(),
-                )),
-                status: ContentStatus::RawSource,
-                score: None,
-                snippet,
-                created_at: Some(created_at),
-                project: None,
-            });
-        }
-    }
-
-    Ok(hits)
-}
-
-/// Search entities with exact phrase matching.
-fn search_entities_exact(
-    conn: &Connection,
-    query: &SearchQuery,
-) -> pkm_core::Result<Vec<SearchHit>> {
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let entity_ids: Vec<String> = stmt
-        .query_map([&query.text], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-
-    for entity_id in entity_ids {
-        let mut name_stmt = conn
-            .prepare("SELECT name, created_at FROM entity WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-        if let Ok((name, created_at)) = name_stmt.query_row([&entity_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }) {
-            let snippet = extract_snippet(&name, &query.text, 150);
-
-            hits.push(SearchHit {
-                object: ObjectRef::Entity(pkm_core::id::EntityId(
-                    uuid::Uuid::parse_str(&entity_id).unwrap(),
-                )),
-                status: ContentStatus::ExtractedMetadata,
-                score: None,
-                snippet,
-                created_at: Some(created_at),
-                project: None,
-            });
-        }
-    }
-
-    Ok(hits)
-}
-
-/// Search notes with fuzzy matching. Tries partial token matching with prefix wildcards.
-fn search_notes_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    // FTS5 fuzzy: search for any token starting with the query text using * wildcard
-    let fuzzy_query = format!("{}*", query.text);
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let note_ids: Vec<String> = stmt
-        .query_map([&fuzzy_query], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-    for note_id in note_ids {
-        let mut stmt = conn
-            .prepare("SELECT created_at, project FROM note WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        let (created_at, project): (Option<String>, Option<String>) = stmt
-            .query_row([&note_id], |row| Ok((row.get(0).ok(), row.get(1).ok())))
-            .unwrap_or_default();
-
-        hits.push(SearchHit {
-            object: ObjectRef::Note(pkm_core::id::NoteId(
-                uuid::Uuid::parse_str(&note_id).unwrap(),
-            )),
-            status: ContentStatus::UserAuthored,
-            score: None,
-            snippet: None,
-            created_at,
-            project,
-        });
-    }
-
-    Ok(hits)
-}
-
-/// Search blocks with fuzzy matching.
-fn search_blocks_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    let fuzzy_query = format!("{}*", query.text);
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let block_ids: Vec<String> = stmt
-        .query_map([&fuzzy_query], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-    for block_id in block_ids {
-        let mut stmt = conn
-            .prepare("SELECT created_at FROM block WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        let created_at: Option<String> = stmt.query_row([&block_id], |row| row.get(0)).ok();
-
-        hits.push(SearchHit {
-            object: ObjectRef::Block(pkm_core::id::BlockId(
-                uuid::Uuid::parse_str(&block_id).unwrap(),
-            )),
-            status: ContentStatus::UserAuthored,
-            score: None,
-            snippet: None,
-            created_at,
-            project: None,
-        });
-    }
-
-    Ok(hits)
-}
-
-/// Search sources with fuzzy matching.
-fn search_sources_fuzzy(
-    conn: &Connection,
-    query: &SearchQuery,
-) -> pkm_core::Result<Vec<SearchHit>> {
-    let fuzzy_query = format!("{}*", query.text);
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM source_fts WHERE source_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let source_ids: Vec<String> = stmt
-        .query_map([&fuzzy_query], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-    for source_id in source_ids {
-        let mut stmt = conn
-            .prepare("SELECT created_at FROM source WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        let created_at: Option<String> = stmt.query_row([&source_id], |row| row.get(0)).ok();
-
-        hits.push(SearchHit {
-            object: ObjectRef::Source(pkm_core::id::SourceId(
-                uuid::Uuid::parse_str(&source_id).unwrap(),
-            )),
-            status: ContentStatus::RawSource,
-            score: None,
-            snippet: None,
-            created_at,
-            project: None,
-        });
-    }
-
-    Ok(hits)
-}
-
-/// Search entities with fuzzy matching.
-fn search_entities_fuzzy(
-    conn: &Connection,
-    query: &SearchQuery,
-) -> pkm_core::Result<Vec<SearchHit>> {
-    let fuzzy_query = format!("{}*", query.text);
-    let mut stmt = conn
-        .prepare("SELECT rowid FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100")
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let entity_ids: Vec<String> = stmt
-        .query_map([&fuzzy_query], |row| row.get(0))
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-    let mut hits = Vec::new();
-    for entity_id in entity_ids {
-        let mut stmt = conn
-            .prepare("SELECT created_at FROM entity WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        let created_at: Option<String> = stmt.query_row([&entity_id], |row| row.get(0)).ok();
-
-        hits.push(SearchHit {
-            object: ObjectRef::Entity(pkm_core::id::EntityId(
-                uuid::Uuid::parse_str(&entity_id).unwrap(),
-            )),
-            status: ContentStatus::ExtractedMetadata,
-            score: None,
-            snippet: None,
-            created_at,
-            project: None,
-        });
-    }
-
-    Ok(hits)
 }
 
 /// Apply filters to search results. Removes hits that don't match the filters.
@@ -714,6 +590,21 @@ fn apply_filters(results: &mut Vec<SearchHit>, query: &SearchQuery) {
             } else {
                 false
             }
+        });
+    }
+
+    if let Some(ref status_filter) = filters.content_status {
+        results.retain(|hit| {
+            let status_str = match hit.status {
+                ContentStatus::UserAuthored => "user_authored",
+                ContentStatus::RawSource => "raw_source",
+                ContentStatus::UnreviewedSuggestion => "unreviewed_suggestion",
+                ContentStatus::Reviewed => "reviewed",
+                ContentStatus::ExtractedMetadata => "extracted_metadata",
+                ContentStatus::AiSummary => "ai_summary",
+                ContentStatus::InferredLink => "inferred_link",
+            };
+            status_str == status_filter.as_str()
         });
     }
 }

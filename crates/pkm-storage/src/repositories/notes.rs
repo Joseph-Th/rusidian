@@ -242,6 +242,10 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     }
 
     fn delete(&self, id: NoteId) -> Result<()> {
+        // Delete child blocks first (no ON DELETE CASCADE in schema).
+        self.conn
+            .execute("DELETE FROM block WHERE note_id = ?1", params![id.to_string()])
+            .map_err(crate::StorageError::from)?;
         self.conn
             .execute("DELETE FROM note WHERE id = ?1", params![id.to_string()])
             .map_err(crate::StorageError::from)?;
@@ -254,30 +258,33 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         block_id: BlockId,
         new_content: BlockContent,
     ) -> Result<Block> {
-        // Serialize the new content as JSON
         let content_json = serde_json::to_string(&new_content)?;
+        let now = pkm_core::Timestamp::now_utc();
+        let updated_at_str = now
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
 
-        // Update the block
         self.conn
             .execute(
-                "UPDATE block SET content = ?1 WHERE id = ?2 AND note_id = ?3",
-                params![content_json, block_id.to_string(), note_id.to_string()],
+                "UPDATE block SET content = ?1, version = version + 1, updated_at = ?2 WHERE id = ?3 AND note_id = ?4",
+                params![content_json, updated_at_str, block_id.to_string(), note_id.to_string()],
             )
             .map_err(crate::StorageError::from)?;
 
-        // Retrieve the updated block to return it
+        // Retrieve the updated block to return current state.
         let mut stmt = self
             .conn
-            .prepare("SELECT \"order\", created_at, created_by FROM block WHERE id = ?1")
+            .prepare("SELECT \"order\", created_at, created_by, version FROM block WHERE id = ?1")
             .map_err(crate::StorageError::from)?;
 
-        let (order, created_at_str, created_by_json) = stmt
+        let (order, created_at_str, created_by_json, version) = stmt
             .query_row(params![block_id.to_string()], |row| {
-                let order: f32 = row.get(0)?;
-                let created_at_str: String = row.get(1)?;
-                let created_by_json: String = row.get(2)?;
-
-                Ok((order, created_at_str, created_by_json))
+                Ok((
+                    row.get::<_, f32>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
             })
             .map_err(crate::StorageError::from)?;
 
@@ -296,8 +303,8 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             created_by,
             created_at,
             source_provenance_ref: None,
-            version: 1,
-            updated_at: created_at,
+            version: u32::try_from(version).unwrap_or(1),
+            updated_at: now,
         })
     }
 }

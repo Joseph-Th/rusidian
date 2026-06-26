@@ -41,6 +41,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0008_add_note_metadata",
         include_str!("../migrations/0008_add_note_metadata.sql"),
     ),
+    (
+        "0009_fix_fts5_indexes",
+        include_str!("../migrations/0009_fix_fts5_indexes.sql"),
+    ),
 ];
 
 /// Apply all pending migrations inside a transaction. Idempotent: safe to call

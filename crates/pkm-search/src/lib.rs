@@ -98,7 +98,7 @@ fn apply_filter(filters: &mut SearchFilters, key: &str, value: &str) {
             filters.object_type = Some(value.to_lowercase());
         }
         "status" | "content_status" => {
-            filters.object_type = Some(value.to_lowercase());
+            filters.content_status = Some(value.to_lowercase());
         }
         "reviewed" | "review_state" | "review" => {
             if let Ok(state) = parse_review_state(value) {

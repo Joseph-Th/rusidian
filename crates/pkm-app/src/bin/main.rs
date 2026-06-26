@@ -7,6 +7,7 @@
 )]
 
 use pkm_app::{commands, AppService};
+use pkm_core::view::ViewParams;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tauri::menu::Menu;
@@ -77,6 +78,53 @@ async fn get_graph_view_data(
     commands::get_graph_view_data(view_id, service).await
 }
 
+#[tauri::command]
+async fn create_view(
+    kind: String,
+    title: String,
+    params: ViewParams,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::CreateViewResponse, String> {
+    let service = state.inner();
+    commands::create_view(kind, title, params, service).await
+}
+
+#[tauri::command]
+async fn list_views(
+    limit: Option<usize>,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<Vec<commands::ViewInfo>, String> {
+    let service = state.inner();
+    commands::list_views(limit, service).await
+}
+
+#[tauri::command]
+async fn get_view(
+    view_id: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<Option<commands::ViewInfo>, String> {
+    let service = state.inner();
+    commands::get_view(view_id, service).await
+}
+
+#[tauri::command]
+async fn render_view(
+    view_id: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::RenderViewResponse, String> {
+    let service = state.inner();
+    commands::render_view(view_id, service).await
+}
+
+#[tauri::command]
+async fn create_graph_view(
+    title: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::CreateViewResponse, String> {
+    let service = state.inner();
+    commands::create_graph_view(title, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -109,7 +157,12 @@ fn main() {
             update_note,
             delete_note,
             search_notes,
-            get_graph_view_data
+            get_graph_view_data,
+            create_view,
+            list_views,
+            get_view,
+            render_view,
+            create_graph_view
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
