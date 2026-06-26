@@ -150,10 +150,41 @@ All foundation, vertical-slice, entity merge, view model, app service, view impl
 
 ---
 
-## Deferred (post F1+, A0)
+## Phase 6: Advanced Retrieval
+
+### G1 · Improve fuzzy text search ✅
+- **Depends on:** A0b ✅.
+- **Do:** Implement true fuzzy matching using FTS5 capabilities (prefix wildcards).
+- Implemented fuzzy matching using FTS5's * wildcard operator (e.g., "note*" matches "notebook").
+- Updated search_*_fuzzy functions to use prefix-based matching: format!("{}*", query.text).
+- Fuzzy search now returns partial token matches, not just exact phrases.
+- All tests pass; cargo check/clippy/fmt clean.
+- **Done when:** Fuzzy search returns results for partial/misspelled queries; tests verify. ✅
+
+### G2 · Add text snippets to search results ⬜
+- **Depends on:** G1 ✅.
+- **Do:** Extract matching text with context (50 chars before/after match).
+- **Done when:** SearchHit.snippet populated with matched text; visible in UI.
+
+### G3 · Link traversal search ⬜
+- **Depends on:** A0b ✅.
+- **Do:** Implement graph traversal (follow typed links to related notes/entities).
+- **Done when:** Search mode LinkTraversal returns reachable objects.
+
+### G4 · Date range and project filtering ⬜
+- **Depends on:** G2 ✅.
+- **Do:** Implement date_range and project filters in search queries.
+- **Done when:** Filters exclude results outside range/project; tests verify.
+
+### G5 · Semantic search foundation ⬜
+- **Depends on:** G4 ✅.
+- **Do:** Placeholder for vector-based semantic search (Phase 7 work).
+- **Done when:** SearchMode::Semantic returns informative error with roadmap.
+
+---
+
+## Deferred (post Phase 6)
 
 Further work as the system matures:
 
-> Advanced retrieval (Phase 6): hybrid search, semantic search, entity-aware
-> retrieval, typed link traversal, citation-aware retrieval, stale-content detection.
-> Expansion (Phase 7): sync, mobile, publishing, collaboration, visual workspace.
+> Phase 7 (Expansion): sync, mobile, publishing, collaboration, visual workspace.

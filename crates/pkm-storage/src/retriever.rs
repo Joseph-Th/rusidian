@@ -180,30 +180,115 @@ fn search_entities_exact(
     Ok(hits)
 }
 
-/// Search notes with fuzzy matching (FTS5 default).
+/// Search notes with fuzzy matching. Tries partial token matching with prefix wildcards.
 fn search_notes_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    search_notes_exact(conn, query)
+    // FTS5 fuzzy: search for any token starting with the query text using * wildcard
+    let fuzzy_query = format!("{}*", query.text);
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&fuzzy_query], |row| {
+            let note_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Note(pkm_core::id::NoteId(
+                    uuid::Uuid::parse_str(&note_id).unwrap(),
+                )),
+                status: ContentStatus::UserAuthored,
+                score: None,
+                snippet: None,
+            })
+        })
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    Ok(hits)
 }
 
-/// Search blocks with fuzzy matching (FTS5 default).
+/// Search blocks with fuzzy matching.
 fn search_blocks_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-    search_blocks_exact(conn, query)
+    let fuzzy_query = format!("{}*", query.text);
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&fuzzy_query], |row| {
+            let block_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Block(pkm_core::id::BlockId(
+                    uuid::Uuid::parse_str(&block_id).unwrap(),
+                )),
+                status: ContentStatus::UserAuthored,
+                score: None,
+                snippet: None,
+            })
+        })
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    Ok(hits)
 }
 
-/// Search sources with fuzzy matching (FTS5 default).
+/// Search sources with fuzzy matching.
 fn search_sources_fuzzy(
     conn: &Connection,
     query: &SearchQuery,
 ) -> pkm_core::Result<Vec<SearchHit>> {
-    search_sources_exact(conn, query)
+    let fuzzy_query = format!("{}*", query.text);
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM source_fts WHERE source_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&fuzzy_query], |row| {
+            let source_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Source(pkm_core::id::SourceId(
+                    uuid::Uuid::parse_str(&source_id).unwrap(),
+                )),
+                status: ContentStatus::RawSource,
+                score: None,
+                snippet: None,
+            })
+        })
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    Ok(hits)
 }
 
-/// Search entities with fuzzy matching (FTS5 default).
+/// Search entities with fuzzy matching.
 fn search_entities_fuzzy(
     conn: &Connection,
     query: &SearchQuery,
 ) -> pkm_core::Result<Vec<SearchHit>> {
-    search_entities_exact(conn, query)
+    let fuzzy_query = format!("{}*", query.text);
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let hits: Vec<SearchHit> = stmt
+        .query_map([&fuzzy_query], |row| {
+            let entity_id: String = row.get(0)?;
+            Ok(SearchHit {
+                object: ObjectRef::Entity(pkm_core::id::EntityId(
+                    uuid::Uuid::parse_str(&entity_id).unwrap(),
+                )),
+                status: ContentStatus::ExtractedMetadata,
+                score: None,
+                snippet: None,
+            })
+        })
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    Ok(hits)
 }
 
 /// Apply filters to search results. Removes hits that don't match the filters.
