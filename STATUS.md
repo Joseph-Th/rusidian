@@ -103,7 +103,7 @@ Phase 7 tasks — expansion beyond the core system:
 ### Phase 7: Expansion
 
 1. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
-   transport contract. Depends on: none (🔨).
+   transport contract. Depends on: none (✅).
    
    Subtasks:
    - H3a: Design conflict detection rules (version/timestamp based) (✅)
