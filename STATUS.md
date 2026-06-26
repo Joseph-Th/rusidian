@@ -125,7 +125,7 @@ Phase 7 tasks — expansion beyond the core system:
    
    Subtasks:
    - H5a: Graph data model for spatial layout (✅)
-   - H5b: Canvas rendering with position persistence (⬜)
+   - H5b: Canvas rendering with position persistence (✅)
    - H5c: Interactive node dragging (⬜)
    - H5d: Link visualization on canvas (⬜)
    
@@ -133,6 +133,12 @@ Phase 7 tasks — expansion beyond the core system:
    enum (ForceDirected, Hierarchical, Circular, Custom). NodePosition struct for
    storing (x,y) coordinates. GraphViewParams with layout configuration. Integrated
    into view rendering pipeline. 3 new tests added, all passing (108 total).
+   
+   Notes (H5b): Added get_graph_view_data command returning nodes with (x,y)
+   positions. Circular layout auto-generated for graphs without saved positions.
+   Canvas element renders nodes as circles with labels, grid background, and
+   metadata. Mobile-responsive: 600px (desktop), 400px (tablets), 300px (phones).
+   All 122 tests passing.
 
 Further: mobile native editor, public publishing, collaboration, plugin API.
 
