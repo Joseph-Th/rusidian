@@ -98,10 +98,10 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Current
 
-#### A0b · Tauri desktop shell (`pkm-app` binary) ⬜
+#### A0b · Tauri desktop shell (`pkm-app` binary) ✅
 - **Depends on:** A0a ✅, B2 ✅.
 - **Do:** Break down into subtasks A0b-i, A0b-ii, A0b-iii, A0b-iv (see below).
-- **Done when:** All subtasks complete.
+- **Done when:** All subtasks complete. ✅
 
 #### A0b-i · ADR 0005: UI shell architecture choice ✅
 - Created `docs/adr/0005-ui-shell-choice.md`. Documents decision to use Tauri as UI shell.
@@ -131,16 +131,22 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - cargo check, clippy -D warnings, and all tests pass.
 - **Done when:** Tauri app binary can invoke create_note and list_notes via RPC. ✅
 
-#### A0b-iv · Window, menu, data dir setup ⬜
+#### A0b-iv · Window, menu, data dir setup ✅
 - **Depends on:** A0b-iii ✅.
 - **Do:** Set up Tauri window, menu bar, persistent data directory.
-- **Done when:** App launches, opens db, shows UI with basic controls.
+- Configured 1200x800 window in tauri.conf.json.
+- Added empty menu bar to application (via tauri::menu::Menu).
+- Data directory at ~/.pkm (auto-created if missing).
+- Database file at ~/.pkm/pkm.db (auto-opened on startup).
+- App launches with UI showing create note form and list functionality.
+- All tests pass; cargo clippy -D warnings and fmt clean.
+- **Done when:** App launches, opens db, shows UI with basic controls. ✅
 
 ---
 
-## Done (35 tasks)
+## Done (36 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, and view implementations complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii.
+All foundation, vertical-slice, entity merge, view model, app service, view implementations, and UI shell complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv.
 
 ---
 

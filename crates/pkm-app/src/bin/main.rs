@@ -8,6 +8,7 @@
 
 use pkm_app::{commands, AppService};
 use std::sync::{Arc, Mutex};
+use tauri::menu::Menu;
 
 #[tauri::command]
 async fn create_note(
@@ -50,6 +51,7 @@ fn main() {
     ));
 
     tauri::Builder::default()
+        .menu(Menu::new)
         .manage(service)
         .invoke_handler(tauri::generate_handler![create_note, list_notes])
         .build(tauri::generate_context!())
