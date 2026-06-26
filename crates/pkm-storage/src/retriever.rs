@@ -25,6 +25,10 @@ impl SqliteRetriever {
 
 impl pkm_core::ports::Retriever for SqliteRetriever {
     fn search(&self, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
+        if query.text.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
         let mut results = Vec::new();
         let conn = self
             .conn
@@ -353,12 +357,11 @@ fn search_notes_fts(
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
     let mut hits = Vec::new();
+    let mut fetch_stmt = conn
+        .prepare("SELECT title, created_at, project FROM note WHERE id = ?")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
     for note_id in note_ids {
-        let mut stmt = conn
-            .prepare("SELECT title, created_at, project FROM note WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
-        if let Ok((title, created_at, project)) = stmt.query_row([&note_id], |row| {
+        if let Ok((title, created_at, project)) = fetch_stmt.query_row([&note_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -400,13 +403,12 @@ fn search_blocks_fts(
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
     let mut hits = Vec::new();
+    let mut fetch_stmt = conn
+        .prepare("SELECT content, created_at FROM block WHERE id = ?")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
     for block_id in block_ids {
-        let mut stmt = conn
-            .prepare("SELECT content, created_at FROM block WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
         if let Ok((content, created_at)) =
-            stmt.query_row([&block_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            fetch_stmt.query_row([&block_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
         {
             let snippet = extract_snippet(&content, text, 150);
             hits.push(SearchHit {
@@ -443,13 +445,12 @@ fn search_sources_fts(
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
     let mut hits = Vec::new();
+    let mut fetch_stmt = conn
+        .prepare("SELECT title, created_at FROM source WHERE id = ?")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
     for source_id in source_ids {
-        let mut stmt = conn
-            .prepare("SELECT title, created_at FROM source WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
         if let Ok((title, created_at)) =
-            stmt.query_row([&source_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            fetch_stmt.query_row([&source_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
         {
             let snippet = extract_snippet(&title, text, 150);
             hits.push(SearchHit {
@@ -486,13 +487,12 @@ fn search_entities_fts(
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
     let mut hits = Vec::new();
+    let mut fetch_stmt = conn
+        .prepare("SELECT name, created_at FROM entity WHERE id = ?")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
     for entity_id in entity_ids {
-        let mut stmt = conn
-            .prepare("SELECT name, created_at FROM entity WHERE id = ?")
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-
         if let Ok((name, created_at)) =
-            stmt.query_row([&entity_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            fetch_stmt.query_row([&entity_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
         {
             let snippet = extract_snippet(&name, text, 150);
             hits.push(SearchHit {

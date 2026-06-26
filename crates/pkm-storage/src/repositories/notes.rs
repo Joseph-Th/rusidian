@@ -139,10 +139,19 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     }
 
     fn list(&self, limit: Option<usize>) -> Result<Vec<Note>> {
-        let query = "SELECT id, title, created_at, created_by, version, updated_at, metadata FROM note ORDER BY created_at DESC";
+        let query = match limit {
+            Some(n) => format!(
+                "SELECT id, title, created_at, created_by, version, updated_at, metadata \
+                 FROM note ORDER BY created_at DESC LIMIT {}",
+                n
+            ),
+            None => "SELECT id, title, created_at, created_by, version, updated_at, metadata \
+                     FROM note ORDER BY created_at DESC"
+                .to_string(),
+        };
         let mut stmt = self
             .conn
-            .prepare(query)
+            .prepare(&query)
             .map_err(crate::StorageError::from)?;
 
         let notes: Result<Vec<Note>> = stmt
@@ -166,7 +175,6 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 ))
             })
             .map_err(crate::StorageError::from)?
-            .take(limit.unwrap_or(usize::MAX))
             .map(|result| {
                 let (
                     id_str,
@@ -208,7 +216,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     metadata,
                     created_at,
                     created_by,
-                    version: version as u32,
+                    version: u32::try_from(version).unwrap_or(1),
                     updated_at,
                 })
             })
@@ -225,7 +233,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
 
         let metadata_json = serde_json::to_string(&note.metadata)?;
 
-        self.conn
+        let rows = self.conn
             .execute(
                 "UPDATE note SET title = ?1, version = ?2, updated_at = ?3, metadata = ?4 WHERE id = ?5",
                 params![
@@ -237,6 +245,12 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 ],
             )
             .map_err(crate::StorageError::from)?;
+
+        if rows == 0 {
+            return Err(pkm_core::CoreError::Invariant(
+                format!("note {} not found", note.id),
+            ));
+        }
 
         Ok(())
     }

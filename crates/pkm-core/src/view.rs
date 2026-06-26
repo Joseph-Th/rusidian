@@ -466,8 +466,12 @@ impl Default for GraphViewParams {
 pub struct StubViewParams;
 
 /// All possible view parameters, one variant per ViewKind.
+/// Tagged with `"type"` so the Tauri frontend can unambiguously specify which
+/// variant to create (e.g. `{"type": "graph_view", "show_edges": false}`).
+/// The storage layer reads params by dispatching on the stored kind string
+/// directly (see `parse_view_params`), so DB data is unaffected by this tag.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ViewParams {
     ReadingQueue(ReadingQueueParams),
     ReviewQueue(ReviewQueueParams),

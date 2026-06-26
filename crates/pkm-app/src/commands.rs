@@ -179,7 +179,10 @@ pub async fn list_views(
         .into_iter()
         .map(|v| ViewInfo {
             id: v.id.to_string(),
-            kind: format!("{:?}", v.kind).to_lowercase(),
+            kind: serde_json::to_value(v.kind)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_else(|| format!("{:?}", v.kind).to_lowercase()),
             title: v.title,
         })
         .collect())
