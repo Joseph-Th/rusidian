@@ -113,16 +113,13 @@ Do not start a later step while an earlier one is 🔨/🚫.
 #### C4c · Entity merge: Operation enum + MergeEntity ✅
 - MergeEntities operation verified; merge_entities_requires_review() test added. All agent tests pass.
 
+#### C4d · Entity merge: Link re-pointing ✅
+- Added LinkRepo trait with create/get/get_by_to/get_by_from/set_to/set_from. Implemented SqliteLinkRepo with full persistence. Created migration 0005 for link review state/confidence columns. Updated apply_action() to re-point all links when MergeEntities is applied. Added merge_entities_apply_repoints_links test verifying link re-pointing. All tests pass.
+
 #### C5 · Finalize Provenance ✅
 - Added originating_action and extraction_span fields to Provenance. 7 tests verify round-trip serialization.
 
 ### Active — Next to work on
-
-#### C4d · Entity merge: Link re-pointing ⬜
-- **Depends on:** C4c.
-- **Do:** When merge is accepted, re-point all links pointing to loser_id → survivor_id.
-  Preserve link provenance/review state. Update AgentAction.apply().
-- **Done when:** Test: merge creates AgentAction; applying it re-points all links.
 
 #### C4e · Entity merge: Rollback path ⬜
 - **Depends on:** C4d.
@@ -135,9 +132,6 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Do:** Document merge design (non-lossy, survivor/loser, re-pointing strategy,
   rollback mechanics). Link to tests.
 - **Done when:** ADR written; answers why this design over alternatives.
-
-#### C5 · Finalize `Provenance` ✅
-- **Notes:** Added `originating_action: Option<AgentActionId>` and `extraction_span: Option<ExtractionSpan>` fields to Provenance. ExtractionSpan tracks byte offsets (start/end) for precise source location. Added invariant documentation that derived content must have non-empty `derived_from`. 7 tests verify round-trip serialization, span arithmetic, and provenance traceability.
 
 #### F0 · Typed view parameters + view model ⬜
 - **Depends on:** C-series.
@@ -158,9 +152,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (14 tasks)
+## Done (19 tasks)
 
-All foundation and vertical-slice work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2.
+All foundation, vertical-slice, and entity merge work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C5.
 
 ---
 
