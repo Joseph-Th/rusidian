@@ -3,10 +3,11 @@
 //! should happen. NO business logic in the UI layer.
 
 use pkm_core::note::Note;
-use pkm_core::ports::{NoteRepo, ViewRepo, SourceRepo};
-use pkm_core::view::{View, ViewKind, ViewParams, DefaultViewModel, ViewModel};
+use pkm_core::ports::{NoteRepo, Retriever, SearchMode, SourceRepo, ViewRepo};
+use pkm_core::view::{DefaultViewModel, View, ViewKind, ViewModel, ViewParams};
 use pkm_core::{Actor, Timestamp};
-use pkm_storage::{open, SqliteNoteRepo, SqliteViewRepo, SqliteSourceRepo};
+use pkm_search::parse_query;
+use pkm_storage::{open, SqliteNoteRepo, SqliteRetriever, SqliteSourceRepo, SqliteViewRepo};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -216,8 +217,8 @@ impl AppService {
 
     /// Get a view by ID.
     pub fn get_view(&self, view_id: &str) -> Result<Option<View>, String> {
-        let uuid = uuid::Uuid::parse_str(view_id)
-            .map_err(|_| format!("Invalid view ID: {}", view_id))?;
+        let uuid =
+            uuid::Uuid::parse_str(view_id).map_err(|_| format!("Invalid view ID: {}", view_id))?;
         let parsed_id = pkm_core::id::ViewId(uuid);
 
         let conn = self
@@ -275,16 +276,57 @@ impl AppService {
             ViewParams::OpenQuestions(params) => {
                 DefaultViewModel::render_open_questions(params, &sources)
             }
-            ViewParams::ActionList(params) => DefaultViewModel::render_action_list(params, &sources),
+            ViewParams::ActionList(params) => {
+                DefaultViewModel::render_action_list(params, &sources)
+            }
             ViewParams::GraphView(params) => DefaultViewModel::render_graph_view(params, &sources),
             ViewParams::Stub(_) => Err("Stub view not yet implemented".to_string()),
         }
         .map_err(|e| format!("Failed to render view: {}", e))?;
 
-        Ok(result
-            .source_ids
-            .iter()
-            .map(|id| id.to_string())
-            .collect())
+        Ok(result.source_ids.iter().map(|id| id.to_string()).collect())
+    }
+
+    /// Search notes by query text using fuzzy text search.
+    pub fn search_notes(
+        &self,
+        query: &str,
+        limit: Option<usize>,
+    ) -> Result<Vec<(String, String)>, String> {
+        use pkm_core::id::ObjectRef;
+
+        let search_query = parse_query(SearchMode::FuzzyText, query);
+        let retriever = SqliteRetriever::new(self.conn.clone());
+
+        let hits = retriever
+            .search(&search_query)
+            .map_err(|e| format!("Search failed: {}", e))?;
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let note_repo = SqliteNoteRepo { conn: &conn };
+        let mut results = Vec::new();
+
+        for hit in hits.iter().take(limit.unwrap_or(50)) {
+            match hit.object {
+                ObjectRef::Note(note_id) => {
+                    if let Ok(Some(note)) = note_repo.get(note_id) {
+                        results.push((note.id.to_string(), note.title));
+                    } else if let Some(snippet) = &hit.snippet {
+                        results.push((format!("{:?}", hit.object), snippet.clone()));
+                    }
+                }
+                _ => {
+                    if let Some(snippet) = &hit.snippet {
+                        results.push((format!("{:?}", hit.object), snippet.clone()));
+                    }
+                }
+            }
+        }
+
+        Ok(results)
     }
 }

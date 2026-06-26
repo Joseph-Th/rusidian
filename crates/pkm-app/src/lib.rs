@@ -93,12 +93,14 @@ mod tests {
             .expect("note should exist after update");
         assert_eq!(updated_note.title, new_title, "title should be updated");
         assert_eq!(updated_note.version, 2, "version should increment");
-        assert_eq!(updated_note.metadata.len(), 2, "metadata should have 2 entries");
+        assert_eq!(
+            updated_note.metadata.len(),
+            2,
+            "metadata should have 2 entries"
+        );
 
         // LIST: List all notes
-        let notes = service
-            .list_notes(Some(10))
-            .expect("failed to list notes");
+        let notes = service.list_notes(Some(10)).expect("failed to list notes");
         assert!(!notes.is_empty(), "list should contain the created note");
 
         // DELETE: Delete the note
@@ -113,9 +115,7 @@ mod tests {
         assert!(deleted.is_none(), "note should not exist after deletion");
 
         // List should be empty
-        let final_list = service
-            .list_notes(Some(10))
-            .expect("failed to list notes");
+        let final_list = service.list_notes(Some(10)).expect("failed to list notes");
         assert!(final_list.is_empty(), "list should be empty after deletion");
     }
 }

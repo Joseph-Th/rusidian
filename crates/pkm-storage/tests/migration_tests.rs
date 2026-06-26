@@ -53,8 +53,8 @@ fn open_is_idempotent() {
 
     // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    // There are now 7 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge, 0005_link_review_state, 0006_add_project_field, 0007_add_versioning.
-    assert_eq!(version1, "7");
+    // There are now 8 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge, 0005_link_review_state, 0006_add_project_field, 0007_add_versioning, 0008_add_note_metadata.
+    assert_eq!(version1, "8");
 }
 
 #[test]

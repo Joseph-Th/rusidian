@@ -102,10 +102,7 @@ pub async fn update_note(
     svc.update_note(&note_id, title, metadata)
 }
 
-pub async fn delete_note(
-    note_id: String,
-    service: &Arc<Mutex<AppService>>,
-) -> Result<(), String> {
+pub async fn delete_note(note_id: String, service: &Arc<Mutex<AppService>>) -> Result<(), String> {
     let svc = service
         .lock()
         .map_err(|_| "Failed to acquire service lock".to_string())?;
@@ -225,15 +222,34 @@ pub async fn create_graph_view(
         .lock()
         .map_err(|_| "Failed to acquire service lock".to_string())?;
 
-    let view_id = svc.create_view(
-        ViewKind::GraphView,
-        title.clone(),
-        ViewParams::graph_view(),
-    )?;
+    let view_id = svc.create_view(ViewKind::GraphView, title.clone(), ViewParams::graph_view())?;
 
     Ok(CreateViewResponse {
         id: view_id,
         kind: "graph_view".to_string(),
         title,
     })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchResult {
+    pub id: String,
+    pub title: String,
+}
+
+pub async fn search_notes(
+    query: String,
+    limit: Option<usize>,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<Vec<SearchResult>, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let results = svc.search_notes(&query, limit)?;
+
+    Ok(results
+        .into_iter()
+        .map(|(id, title)| SearchResult { id, title })
+        .collect())
 }

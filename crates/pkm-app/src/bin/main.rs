@@ -58,6 +58,16 @@ async fn delete_note(
     commands::delete_note(note_id, service).await
 }
 
+#[tauri::command]
+async fn search_notes(
+    query: String,
+    limit: Option<usize>,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<Vec<commands::SearchResult>, String> {
+    let service = state.inner();
+    commands::search_notes(query, limit, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -88,7 +98,8 @@ fn main() {
             list_notes,
             get_note,
             update_note,
-            delete_note
+            delete_note,
+            search_notes
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
