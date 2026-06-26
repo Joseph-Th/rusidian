@@ -98,7 +98,12 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Current
 
-No active tasks.
+1. **H0** ✅ — ViewRepo trait + SqliteViewRepo impl.
+   - Added ViewRepo trait to pkm-core/src/ports.rs
+   - Implemented SqliteViewRepo in pkm-storage/src/repositories/views.rs
+   - Schema migration 0001_init already included view table
+   - 6 new tests added; all pass
+   - Notes: ViewParams uses untagged serde; specific variant preservation not 100% reliable on deserialization, but ViewKind is always correct (the render-determining field)
 
 ---
 
@@ -110,6 +115,26 @@ All foundation, vertical-slice, entity merge, view model, app service, view impl
 
 ## Deferred (post Phase 6)
 
-Further work as the system matures:
+Phase 7 tasks — implement in order for breadth and user value:
 
-> Phase 7 (Expansion): sync, mobile, publishing, collaboration, visual workspace.
+### Phase 7: Expansion
+
+1. **H0** — ViewRepo trait + SqliteViewRepo impl + 0006_views schema migration.
+   Foundation for persisting custom views. Depends on: none (⬜).
+
+2. **H1** — Export as publishable markdown. Create a markdown folder hierarchy
+   from a note tree that's suitable for static-site generation. Depends on: none (⬜).
+
+3. **H2** — Local versioning foundation. Add version numbers to entities; track
+   object history for sync/rollback. Depends on: none (⬜).
+
+4. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
+   transport contract. Depends on: none (⬜).
+
+5. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
+   browsers. Depends on: none (⬜).
+
+6. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
+   and notes. Depends on: H0 (⬜).
+
+Further: sync, mobile editor (native), publishing, collaboration, plugin API.

@@ -93,7 +93,13 @@ pub trait AgentActionRepo {
     // TODO(D2): list/filter (by target, by status, by actor, by date range), batch get.
 }
 
-// TODO(B2): ViewRepo.
+/// Persistence for [`View`] (a saved presentation of structured knowledge).
+pub trait ViewRepo {
+    fn create(&self, view: &crate::view::View) -> Result<()>;
+    fn get(&self, id: crate::id::ViewId) -> Result<Option<crate::view::View>>;
+    fn list(&self, limit: Option<usize>) -> Result<Vec<crate::view::View>>;
+    // TODO(H0): filter by kind, delete, update params.
+}
 
 /// Multi-mode retrieval boundary. The SQLite/FTS implementation lives in
 /// `pkm-storage`; pure query-parsing/ranking helpers live in `pkm-search`.

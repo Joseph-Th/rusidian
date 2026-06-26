@@ -533,9 +533,9 @@ fn search_notes_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
         let mut stmt = conn
             .prepare("SELECT created_at, project FROM note WHERE id = ?")
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        let (created_at, project): (Option<String>, Option<String>) =
-            stmt.query_row([&note_id], |row| Ok((row.get(0).ok(), row.get(1).ok())))
-                .unwrap_or_default();
+        let (created_at, project): (Option<String>, Option<String>) = stmt
+            .query_row([&note_id], |row| Ok((row.get(0).ok(), row.get(1).ok())))
+            .unwrap_or_default();
 
         hits.push(SearchHit {
             object: ObjectRef::Note(pkm_core::id::NoteId(
