@@ -6,12 +6,8 @@ members = [
     "crates/pkm-search",
     "crates/pkm-agent",
     "crates/pkm-ingestion",
+    "crates/pkm-app",
 ]
-
-# The Tauri desktop shell (`crates/pkm-app`) is intentionally NOT a member yet.
-# It is heavy and depends on every other crate through service interfaces.
-# Add it only after the foundation crates have real behavior + tests.
-# See STATUS.md tasks A0 / the vertical-slice spine.
 
 [workspace.package]
 version = "0.0.0"

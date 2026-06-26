@@ -109,13 +109,54 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - 6 tests verify: params serialization, view round-trips, filtering, limits, and full rendering pipeline.
 - All tests pass; ready for F1+ to extend with additional view types.
 
-#### A0 · Tauri desktop shell (`pkm-app`) ⬜
-- **Depends on:** S1 ✅, S2 ✅, E2.
-- **Do:** Add `crates/pkm-app` (Tauri), wire as a workspace member. Expose the
-  agent/search/storage services as Tauri commands. NO business logic in the UI
-  layer. Write an ADR confirming/!revising the UI-shell choice.
-- **Done when:** App launches, opens the db, creates + lists a note through the
-  real services.
+#### F1 · Timeline view ⬜
+- **Depends on:** F0 ✅.
+- **Do:** Implement Timeline view rendering. Retrieve notes by date, order chronologically, render timeline blocks.
+- **Done when:** One integration test: create notes, timeline renders them in order.
+
+#### F2 · Dossier view ⬜
+- **Depends on:** F0 ✅.
+- **Do:** Implement Dossier view rendering. Retrieve notes for an entity, render entity profile + linked notes.
+- **Done when:** One integration test: entity + notes → dossier renders correctly.
+
+#### F3 · ReviewQueue view ⬜
+- **Depends on:** F0 ✅.
+- **Do:** Complete ReviewQueue view implementation. Show sources/blocks awaiting review, filter by review state.
+- **Done when:** Test: review queue filters by proposed/awaiting review status.
+
+#### F4 · ProjectDashboard view ⬜
+- **Depends on:** F0 ✅.
+- **Do:** Implement ProjectDashboard view. Group notes by project, show status summary.
+- **Done when:** Test: project dashboard aggregates and displays project status.
+
+#### F5 · SourceMap view ⬜
+- **Depends on:** F0 ✅.
+- **Do:** Implement SourceMap view. Show source citations, trace knowledge provenance.
+- **Done when:** Test: source map displays link chain from raw source to final note.
+
+#### F6 · DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList ⬜
+- **Depends on:** F0 ✅.
+- **Do:** Implement remaining views (DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList).
+- **Done when:** All views render and have basic tests.
+
+#### A0a · App service layer 🔨
+- **Depends on:** S1 ✅, S2 ✅, E2 ✅.
+- **Do:** Create `pkm-app` crate with service layer wiring all repos and ports.
+  Expose AppService with create_note/get_note through command API.
+- **Done when:** Service creates/retrieves notes through real SqliteNoteRepo. Test passes.
+- **Notes:** Foundation complete. Tauri wiring deferred to A0b. Note: B2 must add NoteRepo::list() before A0 full completion.
+
+#### A0b · Tauri desktop shell (`pkm-app` binary) ⬜
+- **Depends on:** A0a ✅.
+- **Do:** Add Tauri main.rs binary that wires AppService and exposes commands.
+  Set up window, menu, data dir. Write ADR confirming UI-shell choice.
+- **Done when:** App launches, opens db, creates + lists note via frontend commands.
+
+#### B2 · Complete note persistence (BLOCKING for A0) ⬜
+- **Depends on:** B1.
+- **Do:** Add NoteRepo::list(), block CRUD, ordered block fetch. Required for
+  complete A0 "list notes" acceptance.
+- **Done when:** NoteRepo trait has list() and block methods; storage impl complete.
 
 ---
 
@@ -125,11 +166,10 @@ All foundation, vertical-slice, entity merge, and view model work complete: A1, 
 
 ---
 
-## Deferred
+## Deferred (post F1+, A0)
 
-These will become tasks once C4, C5, F0 land:
+Further work as the system matures:
 
-> The remaining concrete views (Dossier, Timeline, ProjectDashboard, SourceMap,
-> DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions,
-> ActionList) become one task each (F1…Fn), all depending on F0. Add them when
-> F0 lands; build none before F0.
+> Advanced retrieval (Phase 6): hybrid search, semantic search, entity-aware
+> retrieval, typed link traversal, citation-aware retrieval, stale-content detection.
+> Expansion (Phase 7): sync, mobile, publishing, collaboration, visual workspace.
