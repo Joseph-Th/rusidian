@@ -25,6 +25,8 @@ uuid = { version = "1", features = ["v7", "serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
+tauri = "2"
+tauri-build = "2"
 
 # Internal crates referenced by path. Dependency direction is strict and
 # acyclic (see README "Dependency graph"):

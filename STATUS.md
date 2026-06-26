@@ -118,10 +118,18 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - Added `CreateNoteResponse` and `NoteInfo` response types; `list_notes` command wrapper.
 - All tests pass; foundation ready for Tauri integration.
 
-#### A0b-iii · Tauri setup and command wiring ⬜
+#### A0b-iii · Tauri setup and command wiring ✅
 - **Depends on:** A0b-ii ✅.
 - **Do:** Add Tauri to workspace; create pkm-app binary target; wire create_note and list_notes commands.
-- **Done when:** Tauri app binary can invoke create_note and list_notes via RPC.
+- Added Tauri v2 to workspace dependencies.
+- Created src/bin/main.rs Tauri binary that wires create_note and list_notes commands via #[tauri::command].
+- Created build.rs for Tauri build system integration.
+- Created tauri.conf.json with app configuration (1200x800 window).
+- Created minimal frontend (HTML + JavaScript) with UI to create and list notes.
+- Created icon assets (PNG and ICO) for the application.
+- Database location: ~/.pkm/pkm.db (or %USERPROFILE%\.pkm\pkm.db on Windows).
+- cargo check, clippy -D warnings, and all tests pass.
+- **Done when:** Tauri app binary can invoke create_note and list_notes via RPC. ✅
 
 #### A0b-iv · Window, menu, data dir setup ⬜
 - **Depends on:** A0b-iii ✅.
@@ -130,9 +138,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (33 tasks)
+## Done (35 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, and view implementations complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i.
+All foundation, vertical-slice, entity merge, view model, app service, and view implementations complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii.
 
 ---
 

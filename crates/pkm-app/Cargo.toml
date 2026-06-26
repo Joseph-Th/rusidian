@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 # A library crate that provides the service layer and command definitions.
-# The Tauri app (built separately) links against this library.
+# The binary target uses this library and Tauri to create the desktop app.
 
 [dependencies]
 pkm-core = { workspace = true }
@@ -20,7 +20,19 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 rusqlite = { workspace = true }
+tauri = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[[bin]]
+name = "pkm-app"
+path = "src/bin/main.rs"
+required-features = ["tauri"]
+
+[features]
+default = ["tauri"]
