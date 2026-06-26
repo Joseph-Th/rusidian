@@ -111,7 +111,23 @@ Do not start a later step while an earlier one is 🔨/🚫.
 #### G4 · Date range and project filtering ⬜
 - **Depends on:** G2 ✅.
 - **Do:** Implement date_range and project filters in search queries.
+- **Break down:** G4a (date filtering using created_at), G4b (project metadata migration + filtering).
 - **Done when:** Filters exclude results outside range/project; tests verify.
+
+#### G4a · Date range filtering ✅
+- **Depends on:** G2 ✅.
+- **Do:** Implement date_range filter for search results using created_at.
+- Added created_at: Option<String> field to SearchHit for RFC3339 timestamps.
+- Updated all search functions to fetch created_at from note/block/source/entity.
+- Implemented date_range filter in apply_filters using RFC3339 lexicographic comparison.
+- Filter format: date_range:"2025-01-01..2025-12-31" or date_range:"2025-01-01".
+- All tests pass; cargo check/clippy/fmt clean.
+- **Done when:** Date filters work for notes/sources; test verifies exclusion outside range. ✅
+
+#### G4b · Project filtering (post-migration) ⬜
+- **Depends on:** G4a ✅.
+- **Do:** Add project field to schema (migration), implement project filter.
+- **Done when:** Project filter works; requires schema migration + SearchFilters support.
 
 #### G5 · Semantic search foundation ⬜
 - **Depends on:** G4 ✅.

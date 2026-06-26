@@ -227,15 +227,18 @@ fn create_hit_for_object(
         ObjectRef::Note(id) => {
             let id_str = id.to_string();
             let mut stmt = conn
-                .prepare("SELECT title FROM note WHERE id = ?")
+                .prepare("SELECT title, created_at FROM note WHERE id = ?")
                 .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-            if let Ok(title) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+            if let Ok((title, created_at)) = stmt.query_row([&id_str], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
                 Ok(Some(SearchHit {
                     object: *obj,
                     status: ContentStatus::UserAuthored,
                     score: None,
                     snippet: Some(format!("Note: {}", title)),
+                    created_at: Some(created_at),
                 }))
             } else {
                 Ok(None)
@@ -244,15 +247,18 @@ fn create_hit_for_object(
         ObjectRef::Source(id) => {
             let id_str = id.to_string();
             let mut stmt = conn
-                .prepare("SELECT title FROM source WHERE id = ?")
+                .prepare("SELECT title, created_at FROM source WHERE id = ?")
                 .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-            if let Ok(title) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+            if let Ok((title, created_at)) = stmt.query_row([&id_str], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
                 Ok(Some(SearchHit {
                     object: *obj,
                     status: ContentStatus::RawSource,
                     score: None,
                     snippet: Some(format!("Source: {}", title)),
+                    created_at: Some(created_at),
                 }))
             } else {
                 Ok(None)
@@ -261,15 +267,18 @@ fn create_hit_for_object(
         ObjectRef::Entity(id) => {
             let id_str = id.to_string();
             let mut stmt = conn
-                .prepare("SELECT name FROM entity WHERE id = ?")
+                .prepare("SELECT name, created_at FROM entity WHERE id = ?")
                 .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-            if let Ok(name) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+            if let Ok((name, created_at)) = stmt.query_row([&id_str], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
                 Ok(Some(SearchHit {
                     object: *obj,
                     status: ContentStatus::ExtractedMetadata,
                     score: None,
                     snippet: Some(format!("Entity: {}", name)),
+                    created_at: Some(created_at),
                 }))
             } else {
                 Ok(None)
@@ -278,10 +287,12 @@ fn create_hit_for_object(
         ObjectRef::Block(id) => {
             let id_str = id.to_string();
             let mut stmt = conn
-                .prepare("SELECT content FROM block WHERE id = ?")
+                .prepare("SELECT content, created_at FROM block WHERE id = ?")
                 .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-            if let Ok(content) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+            if let Ok((content, created_at)) = stmt.query_row([&id_str], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
                 Ok(Some(SearchHit {
                     object: *obj,
                     status: ContentStatus::UserAuthored,
@@ -290,6 +301,7 @@ fn create_hit_for_object(
                         "Block: {}",
                         &content[..std::cmp::min(50, content.len())]
                     )),
+                    created_at: Some(created_at),
                 }))
             } else {
                 Ok(None)
@@ -334,13 +346,15 @@ fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
 
     let mut hits = Vec::new();
 
-    // For each note, fetch title and create snippet
+    // For each note, fetch title and created_at, create snippet
     for note_id in note_ids {
         let mut title_stmt = conn
-            .prepare("SELECT title FROM note WHERE id = ?")
+            .prepare("SELECT title, created_at FROM note WHERE id = ?")
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-        if let Ok(title) = title_stmt.query_row([&note_id], |row| row.get::<_, String>(0)) {
+        if let Ok((title, created_at)) = title_stmt.query_row([&note_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
             let snippet = extract_snippet(&title, &query.text, 150);
 
             hits.push(SearchHit {
@@ -350,6 +364,7 @@ fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
                 status: ContentStatus::UserAuthored,
                 score: None,
                 snippet,
+                created_at: Some(created_at),
             });
         }
     }
@@ -373,10 +388,12 @@ fn search_blocks_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
 
     for block_id in block_ids {
         let mut content_stmt = conn
-            .prepare("SELECT content FROM block WHERE id = ?")
+            .prepare("SELECT content, created_at FROM block WHERE id = ?")
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-        if let Ok(content) = content_stmt.query_row([&block_id], |row| row.get::<_, String>(0)) {
+        if let Ok((content, created_at)) = content_stmt.query_row([&block_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
             let snippet = extract_snippet(&content, &query.text, 150);
 
             hits.push(SearchHit {
@@ -386,6 +403,7 @@ fn search_blocks_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
                 status: ContentStatus::UserAuthored,
                 score: None,
                 snippet,
+                created_at: Some(created_at),
             });
         }
     }
@@ -412,10 +430,12 @@ fn search_sources_exact(
 
     for source_id in source_ids {
         let mut title_stmt = conn
-            .prepare("SELECT title FROM source WHERE id = ?")
+            .prepare("SELECT title, created_at FROM source WHERE id = ?")
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-        if let Ok(title) = title_stmt.query_row([&source_id], |row| row.get::<_, String>(0)) {
+        if let Ok((title, created_at)) = title_stmt.query_row([&source_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
             let snippet = extract_snippet(&title, &query.text, 150);
 
             hits.push(SearchHit {
@@ -425,6 +445,7 @@ fn search_sources_exact(
                 status: ContentStatus::RawSource,
                 score: None,
                 snippet,
+                created_at: Some(created_at),
             });
         }
     }
@@ -451,10 +472,12 @@ fn search_entities_exact(
 
     for entity_id in entity_ids {
         let mut name_stmt = conn
-            .prepare("SELECT name FROM entity WHERE id = ?")
+            .prepare("SELECT name, created_at FROM entity WHERE id = ?")
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-        if let Ok(name) = name_stmt.query_row([&entity_id], |row| row.get::<_, String>(0)) {
+        if let Ok((name, created_at)) = name_stmt.query_row([&entity_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
             let snippet = extract_snippet(&name, &query.text, 150);
 
             hits.push(SearchHit {
@@ -464,6 +487,7 @@ fn search_entities_exact(
                 status: ContentStatus::ExtractedMetadata,
                 score: None,
                 snippet,
+                created_at: Some(created_at),
             });
         }
     }
@@ -479,21 +503,29 @@ fn search_notes_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
         .prepare("SELECT rowid FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&fuzzy_query], |row| {
-            let note_id: String = row.get(0)?;
-            Ok(SearchHit {
-                object: ObjectRef::Note(pkm_core::id::NoteId(
-                    uuid::Uuid::parse_str(&note_id).unwrap(),
-                )),
-                status: ContentStatus::UserAuthored,
-                score: None,
-                snippet: None,
-            })
-        })
+    let note_ids: Vec<String> = stmt
+        .query_map([&fuzzy_query], |row| row.get(0))
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for note_id in note_ids {
+        let mut stmt = conn
+            .prepare("SELECT created_at FROM note WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+        let created_at: Option<String> = stmt.query_row([&note_id], |row| row.get(0)).ok();
+
+        hits.push(SearchHit {
+            object: ObjectRef::Note(pkm_core::id::NoteId(
+                uuid::Uuid::parse_str(&note_id).unwrap(),
+            )),
+            status: ContentStatus::UserAuthored,
+            score: None,
+            snippet: None,
+            created_at,
+        });
+    }
 
     Ok(hits)
 }
@@ -505,21 +537,29 @@ fn search_blocks_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
         .prepare("SELECT rowid FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&fuzzy_query], |row| {
-            let block_id: String = row.get(0)?;
-            Ok(SearchHit {
-                object: ObjectRef::Block(pkm_core::id::BlockId(
-                    uuid::Uuid::parse_str(&block_id).unwrap(),
-                )),
-                status: ContentStatus::UserAuthored,
-                score: None,
-                snippet: None,
-            })
-        })
+    let block_ids: Vec<String> = stmt
+        .query_map([&fuzzy_query], |row| row.get(0))
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for block_id in block_ids {
+        let mut stmt = conn
+            .prepare("SELECT created_at FROM block WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+        let created_at: Option<String> = stmt.query_row([&block_id], |row| row.get(0)).ok();
+
+        hits.push(SearchHit {
+            object: ObjectRef::Block(pkm_core::id::BlockId(
+                uuid::Uuid::parse_str(&block_id).unwrap(),
+            )),
+            status: ContentStatus::UserAuthored,
+            score: None,
+            snippet: None,
+            created_at,
+        });
+    }
 
     Ok(hits)
 }
@@ -534,21 +574,29 @@ fn search_sources_fuzzy(
         .prepare("SELECT rowid FROM source_fts WHERE source_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&fuzzy_query], |row| {
-            let source_id: String = row.get(0)?;
-            Ok(SearchHit {
-                object: ObjectRef::Source(pkm_core::id::SourceId(
-                    uuid::Uuid::parse_str(&source_id).unwrap(),
-                )),
-                status: ContentStatus::RawSource,
-                score: None,
-                snippet: None,
-            })
-        })
+    let source_ids: Vec<String> = stmt
+        .query_map([&fuzzy_query], |row| row.get(0))
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for source_id in source_ids {
+        let mut stmt = conn
+            .prepare("SELECT created_at FROM source WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+        let created_at: Option<String> = stmt.query_row([&source_id], |row| row.get(0)).ok();
+
+        hits.push(SearchHit {
+            object: ObjectRef::Source(pkm_core::id::SourceId(
+                uuid::Uuid::parse_str(&source_id).unwrap(),
+            )),
+            status: ContentStatus::RawSource,
+            score: None,
+            snippet: None,
+            created_at,
+        });
+    }
 
     Ok(hits)
 }
@@ -563,21 +611,29 @@ fn search_entities_fuzzy(
         .prepare("SELECT rowid FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&fuzzy_query], |row| {
-            let entity_id: String = row.get(0)?;
-            Ok(SearchHit {
-                object: ObjectRef::Entity(pkm_core::id::EntityId(
-                    uuid::Uuid::parse_str(&entity_id).unwrap(),
-                )),
-                status: ContentStatus::ExtractedMetadata,
-                score: None,
-                snippet: None,
-            })
-        })
+    let entity_ids: Vec<String> = stmt
+        .query_map([&fuzzy_query], |row| row.get(0))
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, rusqlite::Error>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+    for entity_id in entity_ids {
+        let mut stmt = conn
+            .prepare("SELECT created_at FROM entity WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+        let created_at: Option<String> = stmt.query_row([&entity_id], |row| row.get(0)).ok();
+
+        hits.push(SearchHit {
+            object: ObjectRef::Entity(pkm_core::id::EntityId(
+                uuid::Uuid::parse_str(&entity_id).unwrap(),
+            )),
+            status: ContentStatus::ExtractedMetadata,
+            score: None,
+            snippet: None,
+            created_at,
+        });
+    }
 
     Ok(hits)
 }
@@ -615,7 +671,18 @@ fn apply_filters(results: &mut Vec<SearchHit>, query: &SearchQuery) {
         });
     }
 
-    // TODO(E2): implement date_range and project filters when those fields are persisted
+    if let Some((start_date, end_date)) = &filters.date_range {
+        results.retain(|hit| {
+            if let Some(ref created_at) = hit.created_at {
+                // Compare RFC3339 strings lexicographically (works for ISO format dates)
+                created_at >= start_date && created_at <= end_date
+            } else {
+                false
+            }
+        });
+    }
+
+    // TODO(G4b): implement project filter when project field is persisted
 }
 
 #[cfg(test)]

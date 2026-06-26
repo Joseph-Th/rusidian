@@ -152,4 +152,6 @@ pub struct SearchHit {
     pub score: Option<f64>,
     /// Optional matched text snippet (first ~150 chars of matching context).
     pub snippet: Option<String>,
+    /// Creation timestamp for date-based filtering (RFC3339 UTC).
+    pub created_at: Option<String>,
 }

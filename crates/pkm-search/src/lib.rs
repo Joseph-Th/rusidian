@@ -214,12 +214,14 @@ mod tests {
                 status: ContentStatus::UserAuthored,
                 score: None,
                 snippet: None,
+                created_at: None,
             },
             SearchHit {
                 object: pkm_core::id::ObjectRef::Note(NoteId::new()),
                 status: ContentStatus::UnreviewedSuggestion,
                 score: None,
                 snippet: None,
+                created_at: None,
             },
         ];
 
@@ -244,6 +246,7 @@ mod tests {
             status: ContentStatus::Reviewed,
             score: None,
             snippet: None,
+            created_at: None,
         }];
 
         let query = SearchQuery {
