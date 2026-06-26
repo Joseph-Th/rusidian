@@ -48,7 +48,10 @@ impl pkm_core::ports::Retriever for SqliteRetriever {
             }
             SearchMode::Semantic => {
                 return Err(pkm_core::CoreError::Invariant(
-                    "semantic search not yet implemented".to_string(),
+                    "Semantic search (Phase 7) will use vector embeddings to find conceptually \
+                     related content. Coming after Phase 6 retrieval basics are stable. For now, \
+                     use ExactText or FuzzyText search."
+                        .to_string(),
                 ));
             }
             SearchMode::Entity => {

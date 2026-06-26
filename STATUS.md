@@ -129,16 +129,19 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Do:** Add project field to schema (migration), implement project filter.
 - **Done when:** Project filter works; requires schema migration + SearchFilters support.
 
-#### G5 · Semantic search foundation ⬜
+#### G5 · Semantic search foundation ✅
 - **Depends on:** G4 ✅.
 - **Do:** Placeholder for vector-based semantic search (Phase 7 work).
-- **Done when:** SearchMode::Semantic returns informative error with roadmap.
+- Updated error message to explain semantic search is Phase 7 work.
+- Message directs users to use ExactText or FuzzyText in the meantime.
+- All tests pass; cargo check/clippy/fmt clean.
+- **Done when:** SearchMode::Semantic returns informative error with roadmap. ✅
 
 ---
 
-## Done (38 tasks)
+## Done (41 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, view implementations, UI shell, and Phase 6 retrieval work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv, G1, G2.
+All foundation, vertical-slice, entity merge, view model, app service, view implementations, UI shell, and Phase 6 retrieval complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv, G1, G2, G3, G4a, G5.
 
 ---
 
