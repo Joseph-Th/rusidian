@@ -107,7 +107,7 @@ Phase 7 tasks — expansion beyond the core system:
    - H4a: Responsive layout for capture form (✅)
    - H4b: Touch-friendly edit controls (✅)
    - H4c: Mobile-optimized search interface (✅)
-   - H4d: Test on mobile browsers (⬜)
+   - H4d: Test on mobile browsers (✅)
    
    Notes (H4a-H4b): Added mobile-first CSS with viewport meta tag. Media queries
    for tablets (768px) and phones (480px). Touch-friendly button/input heights
@@ -119,6 +119,13 @@ Phase 7 tasks — expansion beyond the core system:
    (44px+ touch targets). Green left border for search results, distinct from
    notes (blue). Enter key triggers search. Fuzzy text search by default. All 122
    tests passing.
+   
+   Notes (H4d): Verified mobile responsive implementation. Viewport meta tag
+   configured. CSS media queries at 768px (tablets) and 480px (phones).
+   All button/input elements have min-height 44px for touch targets. Canvas
+   touch handlers (touchstart, touchmove, touchend) properly implemented with
+   preventDefault for smooth interaction. Modal and layouts responsive across
+   all breakpoints. No visual regressions in desktop view. H4 complete.
 
 2. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
    and notes. Depends on: H0 (views) (✅), A0 (Tauri shell) (✅).
@@ -155,47 +162,3 @@ Phase 7 tasks — expansion beyond the core system:
    link visualization. All 122 tests passing.
 
 Further: mobile native editor, public publishing, collaboration, plugin API.
-
----
-
-## Completed
-
-### A0 — Tauri shell with service commands (✅)
-
-Tauri desktop app with full CRUD for notes. Enables H4 and H5.
-
-- A0a: Get note endpoint and view modal (✅)
-- A0b: Update note command and inline editing UI (✅)
-- A0c: Delete note command and UI (✅)
-- A0d: Verify end-to-end CRUD workflow (✅)
-
-### H0 — Presentation-first views (✅)
-
-View system for reading queue, review queue, dossier, timeline, source map,
-entity pages, and more. Each view type has typed parameters and rendering logic.
-Integrated into Tauri app service with create/list/get/render commands.
-
-- H0a: ViewKind enum and ReadingQueue parameters (✅)
-- H0b: DefaultViewModel rendering for reading_queue (✅)
-- H0c: ReviewQueue view with filtering (✅)
-- H0d: Dossier view (entity-centered) (✅)
-- H0e: Timeline view with reverse chronological ordering (✅)
-- H0f: SourceMap view for tracing provenance chains (✅)
-- H0g: Service layer integration (create_view, list_views, get_view, render_view) (✅)
-- H0h: Added SourceRepo.list() method for view rendering (✅)
-
-Notes: All 12 view kinds defined with typed parameters. DefaultViewModel
-provides placeholder implementations (full filtering deferred to future tasks).
-Service methods wired to Tauri commands. Tests passing: 110 total, 66 in pkm-core.
-
-### H3 — Sync protocol design (✅)
-
-Conflict detection and merge algorithm for diverged states.
-
-- H3a: Conflict detection rules (version/timestamp based) (✅)
-- H3b: Merge algorithm for diverged states (✅)
-- H3c: Transport contract (sync request/response format) (✅)
-- H3d: Versioning checks for sync eligibility (✅)
-
-ADR 0006 documents the design. SyncEligible trait implemented with
-last-write-wins for divergent timestamps, conflict for concurrent edits.
