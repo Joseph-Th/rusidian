@@ -236,6 +236,15 @@ pub async fn create_graph_view(
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct PreviewCard {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub aliases: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
     pub id: String,
     pub title: String,
@@ -256,6 +265,17 @@ pub async fn search_notes(
         .into_iter()
         .map(|(id, title)| SearchResult { id, title })
         .collect())
+}
+
+pub async fn get_preview_card(
+    entity_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<PreviewCard, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.get_preview_card(&entity_id)
 }
 
 #[derive(Debug, Clone, Serialize)]

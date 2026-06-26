@@ -125,6 +125,15 @@ async fn create_graph_view(
     commands::create_graph_view(title, service).await
 }
 
+#[tauri::command]
+async fn get_preview_card(
+    entity_id: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::PreviewCard, String> {
+    let service = state.inner();
+    commands::get_preview_card(entity_id, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -170,7 +179,8 @@ fn main() {
             list_views,
             get_view,
             render_view,
-            create_graph_view
+            create_graph_view,
+            get_preview_card
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

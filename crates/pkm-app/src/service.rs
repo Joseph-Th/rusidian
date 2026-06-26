@@ -3,11 +3,11 @@
 //! should happen. NO business logic in the UI layer.
 
 use pkm_core::note::Note;
-use pkm_core::ports::{NoteRepo, Retriever, SearchMode, SourceRepo, ViewRepo};
+use pkm_core::ports::{EntityRepo, NoteRepo, Retriever, SearchMode, SourceRepo, ViewRepo};
 use pkm_core::view::{DefaultViewModel, View, ViewKind, ViewModel, ViewParams};
 use pkm_core::{Actor, Timestamp};
 use pkm_search::parse_query;
-use pkm_storage::{open, SqliteNoteRepo, SqliteRetriever, SqliteSourceRepo, SqliteViewRepo};
+use pkm_storage::{open, SqliteEntityRepo, SqliteNoteRepo, SqliteRetriever, SqliteSourceRepo, SqliteViewRepo};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -379,6 +379,7 @@ impl AppService {
                 DefaultViewModel::render_action_list(params, &sources)
             }
             ViewParams::GraphView(params) => DefaultViewModel::render_graph_view(params, &sources),
+            ViewParams::CanvasView(params) => DefaultViewModel::render_canvas_view(params, &sources),
             ViewParams::Stub(_) => Err("Stub view not yet implemented".to_string()),
         }
         .map_err(|e| format!("Failed to render view: {}", e))?;
@@ -490,5 +491,34 @@ impl AppService {
         } else {
             Err("View is not a graph view".to_string())
         }
+    }
+
+    /// Get a preview card for an entity (used for hover tooltips in the frontend).
+    pub fn get_preview_card(&self, entity_id: &str) -> Result<crate::commands::PreviewCard, String> {
+        let uuid = uuid::Uuid::parse_str(entity_id)
+            .map_err(|_| format!("Invalid entity ID: {}", entity_id))?;
+        let parsed_id = pkm_core::id::EntityId(uuid);
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let entity_repo = SqliteEntityRepo { conn: &conn };
+        let entity = entity_repo
+            .get(parsed_id)
+            .map_err(|e| format!("Failed to get entity: {}", e))?
+            .ok_or_else(|| format!("Entity not found: {}", entity_id))?;
+
+        Ok(crate::commands::PreviewCard {
+            id: entity.id.to_string(),
+            name: entity.name,
+            kind: format!("{:?}", entity.kind).to_lowercase(),
+            aliases: entity.aliases,
+            summary: format!(
+                "Entity created by {:?} on {}. Version {}.",
+                entity.created_by, entity.created_at, entity.version
+            ),
+        })
     }
 }

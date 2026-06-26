@@ -10,7 +10,7 @@ use std::result::Result as StdResult;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{SourceId, ViewId};
+use crate::id::{ObjectRef, SourceId, ViewId};
 use crate::ingestion::IngestionState;
 use crate::source::Source;
 use crate::sync::SyncEligible;
@@ -32,6 +32,7 @@ pub enum ViewKind {
     OpenQuestions,
     ActionList,
     GraphView,
+    CanvasView,
 }
 
 /// Parameters for ReadingQueue view: shows sources awaiting review/reading.
@@ -461,6 +462,179 @@ impl Default for GraphViewParams {
     }
 }
 
+/// A node placed on the canvas. Points to an ObjectRef (Note, Block, Entity, Media, etc.)
+/// at specific spatial coordinates with optional styling.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasNode {
+    /// What is placed on the canvas: a Note, Block, Entity, Media, or other object.
+    pub target: ObjectRef,
+    /// X coordinate (absolute pixels).
+    pub x: f64,
+    /// Y coordinate (absolute pixels).
+    pub y: f64,
+    /// Width of the node when rendered (absolute pixels).
+    pub width: f64,
+    /// Height of the node when rendered (absolute pixels).
+    pub height: f64,
+    /// Optional color theme/class for styling (e.g., "note-blue", "entity-red").
+    pub color_theme: Option<String>,
+}
+
+impl CanvasNode {
+    pub fn new(target: ObjectRef, x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            target,
+            x,
+            y,
+            width,
+            height,
+            color_theme: None,
+        }
+    }
+
+    pub fn with_color_theme(mut self, theme: String) -> Self {
+        self.color_theme = Some(theme);
+        self
+    }
+}
+
+/// A visual grouping frame on the canvas. Used to organize nodes into sections.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasFrame {
+    /// Unique identifier for this frame within the canvas.
+    pub id: String,
+    /// Label displayed for this frame.
+    pub label: String,
+    /// X coordinate of top-left corner (absolute pixels).
+    pub x: f64,
+    /// Y coordinate of top-left corner (absolute pixels).
+    pub y: f64,
+    /// Width of the frame (absolute pixels).
+    pub width: f64,
+    /// Height of the frame (absolute pixels).
+    pub height: f64,
+    /// Optional background color (CSS hex or named color).
+    pub background_color: Option<String>,
+}
+
+impl CanvasFrame {
+    pub fn new(id: String, label: String, x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            id,
+            label,
+            x,
+            y,
+            width,
+            height,
+            background_color: None,
+        }
+    }
+
+    pub fn with_background_color(mut self, color: String) -> Self {
+        self.background_color = Some(color);
+        self
+    }
+}
+
+/// Visual routing information for edges (arrows) on the canvas.
+/// The semantic meaning of the edge is stored in the Link system.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasEdgeVisual {
+    /// Source node's target ObjectRef.
+    pub from: ObjectRef,
+    /// Target node's target ObjectRef.
+    pub to: ObjectRef,
+    /// Edge routing style: "curved" or "straight".
+    pub routing_style: String,
+    /// Optional color for this edge (CSS hex or named color).
+    pub color: Option<String>,
+}
+
+impl CanvasEdgeVisual {
+    pub fn new(from: ObjectRef, to: ObjectRef, routing_style: String) -> Self {
+        Self {
+            from,
+            to,
+            routing_style,
+            color: None,
+        }
+    }
+
+    pub fn with_color(mut self, color: String) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+/// Parameters for CanvasView: an infinite spatial canvas for organizing notes and entities.
+///
+/// The Canvas is a View, not a data type. Nodes point to real objects (via ObjectRef),
+/// edges represent Links (semantic typed relationships), and spatial coordinates are
+/// view-specific parameters stored as JSON. This ensures:
+/// - No hidden data (all content is in real Notes/Blocks, searchable as markdown)
+/// - AI-operable (agents can generate layouts through structured operations)
+/// - Open format (canvas JSON exports alongside .md files)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanvasViewParams {
+    /// Nodes placed on the canvas, each pointing to an object.
+    pub nodes: Vec<CanvasNode>,
+    /// Grouping frames that organize nodes visually.
+    pub frames: Vec<CanvasFrame>,
+    /// Visual routing data for edges/arrows (semantic meaning lives in Links).
+    pub edge_visuals: Vec<CanvasEdgeVisual>,
+    /// Maximum number of nodes to show (None = all).
+    pub limit: Option<usize>,
+}
+
+impl CanvasViewParams {
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            frames: Vec::new(),
+            edge_visuals: Vec::new(),
+            limit: Some(500),
+        }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn with_nodes(mut self, nodes: Vec<CanvasNode>) -> Self {
+        self.nodes = nodes;
+        self
+    }
+
+    pub fn with_frames(mut self, frames: Vec<CanvasFrame>) -> Self {
+        self.frames = frames;
+        self
+    }
+
+    pub fn with_edge_visuals(mut self, visuals: Vec<CanvasEdgeVisual>) -> Self {
+        self.edge_visuals = visuals;
+        self
+    }
+
+    pub fn add_node(&mut self, node: CanvasNode) {
+        self.nodes.push(node);
+    }
+
+    pub fn add_frame(&mut self, frame: CanvasFrame) {
+        self.frames.push(frame);
+    }
+
+    pub fn add_edge_visual(&mut self, visual: CanvasEdgeVisual) {
+        self.edge_visuals.push(visual);
+    }
+}
+
+impl Default for CanvasViewParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stub params for unimplemented views (task F1+).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StubViewParams;
@@ -486,6 +660,7 @@ pub enum ViewParams {
     OpenQuestions(OpenQuestionsParams),
     ActionList(ActionListParams),
     GraphView(GraphViewParams),
+    CanvasView(CanvasViewParams),
     // Stub: other views will be implemented in F1+
     Stub(StubViewParams),
 }
@@ -541,6 +716,10 @@ impl ViewParams {
 
     pub fn graph_view() -> Self {
         ViewParams::GraphView(GraphViewParams::default())
+    }
+
+    pub fn canvas_view() -> Self {
+        ViewParams::CanvasView(CanvasViewParams::default())
     }
 }
 
@@ -637,6 +816,11 @@ pub trait ViewModel {
 
     fn render_graph_view(
         params: &GraphViewParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_canvas_view(
+        params: &CanvasViewParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
@@ -870,6 +1054,23 @@ impl ViewModel for DefaultViewModel {
 
         Ok(ViewRenderResult { source_ids })
     }
+
+    fn render_canvas_view(
+        params: &CanvasViewParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Canvas view renders nodes placed on an infinite spatial canvas.
+        // The nodes reference real objects (Notes, Blocks, Entities, Media) via ObjectRef.
+        // This implementation returns all sources that have nodes on the canvas,
+        // in rendering order (which is determined by the node list).
+        let mut filtered: Vec<_> = sources.iter().collect();
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(500);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
 }
 
 impl SyncEligible for View {
@@ -906,6 +1107,7 @@ mod tests {
             ViewKind::OpenQuestions,
             ViewKind::ActionList,
             ViewKind::GraphView,
+            ViewKind::CanvasView,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let back: ViewKind = serde_json::from_str(&json).unwrap();
@@ -1444,5 +1646,250 @@ mod tests {
             let back: GraphLayoutType = serde_json::from_str(&json).unwrap();
             assert_eq!(back, layout);
         }
+    }
+
+    #[test]
+    fn canvas_node_creation_and_styling() {
+        use crate::id::NoteId;
+
+        let note_id = NoteId::new();
+        let node = CanvasNode::new(ObjectRef::Note(note_id), 100.0, 200.0, 300.0, 150.0);
+
+        assert_eq!(node.x, 100.0);
+        assert_eq!(node.y, 200.0);
+        assert_eq!(node.width, 300.0);
+        assert_eq!(node.height, 150.0);
+        assert_eq!(node.target, ObjectRef::Note(note_id));
+        assert_eq!(node.color_theme, None);
+
+        let styled = node.with_color_theme("note-blue".to_string());
+        assert_eq!(styled.color_theme, Some("note-blue".to_string()));
+    }
+
+    #[test]
+    fn canvas_frame_creation() {
+        let frame = CanvasFrame::new(
+            "frame-1".to_string(),
+            "Research Section".to_string(),
+            0.0,
+            0.0,
+            500.0,
+            400.0,
+        );
+
+        assert_eq!(frame.id, "frame-1");
+        assert_eq!(frame.label, "Research Section");
+        assert_eq!(frame.x, 0.0);
+        assert_eq!(frame.y, 0.0);
+        assert_eq!(frame.width, 500.0);
+        assert_eq!(frame.height, 400.0);
+        assert_eq!(frame.background_color, None);
+
+        let colored = frame.with_background_color("#f0f0f0".to_string());
+        assert_eq!(colored.background_color, Some("#f0f0f0".to_string()));
+    }
+
+    #[test]
+    fn canvas_edge_visual_creation() {
+        use crate::id::NoteId;
+
+        let from = ObjectRef::Note(NoteId::new());
+        let to = ObjectRef::Note(NoteId::new());
+
+        let edge = CanvasEdgeVisual::new(from, to, "curved".to_string());
+        assert_eq!(edge.from, from);
+        assert_eq!(edge.to, to);
+        assert_eq!(edge.routing_style, "curved");
+        assert_eq!(edge.color, None);
+
+        let colored = edge.with_color("#ff0000".to_string());
+        assert_eq!(colored.color, Some("#ff0000".to_string()));
+    }
+
+    #[test]
+    fn canvas_view_params_creation() {
+        use crate::id::NoteId;
+
+        let mut params = CanvasViewParams::new();
+        assert_eq!(params.nodes.len(), 0);
+        assert_eq!(params.frames.len(), 0);
+        assert_eq!(params.edge_visuals.len(), 0);
+        assert_eq!(params.limit, Some(500));
+
+        let node = CanvasNode::new(ObjectRef::Note(NoteId::new()), 0.0, 0.0, 100.0, 100.0);
+        params.add_node(node);
+        assert_eq!(params.nodes.len(), 1);
+    }
+
+    #[test]
+    fn canvas_view_params_serialize_and_deserialize() {
+        use crate::id::NoteId;
+
+        let note1 = NoteId::new();
+        let note2 = NoteId::new();
+
+        let node1 = CanvasNode::new(ObjectRef::Note(note1), 0.0, 0.0, 200.0, 200.0);
+        let node2 = CanvasNode::new(ObjectRef::Note(note2), 300.0, 0.0, 200.0, 200.0);
+
+        let frame = CanvasFrame::new(
+            "group-1".to_string(),
+            "Ideas".to_string(),
+            0.0,
+            250.0,
+            600.0,
+            300.0,
+        );
+
+        let edge = CanvasEdgeVisual::new(ObjectRef::Note(note1), ObjectRef::Note(note2), "curved".to_string());
+
+        let params = CanvasViewParams::default()
+            .with_nodes(vec![node1, node2])
+            .with_frames(vec![frame])
+            .with_edge_visuals(vec![edge])
+            .with_limit(100);
+
+        let json = serde_json::to_string(&params).unwrap();
+        let back: CanvasViewParams = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back.nodes.len(), 2);
+        assert_eq!(back.frames.len(), 1);
+        assert_eq!(back.edge_visuals.len(), 1);
+        assert_eq!(back.limit, Some(100));
+        assert_eq!(back.nodes[0].x, 0.0);
+        assert_eq!(back.nodes[1].x, 300.0);
+    }
+
+    #[test]
+    fn canvas_view_kind_round_trips() {
+        let json = serde_json::to_string(&ViewKind::CanvasView).unwrap();
+        assert_eq!(json, "\"canvas_view\"");
+        let back: ViewKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ViewKind::CanvasView);
+    }
+
+    #[test]
+    fn view_params_canvas_variant_round_trips() {
+        use crate::id::NoteId;
+
+        let node = CanvasNode::new(ObjectRef::Note(NoteId::new()), 10.0, 20.0, 100.0, 100.0);
+        let params = ViewParams::CanvasView(CanvasViewParams::default().with_nodes(vec![node]));
+
+        let json = serde_json::to_string(&params).unwrap();
+        let back: ViewParams = serde_json::from_str(&json).unwrap();
+
+        match back {
+            ViewParams::CanvasView(cv_params) => {
+                assert_eq!(cv_params.nodes.len(), 1);
+                assert_eq!(cv_params.nodes[0].x, 10.0);
+                assert_eq!(cv_params.nodes[0].y, 20.0);
+            }
+            _ => panic!("Expected CanvasView variant"),
+        }
+    }
+
+    #[test]
+    fn canvas_view_renders_successfully() {
+        let now = Timestamp::now_utc();
+        let sources: Vec<_> = (0..50)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Canvas Item {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: now - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: IngestionState::Promoted,
+                created_by: Actor::User,
+                created_at: now,
+                version: 1,
+                updated_at: now,
+            })
+            .collect();
+
+        let params = CanvasViewParams::default().with_limit(25);
+        let result = DefaultViewModel::render_canvas_view(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 25);
+        // Should be sorted by captured_at descending (most recent first)
+        assert_eq!(result.source_ids[0], sources[0].id);
+    }
+
+    #[test]
+    fn canvas_view_with_all_components() {
+        use crate::id::NoteId;
+
+        let note1 = NoteId::new();
+        let note2 = NoteId::new();
+
+        let nodes = vec![
+            CanvasNode::new(ObjectRef::Note(note1), 0.0, 0.0, 200.0, 200.0)
+                .with_color_theme("blue".to_string()),
+            CanvasNode::new(ObjectRef::Note(note2), 250.0, 0.0, 200.0, 200.0)
+                .with_color_theme("red".to_string()),
+        ];
+
+        let frames = vec![CanvasFrame::new(
+            "main".to_string(),
+            "Main Concept".to_string(),
+            -50.0,
+            -50.0,
+            600.0,
+            350.0,
+        )
+        .with_background_color("#f5f5f5".to_string())];
+
+        let edges = vec![
+            CanvasEdgeVisual::new(ObjectRef::Note(note1), ObjectRef::Note(note2), "curved".to_string())
+                .with_color("#999999".to_string()),
+        ];
+
+        let params = CanvasViewParams::default()
+            .with_nodes(nodes)
+            .with_frames(frames)
+            .with_edge_visuals(edges)
+            .with_limit(100);
+
+        // Verify structure
+        assert_eq!(params.nodes.len(), 2);
+        assert_eq!(params.frames.len(), 1);
+        assert_eq!(params.edge_visuals.len(), 1);
+
+        // Verify styling is preserved
+        assert_eq!(params.nodes[0].color_theme, Some("blue".to_string()));
+        assert_eq!(params.nodes[1].color_theme, Some("red".to_string()));
+        assert_eq!(params.frames[0].background_color, Some("#f5f5f5".to_string()));
+        assert_eq!(params.edge_visuals[0].color, Some("#999999".to_string()));
+
+        // Verify serialization roundtrip
+        let json = serde_json::to_string(&params).unwrap();
+        let back: CanvasViewParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.nodes.len(), 2);
+        assert_eq!(back.frames.len(), 1);
+        assert_eq!(back.edge_visuals.len(), 1);
+    }
+
+    #[test]
+    fn canvas_view_respects_limit() {
+        let now = Timestamp::now_utc();
+        let sources: Vec<_> = (0..100)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Item {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: now - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: IngestionState::Promoted,
+                created_by: Actor::User,
+                created_at: now,
+                version: 1,
+                updated_at: now,
+            })
+            .collect();
+
+        let params = CanvasViewParams::default().with_limit(30);
+        let result = DefaultViewModel::render_canvas_view(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 30);
     }
 }

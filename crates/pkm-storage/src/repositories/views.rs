@@ -282,6 +282,9 @@ fn parse_view_params(kind_str: &str, params_json: &str) -> crate::Result<pkm_cor
         "graph_view" => serde_json::from_str::<GraphViewParams>(params_json)
             .map(ViewParams::GraphView)
             .map_err(crate::StorageError::from),
+        "canvas_view" => serde_json::from_str::<CanvasViewParams>(params_json)
+            .map(ViewParams::CanvasView)
+            .map_err(crate::StorageError::from),
         _ => Ok(ViewParams::Stub(StubViewParams)),
     }
 }
@@ -303,6 +306,7 @@ fn parse_view_kind(s: &str) -> pkm_core::view::ViewKind {
         "open_questions" => ViewKind::OpenQuestions,
         "action_list" => ViewKind::ActionList,
         "graph_view" => ViewKind::GraphView,
+        "canvas_view" => ViewKind::CanvasView,
         other => {
             // Unknown kind stored in DB — this indicates schema drift or corruption.
             // Log and fall back rather than silently serving wrong data.
@@ -329,6 +333,7 @@ fn view_kind_to_string(kind: pkm_core::view::ViewKind) -> &'static str {
         ViewKind::OpenQuestions => "open_questions",
         ViewKind::ActionList => "action_list",
         ViewKind::GraphView => "graph_view",
+        ViewKind::CanvasView => "canvas_view",
     }
 }
 
@@ -533,5 +538,82 @@ mod tests {
 
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.kind, ViewKind::Timeline);
+    }
+
+    #[test]
+    fn canvas_view_params_round_trip_through_db() {
+        use pkm_core::id::NoteId;
+        use pkm_core::id::ObjectRef;
+
+        let conn = test_db();
+        let repo = SqliteViewRepo { conn: &conn };
+
+        let now = pkm_core::Timestamp::now_utc();
+        let note1 = NoteId::new();
+        let note2 = NoteId::new();
+
+        let node1 = CanvasNode::new(ObjectRef::Note(note1), 0.0, 0.0, 200.0, 200.0);
+        let node2 = CanvasNode::new(ObjectRef::Note(note2), 300.0, 0.0, 200.0, 200.0);
+
+        let frame = CanvasFrame::new(
+            "frame-1".to_string(),
+            "Research Ideas".to_string(),
+            -50.0,
+            -50.0,
+            600.0,
+            350.0,
+        )
+        .with_background_color("#f5f5f5".to_string());
+
+        let edge =
+            CanvasEdgeVisual::new(ObjectRef::Note(note1), ObjectRef::Note(note2), "curved".to_string())
+                .with_color("#999999".to_string());
+
+        let params = CanvasViewParams::default()
+            .with_nodes(vec![node1, node2])
+            .with_frames(vec![frame])
+            .with_edge_visuals(vec![edge])
+            .with_limit(100);
+
+        let view = View {
+            id: ViewId::new(),
+            kind: ViewKind::CanvasView,
+            title: "My Infinite Canvas".to_string(),
+            params: ViewParams::CanvasView(params.clone()),
+            created_by: pkm_core::Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        let view_id = view.id;
+        repo.create(&view).expect("Failed to create canvas view");
+
+        let retrieved = repo.get(view_id).expect("Failed to get canvas view").unwrap();
+        assert_eq!(retrieved.kind, ViewKind::CanvasView);
+        assert_eq!(retrieved.title, "My Infinite Canvas");
+
+        match retrieved.params {
+            ViewParams::CanvasView(p) => {
+                assert_eq!(p.nodes.len(), 2);
+                assert_eq!(p.frames.len(), 1);
+                assert_eq!(p.edge_visuals.len(), 1);
+                assert_eq!(p.limit, Some(100));
+
+                // Verify nodes
+                assert_eq!(p.nodes[0].x, 0.0);
+                assert_eq!(p.nodes[1].x, 300.0);
+
+                // Verify frame
+                assert_eq!(p.frames[0].id, "frame-1");
+                assert_eq!(p.frames[0].label, "Research Ideas");
+                assert_eq!(p.frames[0].background_color, Some("#f5f5f5".to_string()));
+
+                // Verify edge
+                assert_eq!(p.edge_visuals[0].routing_style, "curved");
+                assert_eq!(p.edge_visuals[0].color, Some("#999999".to_string()));
+            }
+            other => panic!("Expected CanvasView params, got {:?}", other),
+        }
     }
 }
