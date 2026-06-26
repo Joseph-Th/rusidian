@@ -98,30 +98,6 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Next to work on
 
-#### C4f · ADR 0004: Entity merge semantics ✅
-- Created `docs/adr/0004-entity-merge-semantics.md`. Documents non-lossy merge design, survivor/loser pattern, link re-pointing, rollback mechanics, and alternatives considered. All tests pass.
-
-#### F0 · Typed view parameters + view model ✅
-- Replaced `params: Value` with typed params: `ReadingQueueParams`, `ReviewQueueParams`, and a `ViewParams` enum.
-- Created `ViewModel` trait with `DefaultViewModel` implementation.
-- `ReadingQueueParams` supports filtering by ingestion state and limit; renders sources sorted by captured_at.
-- `ReviewQueueParams` provides basic review queue rendering.
-- 6 tests verify: params serialization, view round-trips, filtering, limits, and full rendering pipeline.
-- All tests pass; ready for F1+ to extend with additional view types.
-
-#### F1 · Timeline view ✅
-- Implemented TimelineParams with grouping (day/week/month/year), limit, chronological ordering.
-- Added render_timeline to ViewModel trait with DefaultViewModel implementation.
-- Tests verify: params serialization, reverse-chronological ordering, limit enforcement.
-- 3 tests pass; ready for F2+.
-
-#### F2 · Dossier view ✅
-- Implemented DossierParams with entity_id and limit.
-- Added render_dossier to ViewModel trait with DefaultViewModel implementation.
-- Placeholder: returns all sources (entity linking deferred to B2/E-series).
-- Tests verify: params serialization, limit enforcement.
-- 2 tests pass; foundation ready for entity-source linking integration.
-
 #### F3 · ReviewQueue view ⬜
 - **Depends on:** F0 ✅.
 - **Do:** Complete ReviewQueue view implementation. Show sources/blocks awaiting review, filter by review state.
@@ -142,23 +118,11 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Do:** Implement remaining views (DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList).
 - **Done when:** All views render and have basic tests.
 
-#### A0a · App service layer ✅
-- Created `pkm-app` crate as workspace member with service layer.
-- AppService manages Connection lifecycle, creates repos on-demand.
-- Commands: create_note (returns id, title). Test verifies round-trip.
-- Foundation complete; Tauri binary deferred to A0b (blocks on B2::NoteRepo::list()).
-
 #### A0b · Tauri desktop shell (`pkm-app` binary) ⬜
-- **Depends on:** A0a ✅.
+- **Depends on:** A0a ✅, B2 ✅.
 - **Do:** Add Tauri main.rs binary that wires AppService and exposes commands.
   Set up window, menu, data dir. Write ADR confirming UI-shell choice.
 - **Done when:** App launches, opens db, creates + lists note via frontend commands.
-
-#### B2 · Complete note persistence (BLOCKING for A0) ⬜
-- **Depends on:** B1.
-- **Do:** Add NoteRepo::list(), block CRUD, ordered block fetch. Required for
-  complete A0 "list notes" acceptance.
-- **Done when:** NoteRepo trait has list() and block methods; storage impl complete.
 
 ---
 
