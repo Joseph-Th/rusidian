@@ -54,6 +54,8 @@ pub trait EntityRepo {
     fn get(&self, id: EntityId) -> Result<Option<Entity>>;
     /// Mark an entity as merged into another, preserving the loser's history.
     fn set_merged_into(&self, loser_id: EntityId, survivor_id: EntityId) -> Result<()>;
+    /// Clear the merged_into field (restore an entity from merged state).
+    fn clear_merged_into(&self, entity_id: EntityId) -> Result<()>;
     // TODO(C4): list/filter, search by alias, count by kind.
 }
 

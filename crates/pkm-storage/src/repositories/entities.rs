@@ -111,6 +111,20 @@ impl EntityRepo for SqliteEntityRepo<'_> {
             })?;
         Ok(())
     }
+
+    fn clear_merged_into(&self, entity_id: EntityId) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE entity SET merged_into = NULL WHERE id = ?",
+                params![entity_id.to_string()],
+            )
+            .map_err(|e| {
+                let se = crate::StorageError::from(e);
+                let ce: CoreError = se.into();
+                ce
+            })?;
+        Ok(())
+    }
 }
 
 /// Pure mapping function: builds an Entity from extracted fields.

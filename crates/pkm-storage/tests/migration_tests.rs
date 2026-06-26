@@ -390,8 +390,8 @@ fn s2_propose_apply_and_rollback_block_update() {
     );
 
     // Step 4: Apply the action
-    let applied_action = apply_action(action_id, &action_repo, &note_repo, None)
-        .expect("failed to apply action");
+    let applied_action =
+        apply_action(action_id, &action_repo, &note_repo, None).expect("failed to apply action");
 
     assert_eq!(
         applied_action.status,
@@ -399,8 +399,8 @@ fn s2_propose_apply_and_rollback_block_update() {
     );
 
     // Step 5: Rollback the action
-    let rollback_action =
-        rollback_action(action_id, &action_repo, &note_repo).expect("failed to rollback action");
+    let rollback_action = rollback_action(action_id, &action_repo, &note_repo, None, None)
+        .expect("failed to rollback action");
 
     assert_eq!(
         rollback_action.status,

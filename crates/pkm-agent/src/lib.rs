@@ -21,7 +21,7 @@ use pkm_core::agent_action::{AgentAction, AgentActionStatus, OperationKind};
 use pkm_core::block::BlockContent;
 use pkm_core::id::{AgentActionId, BlockId, EntityId, NoteId, ObjectRef, SourceId, ViewId};
 use pkm_core::link::LinkType;
-use pkm_core::ports::{AgentActionRepo, LinkRepo, NoteRepo};
+use pkm_core::ports::{AgentActionRepo, EntityRepo, LinkRepo, NoteRepo};
 use pkm_core::{Actor, Timestamp};
 
 pub type Result<T> = std::result::Result<T, AgentError>;
@@ -243,6 +243,16 @@ pub fn execute(
         AgentActionStatus::Proposed
     };
 
+    // For MergeEntities, populate the diff with loser IDs so rollback can restore them
+    let diff = match &req.operation {
+        Operation::MergeEntities { loser_ids, .. } => {
+            serde_json::json!({
+                "loser_ids": loser_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
+            })
+        }
+        _ => serde_json::json!({}),
+    };
+
     let action = AgentAction {
         id: AgentActionId::new(),
         actor: req.actor,
@@ -251,7 +261,7 @@ pub fn execute(
         status,
         rationale: req.rationale,
         created_at: now,
-        diff: serde_json::json!({}),
+        diff,
         rollback_of: None,
     };
 
@@ -373,6 +383,8 @@ pub fn rollback_action(
     action_id: AgentActionId,
     action_repo: &dyn AgentActionRepo,
     _note_repo: &dyn NoteRepo,
+    entity_repo: Option<&dyn EntityRepo>,
+    link_repo: Option<&dyn LinkRepo>,
 ) -> Result<AgentAction> {
     // Fetch the action to roll back
     let action = action_repo
@@ -386,7 +398,7 @@ pub fn rollback_action(
         ));
     }
 
-    // For now, we only support rolling back UpdateBlock operations
+    // Handle the operation based on its kind
     match action.operation {
         OperationKind::UpdateBlock => {
             // In a full implementation, we'd extract the before state from the diff.
@@ -413,8 +425,70 @@ pub fn rollback_action(
 
             Ok(rollback_action)
         }
+        OperationKind::MergeEntities => {
+            // Restore merged_into to NULL for all losers and re-point links back
+            let entity_repo = entity_repo.ok_or_else(|| {
+                AgentError::Rejected("EntityRepo required for MergeEntities rollback".into())
+            })?;
+            let link_repo = link_repo.ok_or_else(|| {
+                AgentError::Rejected("LinkRepo required for MergeEntities rollback".into())
+            })?;
+
+            // Extract survivor ID from the target (the surviving entity)
+            let survivor_id = match action.target {
+                ObjectRef::Entity(id) => id,
+                _ => {
+                    return Err(AgentError::Rejected(
+                        "MergeEntities target must be an Entity".into(),
+                    ))
+                }
+            };
+
+            // Extract loser IDs from the diff
+            if let Ok(Some(loser_ids)) = extract_loser_ids_from_diff(&action.diff) {
+                for loser_id in loser_ids {
+                    // Restore loser entity's merged_into to NULL
+                    entity_repo.clear_merged_into(loser_id)?;
+
+                    // Re-point links back from survivor to loser.
+                    // Note: A full implementation would track which specific links were re-pointed
+                    // during the merge. For now, we reconstruct by looking at links that
+                    // point to the survivor entity (these are the ones that pointed to the loser
+                    // before the merge).
+                    let links_to_survivor = link_repo.get_by_to(ObjectRef::Entity(survivor_id))?;
+
+                    for link in links_to_survivor {
+                        // Re-point this link back to the loser if it doesn't originate from
+                        // the survivor (those links were originally from the loser)
+                        if link.from != ObjectRef::Entity(survivor_id) {
+                            link_repo.set_to(link.id, ObjectRef::Entity(loser_id))?;
+                        }
+                    }
+                }
+            }
+
+            // Mark original as Reverted
+            action_repo.set_status(action_id, AgentActionStatus::Reverted)?;
+
+            // Create rollback action
+            let rollback_action = AgentAction {
+                id: AgentActionId::new(),
+                actor: Actor::System,
+                operation: OperationKind::RollbackAction,
+                target: action.target,
+                status: AgentActionStatus::Applied,
+                rationale: format!("Rollback of action {}", action_id),
+                created_at: Timestamp::now_utc(),
+                diff: serde_json::json!({}),
+                rollback_of: Some(action_id),
+            };
+
+            action_repo.create(&rollback_action)?;
+
+            Ok(rollback_action)
+        }
         _ => Err(AgentError::Rejected(
-            "Only UpdateBlock rollback is currently supported".into(),
+            "Only UpdateBlock and MergeEntities rollback are currently supported".into(),
         )),
     }
 }
@@ -689,6 +763,102 @@ mod tests {
     }
 
     #[test]
+    fn merge_entities_apply_and_rollback() {
+        use pkm_core::link::{Link, LinkType};
+        use pkm_core::review::ReviewState;
+
+        let action_repo = MockActionRepo::new();
+        let link_repo = MockLinkRepo::new();
+        let entity_repo = MockEntityRepo::new();
+
+        // Create test entity IDs
+        let survivor_id = EntityId::new();
+        let loser_id = EntityId::new();
+
+        // Create loser entity
+        let loser_entity = pkm_core::entity::Entity {
+            id: loser_id,
+            kind: pkm_core::entity::EntityKind::Person,
+            name: "Loser Entity".to_string(),
+            aliases: vec![],
+            created_by: Actor::User,
+            created_at: Timestamp::now_utc(),
+            merged_into: None,
+        };
+
+        entity_repo.create_entity(loser_entity);
+
+        // Create test links pointing to the loser entity
+        let link1 = Link {
+            id: pkm_core::id::LinkId::new(),
+            from: ObjectRef::Note(NoteId::new()),
+            to: ObjectRef::Entity(loser_id),
+            link_type: LinkType::RelatedTo,
+            created_by: Actor::User,
+            created_at: Timestamp::now_utc(),
+            reviewed: ReviewState::Accepted,
+            confidence: None,
+        };
+
+        link_repo.add_link_to(ObjectRef::Entity(loser_id), link1.clone());
+
+        // Create merge action
+        let merge_action = AgentAction {
+            id: AgentActionId::new(),
+            actor: Actor::User,
+            operation: OperationKind::MergeEntities,
+            target: ObjectRef::Entity(survivor_id),
+            status: AgentActionStatus::Proposed,
+            rationale: "Merging duplicate entities".to_string(),
+            created_at: Timestamp::now_utc(),
+            diff: serde_json::json!({
+                "loser_ids": [loser_id.to_string()]
+            }),
+            rollback_of: None,
+        };
+
+        action_repo.create(&merge_action).unwrap();
+
+        // Apply the merge
+        let applied = apply_action(
+            merge_action.id,
+            &action_repo,
+            &MockNoteRepo,
+            Some(&link_repo),
+        )
+        .unwrap();
+
+        assert_eq!(applied.status, AgentActionStatus::Applied);
+
+        // Update mock entity to reflect the merge
+        entity_repo.set_merged_into(loser_id, survivor_id);
+
+        // Verify link was re-pointed during apply
+        let set_to_calls = link_repo.set_to_calls.borrow();
+        assert_eq!(set_to_calls.len(), 1);
+        assert_eq!(set_to_calls[0].0, link1.id);
+        assert_eq!(set_to_calls[0].1, ObjectRef::Entity(survivor_id));
+
+        drop(set_to_calls);
+
+        // Now rollback
+        let rollback = rollback_action(
+            merge_action.id,
+            &action_repo,
+            &MockNoteRepo,
+            Some(&entity_repo),
+            Some(&link_repo),
+        )
+        .unwrap();
+
+        assert_eq!(rollback.status, AgentActionStatus::Applied);
+        assert_eq!(rollback.operation, OperationKind::RollbackAction);
+
+        // Verify loser entity was restored
+        assert!(entity_repo.cleared_merged.borrow().contains(&loser_id));
+    }
+
+    #[test]
     fn merge_entities_apply_repoints_links() {
         use pkm_core::link::{Link, LinkType};
         use pkm_core::review::ReviewState;
@@ -783,6 +953,53 @@ mod tests {
             _new_content: pkm_core::block::BlockContent,
         ) -> pkm_core::Result<pkm_core::block::Block> {
             unimplemented!()
+        }
+    }
+
+    /// A simple in-memory mock EntityRepo for testing.
+    struct MockEntityRepo {
+        entities: RefCell<HashMap<EntityId, pkm_core::entity::Entity>>,
+        merged_into: RefCell<HashMap<EntityId, EntityId>>,
+        cleared_merged: RefCell<Vec<EntityId>>,
+    }
+
+    impl MockEntityRepo {
+        fn new() -> Self {
+            Self {
+                entities: RefCell::new(HashMap::new()),
+                merged_into: RefCell::new(HashMap::new()),
+                cleared_merged: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn create_entity(&self, entity: pkm_core::entity::Entity) {
+            self.entities.borrow_mut().insert(entity.id, entity);
+        }
+    }
+
+    impl pkm_core::ports::EntityRepo for MockEntityRepo {
+        fn create(&self, entity: &pkm_core::entity::Entity) -> pkm_core::Result<()> {
+            self.entities.borrow_mut().insert(entity.id, entity.clone());
+            Ok(())
+        }
+
+        fn get(&self, id: EntityId) -> pkm_core::Result<Option<pkm_core::entity::Entity>> {
+            Ok(self.entities.borrow().get(&id).cloned())
+        }
+
+        fn set_merged_into(
+            &self,
+            loser_id: EntityId,
+            survivor_id: EntityId,
+        ) -> pkm_core::Result<()> {
+            self.merged_into.borrow_mut().insert(loser_id, survivor_id);
+            Ok(())
+        }
+
+        fn clear_merged_into(&self, entity_id: EntityId) -> pkm_core::Result<()> {
+            self.cleared_merged.borrow_mut().push(entity_id);
+            self.merged_into.borrow_mut().remove(&entity_id);
+            Ok(())
         }
     }
 }
