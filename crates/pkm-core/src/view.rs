@@ -31,6 +31,7 @@ pub enum ViewKind {
     ReviewQueue,
     OpenQuestions,
     ActionList,
+    GraphView,
 }
 
 /// Parameters for ReadingQueue view: shows sources awaiting review/reading.
@@ -385,6 +386,81 @@ impl Default for ActionListParams {
     }
 }
 
+/// Layout type for graph visualization (Phase 7: H5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphLayoutType {
+    /// Force-directed graph layout (nodes repel, edges attract).
+    ForceDirected,
+    /// Hierarchical/tree layout (top-down or left-right).
+    Hierarchical,
+    /// Circular layout (nodes arranged in rings).
+    Circular,
+    /// User-positioned custom layout.
+    Custom,
+}
+
+/// Node position in a graph visualization.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodePosition {
+    /// Entity or source ID.
+    pub id: String,
+    /// X coordinate (0.0 to 1.0 normalized, or pixel absolute).
+    pub x: f64,
+    /// Y coordinate (0.0 to 1.0 normalized, or pixel absolute).
+    pub y: f64,
+}
+
+/// Parameters for GraphView: spatial organization of entities and notes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GraphViewParams {
+    /// Layout algorithm type.
+    pub layout_type: GraphLayoutType,
+    /// Saved node positions (used for custom layouts).
+    pub node_positions: Vec<NodePosition>,
+    /// Maximum number of nodes to show.
+    pub limit: Option<usize>,
+    /// Show/hide edges between nodes.
+    pub show_edges: bool,
+}
+
+impl GraphViewParams {
+    pub fn new() -> Self {
+        Self {
+            layout_type: GraphLayoutType::ForceDirected,
+            node_positions: Vec::new(),
+            limit: Some(100),
+            show_edges: true,
+        }
+    }
+
+    pub fn with_layout(mut self, layout: GraphLayoutType) -> Self {
+        self.layout_type = layout;
+        self
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn with_edges(mut self, show: bool) -> Self {
+        self.show_edges = show;
+        self
+    }
+
+    pub fn with_positions(mut self, positions: Vec<NodePosition>) -> Self {
+        self.node_positions = positions;
+        self
+    }
+}
+
+impl Default for GraphViewParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stub params for unimplemented views (task F1+).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StubViewParams;
@@ -405,6 +481,7 @@ pub enum ViewParams {
     BriefingPage(BriefingPageParams),
     OpenQuestions(OpenQuestionsParams),
     ActionList(ActionListParams),
+    GraphView(GraphViewParams),
     // Stub: other views will be implemented in F1+
     Stub(StubViewParams),
 }
@@ -456,6 +533,10 @@ impl ViewParams {
 
     pub fn action_list() -> Self {
         ViewParams::ActionList(ActionListParams::default())
+    }
+
+    pub fn graph_view() -> Self {
+        ViewParams::GraphView(GraphViewParams::default())
     }
 }
 
@@ -547,6 +628,11 @@ pub trait ViewModel {
 
     fn render_action_list(
         params: &ActionListParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_graph_view(
+        params: &GraphViewParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
@@ -760,6 +846,22 @@ impl ViewModel for DefaultViewModel {
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_graph_view(
+        params: &GraphViewParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: graph view shows sources for spatial visualization.
+        // In production, this would compute layout positions using the layout_type
+        // (force-directed, hierarchical, etc.) and return nodes in rendering order.
+        let mut filtered: Vec<_> = sources.iter().collect();
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(100);
         let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
 
         Ok(ViewRenderResult { source_ids })
@@ -1264,5 +1366,78 @@ mod tests {
         let params = ActionListParams::default().with_limit(10);
         let result = DefaultViewModel::render_action_list(&params, &sources).unwrap();
         assert_eq!(result.source_ids.len(), 10);
+    }
+
+    #[test]
+    fn graph_view_params_serialize_and_deserialize() {
+        let positions = vec![
+            NodePosition {
+                id: "node-1".to_string(),
+                x: 100.0,
+                y: 200.0,
+            },
+            NodePosition {
+                id: "node-2".to_string(),
+                x: 300.0,
+                y: 150.0,
+            },
+        ];
+        let params = GraphViewParams::default()
+            .with_layout(GraphLayoutType::Hierarchical)
+            .with_positions(positions.clone())
+            .with_limit(50)
+            .with_edges(false);
+
+        let json = serde_json::to_string(&params).unwrap();
+        let back: GraphViewParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.layout_type, GraphLayoutType::Hierarchical);
+        assert_eq!(back.node_positions.len(), 2);
+        assert_eq!(back.limit, Some(50));
+        assert!(!back.show_edges);
+    }
+
+    #[test]
+    fn graph_view_renders_successfully() {
+        let now = Timestamp::now_utc();
+        let sources: Vec<_> = (0..30)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Node {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: now - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: IngestionState::Promoted,
+                created_by: Actor::User,
+                created_at: now,
+                version: 1,
+                updated_at: now,
+            })
+            .collect();
+
+        let params = GraphViewParams::default()
+            .with_layout(GraphLayoutType::ForceDirected)
+            .with_limit(15);
+        let result = DefaultViewModel::render_graph_view(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 15);
+        // Should be sorted by captured_at descending (most recent first)
+        assert_eq!(result.source_ids[0], sources[0].id);
+    }
+
+    #[test]
+    fn graph_layout_types_serialize_and_deserialize() {
+        let layouts = vec![
+            GraphLayoutType::ForceDirected,
+            GraphLayoutType::Hierarchical,
+            GraphLayoutType::Circular,
+            GraphLayoutType::Custom,
+        ];
+
+        for layout in layouts {
+            let json = serde_json::to_string(&layout).unwrap();
+            let back: GraphLayoutType = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, layout);
+        }
     }
 }

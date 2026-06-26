@@ -276,6 +276,7 @@ impl AppService {
                 DefaultViewModel::render_open_questions(params, &sources)
             }
             ViewParams::ActionList(params) => DefaultViewModel::render_action_list(params, &sources),
+            ViewParams::GraphView(params) => DefaultViewModel::render_graph_view(params, &sources),
             ViewParams::Stub(_) => Err("Stub view not yet implemented".to_string()),
         }
         .map_err(|e| format!("Failed to render view: {}", e))?;

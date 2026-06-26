@@ -254,6 +254,7 @@ fn parse_view_kind(s: &str) -> pkm_core::view::ViewKind {
         "review_queue" => ViewKind::ReviewQueue,
         "open_questions" => ViewKind::OpenQuestions,
         "action_list" => ViewKind::ActionList,
+        "graph_view" => ViewKind::GraphView,
         _ => ViewKind::ReadingQueue, // Fallback to safest default
     }
 }
@@ -274,6 +275,7 @@ fn view_kind_to_string(kind: pkm_core::view::ViewKind) -> &'static str {
         ViewKind::ReviewQueue => "review_queue",
         ViewKind::OpenQuestions => "open_questions",
         ViewKind::ActionList => "action_list",
+        ViewKind::GraphView => "graph_view",
     }
 }
 

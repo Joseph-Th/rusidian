@@ -216,3 +216,24 @@ pub async fn render_view(
 
     Ok(RenderViewResponse { source_ids })
 }
+
+pub async fn create_graph_view(
+    title: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<CreateViewResponse, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let view_id = svc.create_view(
+        ViewKind::GraphView,
+        title.clone(),
+        ViewParams::graph_view(),
+    )?;
+
+    Ok(CreateViewResponse {
+        id: view_id,
+        kind: "graph_view".to_string(),
+        title,
+    })
+}
