@@ -72,4 +72,22 @@ impl AppService {
 
         Ok(note.map(|n| (n.id.to_string(), n.title)))
     }
+
+    /// List all notes with optional limit.
+    pub fn list_notes(&self, limit: Option<usize>) -> Result<Vec<(String, String)>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let note_repo = SqliteNoteRepo { conn: &conn };
+        let notes = note_repo
+            .list(limit)
+            .map_err(|e| format!("Failed to list notes: {}", e))?;
+
+        Ok(notes
+            .into_iter()
+            .map(|n| (n.id.to_string(), n.title))
+            .collect())
+    }
 }

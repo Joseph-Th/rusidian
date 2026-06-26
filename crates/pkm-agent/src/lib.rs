@@ -946,6 +946,10 @@ mod tests {
             Ok(None)
         }
 
+        fn list(&self, _limit: Option<usize>) -> pkm_core::Result<Vec<pkm_core::note::Note>> {
+            Ok(vec![])
+        }
+
         fn update_block(
             &self,
             _note_id: NoteId,

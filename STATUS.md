@@ -96,39 +96,11 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ## Tasks
 
-### Next to work on
-
-#### F3 · ReviewQueue view ✅
-- Added `ingestion_state_filter` to ReviewQueueParams to allow filtering by ingestion state.
-- Updated `render_review_queue` to filter sources by AwaitingReview or other states.
-- Added helper methods `with_state()` and `with_limit()` for fluent configuration.
-- 2 tests verify: params serialization and filtering by AwaitingReview status.
-- All tests pass; ready for integration with UI layer.
-
-#### F4 · ProjectDashboard view ✅
-- Added ProjectDashboardParams with project_name filter and limit.
-- Updated render_project_dashboard to aggregate and display status (placeholder: shows all sources sorted by recency).
-- Added helper methods with_project() and with_limit() for fluent configuration.
-- 2 tests verify: params serialization and dashboard aggregation.
-- All tests pass; placeholder ready for integration with project metadata when available.
-
-#### F5 · SourceMap view ✅
-- Added SourceMapParams with root_source_id filter and limit.
-- Implemented render_source_map to display provenance chains (placeholder: shows all sources sorted by recency).
-- Added with_source() and with_limit() builder methods.
-- 2 tests verify: params serialization and link chain display.
-- All tests pass; placeholder ready for integration with typed link chains when available.
-
-#### F6 · DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList ✅
-- Implemented 6 view parameter types: DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList.
-- Each has default limit (50) and with_limit() builder method.
-- Implemented render methods for all 6 views (placeholders, show all sources sorted by recency).
-- 1 comprehensive test verifies all 6 views render and respect limits.
-- All tests pass; ready for filtering/aggregation logic when metadata becomes available.
+### Current
 
 #### A0b · Tauri desktop shell (`pkm-app` binary) ⬜
 - **Depends on:** A0a ✅, B2 ✅.
-- **Do:** Break down into subtasks A0b-i, A0b-ii, A0b-iii (see below).
+- **Do:** Break down into subtasks A0b-i, A0b-ii, A0b-iii, A0b-iv (see below).
 - **Done when:** All subtasks complete.
 
 #### A0b-i · ADR 0005: UI shell architecture choice ✅
@@ -137,21 +109,30 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - Alternatives considered: Electron (rejected: heavy), GTK/Qt (rejected: less design flexibility), web-only (rejected: violates local-first), CLI/TUI (rejected: can't deliver visual presentation).
 - Consequences: Tauri binary in pkm-app, command API, single executable, cross-platform support.
 
-#### A0b-ii · Tauri + AppService wiring ⬜
+#### A0b-ii · AppService commands foundation ✅
 - **Depends on:** A0a ✅, A0b-i ✅.
-- **Do:** Add Tauri binary and wire AppService commands (create_note, list_notes).
-- **Done when:** App binary can create and list notes via RPC.
+- **Do:** Add list_notes method to NoteRepo and AppService; create command wrappers for create_note and list_notes.
+- Added `list` method to NoteRepo trait that returns Vec<Note> with optional limit.
+- Implemented `list` in SqliteNoteRepo (queries notes sorted by created_at DESC, respects limit).
+- Added `list_notes` to AppService; returns Vec<(id, title)> tuples.
+- Added `CreateNoteResponse` and `NoteInfo` response types; `list_notes` command wrapper.
+- All tests pass; foundation ready for Tauri integration.
 
-#### A0b-iii · Window, menu, data dir setup ⬜
+#### A0b-iii · Tauri setup and command wiring ⬜
 - **Depends on:** A0b-ii ✅.
+- **Do:** Add Tauri to workspace; create pkm-app binary target; wire create_note and list_notes commands.
+- **Done when:** Tauri app binary can invoke create_note and list_notes via RPC.
+
+#### A0b-iv · Window, menu, data dir setup ⬜
+- **Depends on:** A0b-iii ✅.
 - **Do:** Set up Tauri window, menu bar, persistent data directory.
 - **Done when:** App launches, opens db, shows UI with basic controls.
 
 ---
 
-## Done (29 tasks)
+## Done (33 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, view implementations complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6.
+All foundation, vertical-slice, entity merge, view model, app service, and view implementations complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i.
 
 ---
 

@@ -100,6 +100,53 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         }
     }
 
+    fn list(&self, limit: Option<usize>) -> Result<Vec<Note>> {
+        let query = "SELECT id, title, created_at, created_by FROM note ORDER BY created_at DESC";
+        let mut stmt = self
+            .conn
+            .prepare(query)
+            .map_err(crate::StorageError::from)?;
+
+        let notes: Result<Vec<Note>> = stmt
+            .query_map([], |row| {
+                let id_str: String = row.get(0)?;
+                let title: String = row.get(1)?;
+                let created_at_str: String = row.get(2)?;
+                let created_by_json: String = row.get(3)?;
+
+                Ok((id_str, title, created_at_str, created_by_json))
+            })
+            .map_err(crate::StorageError::from)?
+            .take(limit.unwrap_or(usize::MAX))
+            .map(|result| {
+                let (id_str, title, created_at_str, created_by_json) =
+                    result.map_err(crate::StorageError::from)?;
+
+                let uuid = uuid::Uuid::parse_str(&id_str)
+                    .map_err(|_| pkm_core::CoreError::Invariant("invalid note uuid".into()))?;
+                let id = NoteId(uuid);
+
+                let created_by = serde_json::from_str(&created_by_json)?;
+                let created_at = time::OffsetDateTime::parse(
+                    &created_at_str,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+
+                Ok(Note {
+                    id,
+                    title,
+                    blocks: vec![],
+                    metadata: BTreeMap::new(),
+                    created_at,
+                    created_by,
+                })
+            })
+            .collect();
+
+        notes
+    }
+
     fn update_block(
         &self,
         note_id: NoteId,
