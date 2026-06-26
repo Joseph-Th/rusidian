@@ -831,7 +831,7 @@ mod tests {
         assert_eq!(applied.status, AgentActionStatus::Applied);
 
         // Update mock entity to reflect the merge
-        entity_repo.set_merged_into(loser_id, survivor_id);
+        let _ = entity_repo.set_merged_into(loser_id, survivor_id);
 
         // Verify link was re-pointed during apply
         let set_to_calls = link_repo.set_to_calls.borrow();

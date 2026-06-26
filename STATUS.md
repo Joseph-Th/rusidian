@@ -96,43 +96,10 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ## Tasks
 
-### Recently Completed
+### Next to work on
 
-#### E2 · Keyword/FTS retriever + ranking + filters ✅
-- Implemented parse_query(), rank(), filters (type:, status:, reviewed:, date:, project:). Created migration 0003 for FTS5. All tests pass.
-
-#### E1 · Markdown import/export ✅
-- Implemented blocks_to_markdown(), markdown_to_blocks(), note_to_markdown(), markdown_to_note() with block ID preservation via HTML comments. 7 unit tests pass.
-
-#### C4a · Entity merge: schema migration 0004 ✅
-- Added merged_into, created_by, created_at columns to entity table with backfill. Schema updated.
-
-#### C4b · Entity merge: SqliteEntityRepo persistence ✅
-- Implemented EntityRepo trait and SqliteEntityRepo with full SQL persistence. 2 round-trip tests pass.
-
-#### C4c · Entity merge: Operation enum + MergeEntity ✅
-- MergeEntities operation verified; merge_entities_requires_review() test added. All agent tests pass.
-
-#### C4d · Entity merge: Link re-pointing ✅
-- Added LinkRepo trait with create/get/get_by_to/get_by_from/set_to/set_from. Implemented SqliteLinkRepo with full persistence. Created migration 0005 for link review state/confidence columns. Updated apply_action() to re-point all links when MergeEntities is applied. Added merge_entities_apply_repoints_links test verifying link re-pointing. All tests pass.
-
-#### C4e · Entity merge: Rollback path ✅
-- Added clear_merged_into() to EntityRepo. Updated execute() to populate diff with loser_ids. Updated rollback_action() to restore merged_into and re-point links. Added merge_entities_apply_and_rollback test. All tests pass.
-
-#### C5 · Finalize Provenance ✅
-- Added originating_action and extraction_span fields to Provenance. 7 tests verify round-trip serialization.
-
-### Active — Next to work on
-- **Depends on:** C4d.
-- **Do:** Implement rollback_merge in AgentActionRepo. Restore merged_into→NULL,
-  re-point links back to loser. Verify pre-merge state is fully recoverable.
-- **Done when:** Test: merge → accept → rollback restores all state.
-
-#### C4f · ADR 0004: Entity merge semantics ⬜
-- **Depends on:** C4e.
-- **Do:** Document merge design (non-lossy, survivor/loser, re-pointing strategy,
-  rollback mechanics). Link to tests.
-- **Done when:** ADR written; answers why this design over alternatives.
+#### C4f · ADR 0004: Entity merge semantics ✅
+- Created `docs/adr/0004-entity-merge-semantics.md`. Documents non-lossy merge design, survivor/loser pattern, link re-pointing, rollback mechanics, and alternatives considered. All tests pass.
 
 #### F0 · Typed view parameters + view model ⬜
 - **Depends on:** C-series.
@@ -153,9 +120,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (20 tasks)
+## Done (21 tasks)
 
-All foundation, vertical-slice, and entity merge work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5.
+All foundation, vertical-slice, and entity merge work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f.
 
 ---
 
