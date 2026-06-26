@@ -37,6 +37,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0007_add_versioning",
         include_str!("../migrations/0007_add_versioning.sql"),
     ),
+    (
+        "0008_add_note_metadata",
+        include_str!("../migrations/0008_add_note_metadata.sql"),
+    ),
 ];
 
 /// Apply all pending migrations inside a transaction. Idempotent: safe to call

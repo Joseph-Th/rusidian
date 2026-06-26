@@ -142,20 +142,26 @@ Further: mobile native editor, public publishing, collaboration, plugin API.
 
 ## Deferred / Blocked Items
 
-### A0 — Tauri shell with service commands (🔨)
+### A0 — Tauri shell with service commands (✅)
 
-Currently has:
+Implements a working desktop app with full CRUD operations for notes.
+
+Completed:
 - Tauri window and app structure ✅
-- Service layer with create_note, list_notes, get_note ✅
-- Commands wired to Tauri handlers ✅
-- HTML/CSS/JS frontend with create/list UI ✅
-- command→service→repository→storage pipeline ✅
-- Builds successfully and passes tests ✅
+- Service layer with all CRUD operations ✅
+- Commands wired to Tauri handlers (create, list, get, update, delete) ✅
+- HTML/CSS/JS frontend with full CRUD UI ✅
+- Modal for viewing and editing notes ✅
+- Metadata support in notes ✅
+- command→service→repository→storage pipeline tested end-to-end ✅
+- Migration 0008 adds metadata column to notes table ✅
+- Comprehensive CRUD integration test (crud_workflow_end_to_end) ✅
+- All tests passing, clippy clean ✅
 
 Subtasks:
 - A0a: Add get_note endpoint and view modal (✅)
 - A0b: Add update_note command and inline editing UI (✅)
 - A0c: Add delete_note command and UI (✅)
-- A0d: Verify app runs and basic CRUD works end-to-end (⬜)
+- A0d: Verify app runs and basic CRUD works end-to-end (✅)
 
-A0 blocks H4 (mobile UI) and H5 (visual workspace). H4/H5 require A0's UI foundation.
+A0 enables H4 (mobile UI) and H5 (visual workspace). Foundation is solid.

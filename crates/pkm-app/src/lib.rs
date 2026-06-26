@@ -49,4 +49,73 @@ mod tests {
             "retrieved note title should match created title"
         );
     }
+
+    #[test]
+    fn crud_workflow_end_to_end() {
+        use std::collections::BTreeMap;
+
+        let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
+        let db_path = temp_dir.path().join("crud_test.db");
+        let db_path_str = db_path.to_str().expect("invalid path");
+
+        let service =
+            AppService::new(db_path_str).expect("failed to create AppService with temp db");
+
+        // CREATE: Create a note
+        let original_title = "My Note".to_string();
+        let note_id = service
+            .create_note(original_title.clone())
+            .expect("failed to create note");
+        assert!(!note_id.is_empty(), "note_id should not be empty");
+
+        // READ: Get the note
+        let full_note = service
+            .get_note_full(&note_id)
+            .expect("failed to get note")
+            .expect("note should exist");
+        assert_eq!(full_note.title, original_title, "title should match");
+        assert_eq!(full_note.version, 1, "initial version should be 1");
+
+        // UPDATE: Update the note title and metadata
+        let new_title = "Updated Note".to_string();
+        let mut metadata = BTreeMap::new();
+        metadata.insert("tag".to_string(), serde_json::json!("important"));
+        metadata.insert("project".to_string(), serde_json::json!("myproject"));
+
+        service
+            .update_note(&note_id, new_title.clone(), metadata.clone())
+            .expect("failed to update note");
+
+        // Verify update worked
+        let updated_note = service
+            .get_note_full(&note_id)
+            .expect("failed to get note")
+            .expect("note should exist after update");
+        assert_eq!(updated_note.title, new_title, "title should be updated");
+        assert_eq!(updated_note.version, 2, "version should increment");
+        assert_eq!(updated_note.metadata.len(), 2, "metadata should have 2 entries");
+
+        // LIST: List all notes
+        let notes = service
+            .list_notes(Some(10))
+            .expect("failed to list notes");
+        assert!(!notes.is_empty(), "list should contain the created note");
+
+        // DELETE: Delete the note
+        service
+            .delete_note(&note_id)
+            .expect("failed to delete note");
+
+        // Verify delete worked
+        let deleted = service
+            .get_note(&note_id)
+            .expect("failed to check if note exists");
+        assert!(deleted.is_none(), "note should not exist after deletion");
+
+        // List should be empty
+        let final_list = service
+            .list_notes(Some(10))
+            .expect("failed to list notes");
+        assert!(final_list.is_empty(), "list should be empty after deletion");
+    }
 }

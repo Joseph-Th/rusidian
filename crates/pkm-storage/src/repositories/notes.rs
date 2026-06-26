@@ -1,7 +1,6 @@
 //! SQLite implementation of [`pkm_core::ports::NoteRepo`].
 
 use rusqlite::{params, Connection};
-use std::collections::BTreeMap;
 
 use pkm_core::block::{Block, BlockContent};
 use pkm_core::id::{BlockId, NoteId};
@@ -50,7 +49,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT title, created_at, created_by, version, updated_at FROM note WHERE id = ?1",
+                "SELECT title, created_at, created_by, version, updated_at, metadata FROM note WHERE id = ?1",
             )
             .map_err(crate::StorageError::from)?;
 
@@ -60,6 +59,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             let created_by_json: String = row.get(2)?;
             let version: i64 = row.get(3)?;
             let updated_at_str: String = row.get(4)?;
+            let metadata_json: String = row.get(5)?;
 
             Ok((
                 title,
@@ -67,11 +67,12 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 created_by_json,
                 version,
                 updated_at_str,
+                metadata_json,
             ))
         });
 
         match result {
-            Ok((title, created_at_str, created_by_json, version, updated_at_str)) => {
+            Ok((title, created_at_str, created_by_json, version, updated_at_str, metadata_json)) => {
                 let created_by = serde_json::from_str(&created_by_json)?;
                 let created_at = time::OffsetDateTime::parse(
                     &created_at_str,
@@ -83,6 +84,13 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     &time::format_description::well_known::Rfc3339,
                 )
                 .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+
+                let metadata_value: serde_json::Value = serde_json::from_str(&metadata_json)?;
+                let metadata = metadata_value
+                    .as_object()
+                    .cloned()
+                    .map(|obj| obj.into_iter().collect())
+                    .unwrap_or_default();
 
                 // Fetch block IDs for this note
                 let mut block_stmt = self
@@ -111,7 +119,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     id,
                     title,
                     blocks,
-                    metadata: BTreeMap::new(), // TODO(S2): add metadata to schema
+                    metadata,
                     created_at,
                     created_by,
                     version: version as u32,
@@ -124,7 +132,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     }
 
     fn list(&self, limit: Option<usize>) -> Result<Vec<Note>> {
-        let query = "SELECT id, title, created_at, created_by, version, updated_at FROM note ORDER BY created_at DESC";
+        let query = "SELECT id, title, created_at, created_by, version, updated_at, metadata FROM note ORDER BY created_at DESC";
         let mut stmt = self
             .conn
             .prepare(query)
@@ -138,6 +146,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 let created_by_json: String = row.get(3)?;
                 let version: i64 = row.get(4)?;
                 let updated_at_str: String = row.get(5)?;
+                let metadata_json: String = row.get(6)?;
 
                 Ok((
                     id_str,
@@ -146,12 +155,13 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     created_by_json,
                     version,
                     updated_at_str,
+                    metadata_json,
                 ))
             })
             .map_err(crate::StorageError::from)?
             .take(limit.unwrap_or(usize::MAX))
             .map(|result| {
-                let (id_str, title, created_at_str, created_by_json, version, updated_at_str) =
+                let (id_str, title, created_at_str, created_by_json, version, updated_at_str, metadata_json) =
                     result.map_err(crate::StorageError::from)?;
 
                 let uuid = uuid::Uuid::parse_str(&id_str)
@@ -170,11 +180,18 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 )
                 .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
 
+                let metadata_value: serde_json::Value = serde_json::from_str(&metadata_json)?;
+                let metadata = metadata_value
+                    .as_object()
+                    .cloned()
+                    .map(|obj| obj.into_iter().collect())
+                    .unwrap_or_default();
+
                 Ok(Note {
                     id,
                     title,
                     blocks: vec![],
-                    metadata: BTreeMap::new(),
+                    metadata,
                     created_at,
                     created_by,
                     version: version as u32,
