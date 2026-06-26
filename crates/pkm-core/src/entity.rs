@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::EntityId;
 use crate::{Actor, Timestamp};
+use crate::sync::SyncEligible;
 
 /// Entity classification. Product invariant set — extend via ADR only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +46,16 @@ pub struct Entity {
     pub version: u32,
     /// When this version was created.
     pub updated_at: Timestamp,
+}
+
+impl SyncEligible for Entity {
+    fn version(&self) -> u32 {
+        self.version
+    }
+
+    fn updated_at(&self) -> Timestamp {
+        self.updated_at
+    }
 }
 
 #[cfg(test)]

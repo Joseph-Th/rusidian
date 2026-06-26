@@ -36,6 +36,7 @@ pub mod markdown;
 pub mod ports;
 pub mod provenance;
 pub mod review;
+pub mod sync;
 
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures;

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::id::{BlockId, NoteId};
 use crate::{Actor, Timestamp};
+use crate::sync::SyncEligible;
 
 /// A durable knowledge object. Notes consist of ordered blocks and carry
 /// metadata, provenance, and review state.
@@ -30,6 +31,16 @@ pub struct Note {
     pub version: u32,
     /// When this version was created.
     pub updated_at: Timestamp,
+}
+
+impl SyncEligible for Note {
+    fn version(&self) -> u32 {
+        self.version
+    }
+
+    fn updated_at(&self) -> Timestamp {
+        self.updated_at
+    }
 }
 
 #[cfg(test)]

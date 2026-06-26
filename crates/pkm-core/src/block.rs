@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{BlockId, NoteId, ObjectRef};
 use crate::{Actor, Timestamp};
+use crate::sync::SyncEligible;
 
 /// What a block holds. Start markdown-compatible; richer block kinds (tables,
 /// embeds, generated sections) come later per STATUS.md task C2.
@@ -43,6 +44,16 @@ pub struct Block {
     pub version: u32,
     /// When this version was created.
     pub updated_at: Timestamp,
+}
+
+impl SyncEligible for Block {
+    fn version(&self) -> u32 {
+        self.version
+    }
+
+    fn updated_at(&self) -> Timestamp {
+        self.updated_at
+    }
 }
 
 #[cfg(test)]

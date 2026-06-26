@@ -103,13 +103,20 @@ Phase 7 tasks — expansion beyond the core system:
 ### Phase 7: Expansion
 
 1. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
-   transport contract. Depends on: none (⬜).
+   transport contract. Depends on: none (🔨).
    
    Subtasks:
-   - H3a: Design conflict detection rules (version/timestamp based)
-   - H3b: Define merge algorithm for diverged states
-   - H3c: Design transport contract (sync request/response format)
-   - H3d: Implement versioning checks for sync eligibility
+   - H3a: Design conflict detection rules (version/timestamp based) (✅)
+   - H3b: Define merge algorithm for diverged states (✅)
+   - H3c: Design transport contract (sync request/response format) (✅)
+   - H3d: Implement versioning checks for sync eligibility (✅)
+   
+   Notes: Created ADR 0006 with sync protocol design. Implemented SyncEligible
+   trait in pkm-core with conflict detection algorithm (last-write-wins for 
+   divergent timestamps, conflict for concurrent edits). Added SyncRef type for
+   tracking version/timestamp pairs. All domain types (Note, Source, Entity, Link,
+   View, Block) now implement SyncEligible. 14 tests added covering conflict
+   detection, merge logic, and edge cases. All tests passing, clippy clean.
 
 2. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
    browsers. Depends on: A0 (Tauri shell), H0 (views) (⬜).

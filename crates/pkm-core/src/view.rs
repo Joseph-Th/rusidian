@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::id::{SourceId, ViewId};
 use crate::ingestion::IngestionState;
 use crate::source::Source;
+use crate::sync::SyncEligible;
 
 /// The catalog of supported views. Phase 5 fills these in (STATUS.md F-series).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -762,6 +763,16 @@ impl ViewModel for DefaultViewModel {
         let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
 
         Ok(ViewRenderResult { source_ids })
+    }
+}
+
+impl SyncEligible for View {
+    fn version(&self) -> u32 {
+        self.version
+    }
+
+    fn updated_at(&self) -> crate::Timestamp {
+        self.updated_at
     }
 }
 

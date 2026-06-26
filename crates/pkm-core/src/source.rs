@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::id::SourceId;
 use crate::ingestion::IngestionState;
 use crate::{Actor, Timestamp};
+use crate::sync::SyncEligible;
 
 /// Where a source came from. Extend this enum as new ingestion kinds land
 /// (AGENTS.md lists web article, pdf, email, screenshot, transcript, etc.).
@@ -44,6 +45,16 @@ pub struct Source {
     pub version: u32,
     pub updated_at: Timestamp,
     // TODO(D4): byte_attachment_ref for binary content.
+}
+
+impl SyncEligible for Source {
+    fn version(&self) -> u32 {
+        self.version
+    }
+
+    fn updated_at(&self) -> Timestamp {
+        self.updated_at
+    }
 }
 
 #[cfg(test)]
