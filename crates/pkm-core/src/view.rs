@@ -814,7 +814,7 @@ mod tests {
             title: "My Reading Queue".to_string(),
             params: ViewParams::reading_queue(),
             created_by: crate::Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };
@@ -908,11 +908,16 @@ mod tests {
             updated_at: now,
         }];
 
+        let now = crate::Timestamp::now_utc();
         let view = View {
             id: ViewId::new(),
             kind: ViewKind::ReadingQueue,
             title: "My Reading Queue".to_string(),
             params: ViewParams::reading_queue(),
+            created_by: crate::Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
         };
 
         // Verify the view can be created with typed params
@@ -1042,6 +1047,9 @@ mod tests {
                 content_hash: format!("hash{}", i),
                 ingestion_state: IngestionState::Captured,
                 created_by: Actor::User,
+                created_at: now,
+                version: 1,
+                updated_at: now,
             })
             .collect();
 
@@ -1144,6 +1152,9 @@ mod tests {
                     IngestionState::AwaitingReview
                 },
                 created_by: Actor::User,
+                created_at: now,
+                version: 1,
+                updated_at: now,
             })
             .collect();
 
@@ -1179,6 +1190,9 @@ mod tests {
                 content_hash: format!("hash{}", i),
                 ingestion_state: IngestionState::Promoted,
                 created_by: Actor::User,
+                created_at: now,
+                version: 1,
+                updated_at: now,
             })
             .collect();
 
@@ -1204,6 +1218,9 @@ mod tests {
                 content_hash: format!("hash{}", i),
                 ingestion_state: IngestionState::Promoted,
                 created_by: Actor::User,
+                created_at: now,
+                version: 1,
+                updated_at: now,
             })
             .collect();
 

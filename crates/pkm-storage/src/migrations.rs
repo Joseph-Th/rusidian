@@ -29,6 +29,14 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0005_link_review_state",
         include_str!("../migrations/0005_link_review_state.sql"),
     ),
+    (
+        "0006_add_project_field",
+        include_str!("../migrations/0006_add_project_field.sql"),
+    ),
+    (
+        "0007_add_versioning",
+        include_str!("../migrations/0007_add_versioning.sql"),
+    ),
 ];
 
 /// Apply all pending migrations inside a transaction. Idempotent: safe to call

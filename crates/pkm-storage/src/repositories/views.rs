@@ -6,9 +6,9 @@ use uuid::Uuid;
 use pkm_core::id::ViewId;
 use pkm_core::ports::ViewRepo;
 use pkm_core::view::View;
+use pkm_core::Actor;
 use pkm_core::CoreError;
 use pkm_core::Result;
-use pkm_core::Actor;
 
 /// View persistence backed by SQLite.
 pub struct SqliteViewRepo<'c> {
@@ -18,21 +18,41 @@ pub struct SqliteViewRepo<'c> {
 impl ViewRepo for SqliteViewRepo<'_> {
     fn create(&self, view: &View) -> Result<()> {
         let created_by_json =
-            serde_json::to_string(&view.id.0).map_err(crate::StorageError::from)?;
+            serde_json::to_string(&view.created_by).map_err(crate::StorageError::from)?;
         let params_json = serde_json::to_string(&view.params).map_err(crate::StorageError::from)?;
         let kind_str = view_kind_to_string(view.kind);
+        let created_at_str = view
+            .created_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .map_err(|e| {
+                crate::StorageError::Core(CoreError::Invariant(format!(
+                    "failed to format timestamp: {}",
+                    e
+                )))
+            })?;
+        let updated_at_str = view
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .map_err(|e| {
+                crate::StorageError::Core(CoreError::Invariant(format!(
+                    "failed to format timestamp: {}",
+                    e
+                )))
+            })?;
 
         self.conn
             .execute(
-                "INSERT INTO view (id, kind, title, params, created_at, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO view (id, kind, title, params, created_at, created_by, version, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     view.id.to_string(),
                     kind_str,
                     view.title,
                     params_json,
-                    "2025-01-01T00:00:00Z", // Placeholder: should come from view
+                    created_at_str,
                     created_by_json,
+                    view.version,
+                    updated_at_str,
                 ],
             )
             .map_err(|e| {
@@ -164,7 +184,16 @@ fn parse_actor(json: &str) -> Actor {
 fn build_view_from_fields(
     fields: (String, String, String, String, String, String, i64, String),
 ) -> crate::Result<View> {
-    let (id_str, kind_str, title, params_json, created_at_str, created_by_json, version, updated_at_str) = fields;
+    let (
+        id_str,
+        kind_str,
+        title,
+        params_json,
+        created_at_str,
+        created_by_json,
+        version,
+        updated_at_str,
+    ) = fields;
 
     let id = Uuid::parse_str(&id_str).map(ViewId).map_err(|e| {
         crate::StorageError::Core(CoreError::Invariant(format!("invalid view id: {}", e)))
@@ -272,7 +301,7 @@ mod tests {
             title: "My Reading Queue".to_string(),
             params: ViewParams::reading_queue(),
             created_by: pkm_core::Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };
@@ -301,7 +330,7 @@ mod tests {
             title: "Timeline View".to_string(),
             params: ViewParams::timeline(),
             created_by: pkm_core::Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now.clone(),
         };
@@ -313,7 +342,7 @@ mod tests {
             title: "Reading Queue".to_string(),
             params: ViewParams::reading_queue(),
             created_by: pkm_core::Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };
@@ -338,7 +367,7 @@ mod tests {
                 title: format!("View {}", i),
                 params: ViewParams::reading_queue(),
                 created_by: pkm_core::Actor::User,
-                created_at: now.clone(),
+                created_at: now,
                 version: 1,
                 updated_at: now,
             };
@@ -370,7 +399,7 @@ mod tests {
             title: "Dossier on Entity X".to_string(),
             params: ViewParams::dossier("entity-123".to_string()),
             created_by: pkm_core::Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };
@@ -399,7 +428,7 @@ mod tests {
             title: "Monthly Timeline".to_string(),
             params: ViewParams::timeline(),
             created_by: pkm_core::Actor::User,
-            created_at: now.clone(),
+            created_at: now,
             version: 1,
             updated_at: now,
         };

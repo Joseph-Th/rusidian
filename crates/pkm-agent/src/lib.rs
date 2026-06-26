@@ -776,14 +776,17 @@ mod tests {
         let loser_id = EntityId::new();
 
         // Create loser entity
+        let now = Timestamp::now_utc();
         let loser_entity = pkm_core::entity::Entity {
             id: loser_id,
             kind: pkm_core::entity::EntityKind::Person,
             name: "Loser Entity".to_string(),
             aliases: vec![],
             created_by: Actor::User,
-            created_at: Timestamp::now_utc(),
+            created_at: now,
             merged_into: None,
+            version: 1,
+            updated_at: now,
         };
 
         entity_repo.create_entity(loser_entity);
@@ -795,9 +798,11 @@ mod tests {
             to: ObjectRef::Entity(loser_id),
             link_type: LinkType::RelatedTo,
             created_by: Actor::User,
-            created_at: Timestamp::now_utc(),
+            created_at: now,
             reviewed: ReviewState::Accepted,
             confidence: None,
+            version: 1,
+            updated_at: now,
         };
 
         link_repo.add_link_to(ObjectRef::Entity(loser_id), link1.clone());
@@ -871,15 +876,18 @@ mod tests {
         let loser_id = EntityId::new();
 
         // Create some test links pointing to the loser entity
+        let now = Timestamp::now_utc();
         let link1 = Link {
             id: pkm_core::id::LinkId::new(),
             from: ObjectRef::Note(NoteId::new()),
             to: ObjectRef::Entity(loser_id),
             link_type: LinkType::RelatedTo,
             created_by: Actor::User,
-            created_at: Timestamp::now_utc(),
+            created_at: now,
             reviewed: ReviewState::Accepted,
             confidence: None,
+            version: 1,
+            updated_at: now,
         };
 
         let link2 = Link {
@@ -888,9 +896,11 @@ mod tests {
             to: ObjectRef::Note(NoteId::new()),
             link_type: LinkType::Mentions,
             created_by: Actor::User,
-            created_at: Timestamp::now_utc(),
+            created_at: now,
             reviewed: ReviewState::Proposed,
             confidence: Some(0.95),
+            version: 1,
+            updated_at: now,
         };
 
         // Add links to the mock repo
