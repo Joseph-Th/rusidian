@@ -96,29 +96,27 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ## Tasks
 
-### Active — Next to work on
+### Recently Completed
 
 #### E2 · Keyword/FTS retriever + ranking + filters ✅
-- **Depends on:** B1 ✅, B2 ✅.
-- **Files:** `pkm-search/src/lib.rs` (parse/rank); the `Retriever` impl over
-  SQLite FTS5 lives in `pkm-storage`.
-- **Notes:** Implemented parse_query() for quoted phrases, bare terms, and field filters (type:, status:, reviewed:, date:, project:). Implemented rank() with ContentStatus-aware scoring (UserAuthored > Reviewed > RawSource > others). Expanded SearchQuery/SearchHit with filters and score/snippet fields. Created migration 0003 for FTS5 virtual tables on notes, blocks, sources, entities. Implemented SqliteRetriever with ExactText/FuzzyText search and filter application. Left Semantic and LinkTraversal unimplemented. 8 parse/rank tests pass; migration tests pass; all content status preserved throughout retrieval pipeline.
+- Implemented parse_query(), rank(), filters (type:, status:, reviewed:, date:, project:). Created migration 0003 for FTS5. All tests pass.
 
 #### E1 · Markdown import/export ✅
-- **Depends on:** C2 ✅, B2 ✅.
-- **Notes:** Implemented pure markdown parsing in pkm-core/src/markdown.rs. Functions: blocks_to_markdown(), markdown_to_blocks(), note_to_markdown(), markdown_to_note(), extract_title(). All preserve block IDs via HTML comments for round-tripping. Tested: 7 unit tests covering title extraction, block parsing, block ID preservation, and note-level round-trip (# Title + paragraphs). Note-to-markdown includes title as level-1 heading. Markdown-to-note extracts title and creates blocks with fractional ordering. Folder import (walk directory, create sources) deferred to follow-up as it requires coordination with storage layer for provenance tracking.
+- Implemented blocks_to_markdown(), markdown_to_blocks(), note_to_markdown(), markdown_to_note() with block ID preservation via HTML comments. 7 unit tests pass.
 
 #### C4a · Entity merge: schema migration 0004 ✅
-- **Depends on:** B2 ✅.
-- **Do:** Add merged_into (nullable EntityId), created_by, created_at columns to entity table.
-  Update schema version. Backfill created_at/created_by from existing data.
-- **Done when:** Migration runs; existing entities load with new fields; schema.md updated.
+- Added merged_into, created_by, created_at columns to entity table with backfill. Schema updated.
 
 #### C4b · Entity merge: SqliteEntityRepo persistence ✅
-- **Notes:** Added EntityRepo trait to ports.rs with create(), get(), set_merged_into(). Implemented SqliteEntityRepo in entities.rs with full SQL persistence for all Entity fields including merged_into. Added 2 round-trip tests: entity_create_and_get_round_trip and entity_merge_sets_merged_into. Both tests pass; all entity fields survive persist/retrieve cycle.
+- Implemented EntityRepo trait and SqliteEntityRepo with full SQL persistence. 2 round-trip tests pass.
 
 #### C4c · Entity merge: Operation enum + MergeEntity ✅
-- **Notes:** MergeEntities operation was already defined in Operation enum with (survivor_id, loser_ids). Verified requires_review() returns true (knowledge operation). Added merge_entities_requires_review() test and included MergeEntities in operation_round_trips() serialization test. All 6 agent tests pass.
+- MergeEntities operation verified; merge_entities_requires_review() test added. All agent tests pass.
+
+#### C5 · Finalize Provenance ✅
+- Added originating_action and extraction_span fields to Provenance. 7 tests verify round-trip serialization.
+
+### Active — Next to work on
 
 #### C4d · Entity merge: Link re-pointing ⬜
 - **Depends on:** C4c.

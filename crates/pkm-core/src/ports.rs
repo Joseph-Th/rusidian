@@ -17,7 +17,8 @@
 use crate::agent_action::{AgentAction, AgentActionStatus};
 use crate::block::Block;
 use crate::entity::Entity;
-use crate::id::{AgentActionId, BlockId, EntityId, NoteId, SourceId};
+use crate::id::{AgentActionId, BlockId, EntityId, NoteId, ObjectRef, SourceId};
+use crate::link::Link;
 use crate::note::Note;
 use crate::review::ReviewState;
 use crate::source::Source;
@@ -56,6 +57,20 @@ pub trait EntityRepo {
     // TODO(C4): list/filter, search by alias, count by kind.
 }
 
+/// Persistence for [`Link`] (typed relationships between objects).
+pub trait LinkRepo {
+    fn create(&self, link: &Link) -> Result<()>;
+    fn get(&self, link_id: crate::id::LinkId) -> Result<Option<Link>>;
+    /// Get all links pointing to a target object.
+    fn get_by_to(&self, target: ObjectRef) -> Result<Vec<Link>>;
+    /// Get all links originating from a source object.
+    fn get_by_from(&self, source: ObjectRef) -> Result<Vec<Link>>;
+    /// Update a link's to target (used for entity merge re-pointing).
+    fn set_to(&self, link_id: crate::id::LinkId, new_to: ObjectRef) -> Result<()>;
+    /// Update a link's from target (used for entity merge re-pointing).
+    fn set_from(&self, link_id: crate::id::LinkId, new_from: ObjectRef) -> Result<()>;
+}
+
 /// Append-only persistence for agent action audit trail (AGENTS.md "Agent Action").
 /// Actions record what agents changed, who/what triggered it, before/after state,
 /// and rollback references. The log is append-only: statuses advance (Proposed →
@@ -74,7 +89,7 @@ pub trait AgentActionRepo {
     // TODO(D2): list/filter (by target, by status, by actor, by date range), batch get.
 }
 
-// TODO(B2): LinkRepo, ViewRepo.
+// TODO(B2): ViewRepo.
 
 /// Multi-mode retrieval boundary. The SQLite/FTS implementation lives in
 /// `pkm-storage`; pure query-parsing/ranking helpers live in `pkm-search`.

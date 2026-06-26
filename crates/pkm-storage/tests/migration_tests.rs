@@ -53,8 +53,8 @@ fn open_is_idempotent() {
 
     // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    // There are now 4 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge.
-    assert_eq!(version1, "4");
+    // There are now 5 migrations: 0001_init, 0002_extend_source, 0003_fts5_indexing, 0004_entity_merge, 0005_link_review_state.
+    assert_eq!(version1, "5");
 }
 
 #[test]
@@ -390,8 +390,8 @@ fn s2_propose_apply_and_rollback_block_update() {
     );
 
     // Step 4: Apply the action
-    let applied_action =
-        apply_action(action_id, &action_repo, &note_repo).expect("failed to apply action");
+    let applied_action = apply_action(action_id, &action_repo, &note_repo, None)
+        .expect("failed to apply action");
 
     assert_eq!(
         applied_action.status,

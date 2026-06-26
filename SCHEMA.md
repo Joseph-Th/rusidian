@@ -24,6 +24,7 @@ Migrations applied in order:
 2. `0002_extend_source` (STATUS task B2 / task C1): adds source ingestion pipeline fields
 3. `0003_fts5_indexing` (STATUS task E2): adds FTS5 virtual tables
 4. `0004_entity_merge` (STATUS task C4a): adds merged_into column to entity table
+5. `0005_link_review_state` (STATUS task C4d): adds reviewed and confidence to link table
 
 | Table | Backs (core type) | Key columns | Notes |
 |-------|-------------------|-------------|-------|
@@ -32,7 +33,7 @@ Migrations applied in order:
 | `note` | `note::Note` | `id` (PK) | `title`, `created_at` (RFC3339), `created_by` |
 | `block` | `block::Block` | `id` (PK), `note_id` (FK) | `block_type` (enum), `content`, `order` (REAL, fractional for insert-between), `created_at`, `created_by` |
 | `entity` | `entity::Entity` | `id` (PK) | `kind` (enum), `name`, `aliases` (JSON), `created_at`, `created_by`, `merged_into` (TEXT NULL, references `entity(id)`) |
-| `link` | `link::Link` | `id` (PK) | `from_type`/`from_id` (ObjectRef), `to_type`/`to_id` (ObjectRef), `link_type` (enum), `created_at`, `created_by` |
+| `link` | `link::Link` | `id` (PK) | `from_type`/`from_id` (ObjectRef), `to_type`/`to_id` (ObjectRef), `link_type` (enum), `created_at`, `created_by`, `reviewed` (enum), `confidence` (REAL NULL) |
 | `view` | `view::View` | `id` (PK) | `kind` (enum), `title`, `params` (JSON), `created_at`, `created_by` |
 | `agent_action` | `agent_action::AgentAction` | `id` (PK) | `actor` (JSON), `operation` (enum), `target_type`/`target_id` (ObjectRef), `status` (enum), `rationale`, `created_at`, `diff` (JSON), `rollback_of` (FK or NULL) |
 
@@ -48,4 +49,4 @@ Migrations applied in order:
 
 ### What is NOT yet persisted
 
-Tasks C1-C5, D1-D4, E1 will add fields (e.g., `captured_at`, `content_hash`, `ingestion_state` on Source; provenance/review state on blocks/links; etc.). Schema evolves via new migrations.
+Tasks D1-D4, E1 will add fields (e.g., `captured_at`, `content_hash`, `ingestion_state` on Source; provenance/review state on blocks; etc.). Schema evolves via new migrations.

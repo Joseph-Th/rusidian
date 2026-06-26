@@ -8,12 +8,14 @@
 
 pub mod agent_actions;
 pub mod entities;
+pub mod links;
 pub mod notes;
 pub mod sources;
 
 pub use agent_actions::SqliteAgentActionRepo;
 pub use entities::SqliteEntityRepo;
+pub use links::SqliteLinkRepo;
 pub use notes::SqliteNoteRepo;
 pub use sources::SqliteSourceRepo;
 
-// TODO(B2): links.rs, views.rs as those ports are added to core.
+// TODO(B2): views.rs as that port is added to core.

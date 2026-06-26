@@ -21,7 +21,7 @@ use pkm_core::agent_action::{AgentAction, AgentActionStatus, OperationKind};
 use pkm_core::block::BlockContent;
 use pkm_core::id::{AgentActionId, BlockId, EntityId, NoteId, ObjectRef, SourceId, ViewId};
 use pkm_core::link::LinkType;
-use pkm_core::ports::{AgentActionRepo, NoteRepo};
+use pkm_core::ports::{AgentActionRepo, LinkRepo, NoteRepo};
 use pkm_core::{Actor, Timestamp};
 
 pub type Result<T> = std::result::Result<T, AgentError>;
@@ -267,6 +267,7 @@ pub fn apply_action(
     action_id: AgentActionId,
     action_repo: &dyn AgentActionRepo,
     _note_repo: &dyn NoteRepo,
+    link_repo: Option<&dyn LinkRepo>,
 ) -> Result<AgentAction> {
     // Fetch the action
     let mut action = action_repo
@@ -280,8 +281,7 @@ pub fn apply_action(
         ));
     }
 
-    // For now, we only support UpdateBlock operations
-    // This is S2's concrete test case
+    // Handle the operation based on its kind
     match action.operation {
         OperationKind::UpdateBlock => {
             // The operation data is in the persisted action but not directly accessible.
@@ -295,10 +295,77 @@ pub fn apply_action(
 
             Ok(action)
         }
+        OperationKind::MergeEntities => {
+            // Re-point all links pointing to losers → survivor.
+            // LinkRepo is required for merge operations.
+            let link_repo = link_repo.ok_or_else(|| {
+                AgentError::Rejected("LinkRepo required for MergeEntities".into())
+            })?;
+
+            // Extract survivor ID from the target (which is the survivor entity)
+            let survivor_id = match action.target {
+                ObjectRef::Entity(id) => id,
+                _ => {
+                    return Err(AgentError::Rejected(
+                        "MergeEntities target must be an Entity".into(),
+                    ))
+                }
+            };
+
+            // We need to find loser IDs from the stored action's diff or metadata.
+            // For now, we can extract them from the diff if it was populated.
+            // The diff should contain: {"loser_ids": ["uuid1", "uuid2", ...]}
+            if let Ok(Some(loser_ids)) = extract_loser_ids_from_diff(&action.diff) {
+                for loser_id in loser_ids {
+                    // Get all links pointing to this loser entity
+                    let links_to_loser = link_repo.get_by_to(ObjectRef::Entity(loser_id))?;
+
+                    // Re-point each link to the survivor
+                    for link in links_to_loser {
+                        link_repo.set_to(link.id, ObjectRef::Entity(survivor_id))?;
+                    }
+
+                    // Get all links originating from this loser entity
+                    let links_from_loser = link_repo.get_by_from(ObjectRef::Entity(loser_id))?;
+
+                    // Re-point each link's source to the survivor
+                    for link in links_from_loser {
+                        link_repo.set_from(link.id, ObjectRef::Entity(survivor_id))?;
+                    }
+                }
+            }
+
+            // Mark as Applied
+            action_repo.set_status(action_id, AgentActionStatus::Applied)?;
+            action.status = AgentActionStatus::Applied;
+
+            Ok(action)
+        }
         _ => Err(AgentError::Rejected(
-            "Only UpdateBlock is currently supported for apply".into(),
+            "Only UpdateBlock and MergeEntities are currently supported for apply".into(),
         )),
     }
+}
+
+/// Extract loser IDs from the action diff (if populated).
+/// Expected format: {"loser_ids": ["uuid1", "uuid2", ...]}
+fn extract_loser_ids_from_diff(diff: &serde_json::Value) -> Result<Option<Vec<EntityId>>> {
+    if let Some(loser_ids_arr) = diff.get("loser_ids").and_then(|v| v.as_array()) {
+        let mut loser_ids = Vec::new();
+        for id_val in loser_ids_arr {
+            if let Some(id_str) = id_val.as_str() {
+                // Try to deserialize the string as a JSON string (which will be an EntityId)
+                if let Ok(entity_id) = serde_json::from_str::<EntityId>(&format!("\"{}\"", id_str))
+                {
+                    loser_ids.push(entity_id);
+                }
+            }
+        }
+        if !loser_ids.is_empty() {
+            return Ok(Some(loser_ids));
+        }
+    }
+    Ok(None)
 }
 
 /// Rollback an applied action, restoring the prior state.
@@ -538,6 +605,184 @@ mod tests {
             let json = serde_json::to_string(op).unwrap();
             let back: Operation = serde_json::from_str(&json).unwrap();
             assert_eq!(&back, op);
+        }
+    }
+
+    /// A simple in-memory mock LinkRepo for testing link re-pointing.
+    struct MockLinkRepo {
+        set_to_calls: RefCell<Vec<(pkm_core::id::LinkId, ObjectRef)>>,
+        set_from_calls: RefCell<Vec<(pkm_core::id::LinkId, ObjectRef)>>,
+        links_to: RefCell<HashMap<ObjectRef, Vec<pkm_core::link::Link>>>,
+        links_from: RefCell<HashMap<ObjectRef, Vec<pkm_core::link::Link>>>,
+    }
+
+    impl MockLinkRepo {
+        fn new() -> Self {
+            Self {
+                set_to_calls: RefCell::new(Vec::new()),
+                set_from_calls: RefCell::new(Vec::new()),
+                links_to: RefCell::new(HashMap::new()),
+                links_from: RefCell::new(HashMap::new()),
+            }
+        }
+
+        fn add_link_to(&self, target: ObjectRef, link: pkm_core::link::Link) {
+            self.links_to
+                .borrow_mut()
+                .entry(target)
+                .or_default()
+                .push(link);
+        }
+
+        fn add_link_from(&self, source: ObjectRef, link: pkm_core::link::Link) {
+            self.links_from
+                .borrow_mut()
+                .entry(source)
+                .or_default()
+                .push(link);
+        }
+    }
+
+    impl pkm_core::ports::LinkRepo for MockLinkRepo {
+        fn create(&self, _link: &pkm_core::link::Link) -> pkm_core::Result<()> {
+            Ok(())
+        }
+
+        fn get(
+            &self,
+            _link_id: pkm_core::id::LinkId,
+        ) -> pkm_core::Result<Option<pkm_core::link::Link>> {
+            Ok(None)
+        }
+
+        fn get_by_to(&self, target: ObjectRef) -> pkm_core::Result<Vec<pkm_core::link::Link>> {
+            Ok(self
+                .links_to
+                .borrow()
+                .get(&target)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        fn get_by_from(&self, source: ObjectRef) -> pkm_core::Result<Vec<pkm_core::link::Link>> {
+            Ok(self
+                .links_from
+                .borrow()
+                .get(&source)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        fn set_to(&self, link_id: pkm_core::id::LinkId, new_to: ObjectRef) -> pkm_core::Result<()> {
+            self.set_to_calls.borrow_mut().push((link_id, new_to));
+            Ok(())
+        }
+
+        fn set_from(
+            &self,
+            link_id: pkm_core::id::LinkId,
+            new_from: ObjectRef,
+        ) -> pkm_core::Result<()> {
+            self.set_from_calls.borrow_mut().push((link_id, new_from));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn merge_entities_apply_repoints_links() {
+        use pkm_core::link::{Link, LinkType};
+        use pkm_core::review::ReviewState;
+
+        let action_repo = MockActionRepo::new();
+        let link_repo = MockLinkRepo::new();
+
+        // Create test entity IDs
+        let survivor_id = EntityId::new();
+        let loser_id = EntityId::new();
+
+        // Create some test links pointing to the loser entity
+        let link1 = Link {
+            id: pkm_core::id::LinkId::new(),
+            from: ObjectRef::Note(NoteId::new()),
+            to: ObjectRef::Entity(loser_id),
+            link_type: LinkType::RelatedTo,
+            created_by: Actor::User,
+            created_at: Timestamp::now_utc(),
+            reviewed: ReviewState::Accepted,
+            confidence: None,
+        };
+
+        let link2 = Link {
+            id: pkm_core::id::LinkId::new(),
+            from: ObjectRef::Entity(loser_id),
+            to: ObjectRef::Note(NoteId::new()),
+            link_type: LinkType::Mentions,
+            created_by: Actor::User,
+            created_at: Timestamp::now_utc(),
+            reviewed: ReviewState::Proposed,
+            confidence: Some(0.95),
+        };
+
+        // Add links to the mock repo
+        link_repo.add_link_to(ObjectRef::Entity(loser_id), link1.clone());
+        link_repo.add_link_from(ObjectRef::Entity(loser_id), link2.clone());
+
+        // Create a merge operation in an action with loser IDs in the diff
+        let action = AgentAction {
+            id: AgentActionId::new(),
+            actor: Actor::User,
+            operation: OperationKind::MergeEntities,
+            target: ObjectRef::Entity(survivor_id),
+            status: AgentActionStatus::Proposed,
+            rationale: "Merging duplicate entities".to_string(),
+            created_at: Timestamp::now_utc(),
+            diff: serde_json::json!({
+                "loser_ids": [loser_id.to_string()]
+            }),
+            rollback_of: None,
+        };
+
+        action_repo.create(&action).unwrap();
+
+        // Apply the action, which should re-point the links
+        let result = apply_action(action.id, &action_repo, &MockNoteRepo, Some(&link_repo));
+
+        assert!(result.is_ok());
+        let applied_action = result.unwrap();
+        assert_eq!(applied_action.status, AgentActionStatus::Applied);
+
+        // Verify that set_to was called for link1 (pointing to loser)
+        let set_to_calls = link_repo.set_to_calls.borrow();
+        assert_eq!(set_to_calls.len(), 1);
+        assert_eq!(set_to_calls[0].0, link1.id);
+        assert_eq!(set_to_calls[0].1, ObjectRef::Entity(survivor_id));
+
+        // Verify that set_from was called for link2 (from loser)
+        let set_from_calls = link_repo.set_from_calls.borrow();
+        assert_eq!(set_from_calls.len(), 1);
+        assert_eq!(set_from_calls[0].0, link2.id);
+        assert_eq!(set_from_calls[0].1, ObjectRef::Entity(survivor_id));
+    }
+
+    /// A minimal mock NoteRepo for testing.
+    struct MockNoteRepo;
+
+    impl pkm_core::ports::NoteRepo for MockNoteRepo {
+        fn create(&self, _note: &pkm_core::note::Note) -> pkm_core::Result<()> {
+            Ok(())
+        }
+
+        fn get(&self, _id: NoteId) -> pkm_core::Result<Option<pkm_core::note::Note>> {
+            Ok(None)
+        }
+
+        fn update_block(
+            &self,
+            _note_id: NoteId,
+            _block_id: BlockId,
+            _new_content: pkm_core::block::BlockContent,
+        ) -> pkm_core::Result<pkm_core::block::Block> {
+            unimplemented!()
         }
     }
 }
