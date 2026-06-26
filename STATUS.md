@@ -106,13 +106,19 @@ Phase 7 tasks — expansion beyond the core system:
    Subtasks:
    - H4a: Responsive layout for capture form (✅)
    - H4b: Touch-friendly edit controls (✅)
-   - H4c: Mobile-optimized search interface (⬜)
+   - H4c: Mobile-optimized search interface (✅)
    - H4d: Test on mobile browsers (⬜)
    
    Notes (H4a-H4b): Added mobile-first CSS with viewport meta tag. Media queries
    for tablets (768px) and phones (480px). Touch-friendly button/input heights
    (min 44px). Flexible layouts with flexbox. Modal full-width on mobile.
    Improved padding/margins for touch targets. All tests passing (110).
+   
+   Notes (H4c): Added search command to Tauri backend using pkm-search parsing
+   and SqliteRetriever. Search results display with mobile-optimized styling
+   (44px+ touch targets). Green left border for search results, distinct from
+   notes (blue). Enter key triggers search. Fuzzy text search by default. All 122
+   tests passing.
 
 2. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
    and notes. Depends on: H0 (views) (✅), A0 (Tauri shell) (✅).
