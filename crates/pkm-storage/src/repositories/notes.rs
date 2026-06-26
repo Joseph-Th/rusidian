@@ -1,85 +1,76 @@
 //! SQLite implementation of [`pkm_core::ports::NoteRepo`].
+//!
+//! Hybrid markdown-first + SQLite-index architecture:
+//! - Notes are written to disk as markdown files (vault_path)
+//! - SQLite maintains an FTS5 index for fast search
+//! - Blocks and note metadata are stored in both formats for redundancy
 
+use std::path::PathBuf;
 use rusqlite::{params, Connection};
 
 use pkm_core::block::{Block, BlockContent};
 use pkm_core::id::{BlockId, NoteId};
+use pkm_core::markdown;
 use pkm_core::note::Note;
 use pkm_core::ports::NoteRepo;
 use pkm_core::Result;
 
-/// Note persistence backed by SQLite.
+/// Note persistence backed by SQLite + markdown files.
+/// The vault_path is the root directory where .md files are stored.
 pub struct SqliteNoteRepo<'c> {
     pub conn: &'c Connection,
+    pub vault_path: PathBuf,
 }
 
-impl NoteRepo for SqliteNoteRepo<'_> {
-    fn create(&self, note: &Note) -> Result<()> {
-        // Insert the note itself
-        let created_at_str = note
-            .created_at
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| "unknown".to_string());
-        let updated_at_str = note
-            .updated_at
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| "unknown".to_string());
-
-        let created_by_json = serde_json::to_string(&note.created_by)?;
-
-        self.conn
-            .execute(
-                "INSERT INTO note (id, title, created_at, created_by, version, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    note.id.to_string(),
-                    note.title,
-                    created_at_str,
-                    created_by_json,
-                    note.version,
-                    updated_at_str,
-                ],
-            )
-            .map_err(crate::StorageError::from)?;
-
-        Ok(())
-    }
-
-    fn get(&self, id: NoteId) -> Result<Option<Note>> {
+impl SqliteNoteRepo<'_> {
+    /// Helper: fetch all blocks for a note from the database.
+    fn fetch_blocks(&self, note_id: NoteId) -> Result<Vec<Block>> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT title, created_at, created_by, version, updated_at, metadata FROM note WHERE id = ?1",
+                "SELECT id, block_type, content, \"order\", created_at, created_by, version, updated_at \
+                 FROM block WHERE note_id = ?1 ORDER BY \"order\"",
             )
             .map_err(crate::StorageError::from)?;
 
-        let result = stmt.query_row(params![id.to_string()], |row| {
-            let title: String = row.get(0)?;
-            let created_at_str: String = row.get(1)?;
-            let created_by_json: String = row.get(2)?;
-            let version: i64 = row.get(3)?;
-            let updated_at_str: String = row.get(4)?;
-            let metadata_json: String = row.get(5)?;
+        let blocks: Result<Vec<Block>> = stmt
+            .query_map(params![note_id.to_string()], |row| {
+                let id_str: String = row.get(0)?;
+                let _block_type: String = row.get(1)?;
+                let content_json: String = row.get(2)?;
+                let order: f32 = row.get(3)?;
+                let created_at_str: String = row.get(4)?;
+                let created_by_json: String = row.get(5)?;
+                let version: i64 = row.get(6)?;
+                let updated_at_str: String = row.get(7)?;
 
-            Ok((
-                title,
-                created_at_str,
-                created_by_json,
-                version,
-                updated_at_str,
-                metadata_json,
-            ))
-        });
+                Ok((
+                    id_str,
+                    content_json,
+                    order,
+                    created_at_str,
+                    created_by_json,
+                    version,
+                    updated_at_str,
+                ))
+            })
+            .map_err(crate::StorageError::from)?
+            .map(|result| {
+                let (
+                    id_str,
+                    content_json,
+                    order,
+                    created_at_str,
+                    created_by_json,
+                    version,
+                    updated_at_str,
+                ) = result.map_err(crate::StorageError::from)?;
 
-        match result {
-            Ok((
-                title,
-                created_at_str,
-                created_by_json,
-                version,
-                updated_at_str,
-                metadata_json,
-            )) => {
+                let uuid = uuid::Uuid::parse_str(&id_str)
+                    .map_err(|_| pkm_core::CoreError::Invariant("invalid block uuid".into()))?;
+                let id = BlockId(uuid);
+
+                let content = serde_json::from_str(&content_json)?;
                 let created_by = serde_json::from_str(&created_by_json)?;
                 let created_at = time::OffsetDateTime::parse(
                     &created_at_str,
@@ -92,46 +83,137 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 )
                 .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
 
-                let metadata_value: serde_json::Value = serde_json::from_str(&metadata_json)?;
-                let metadata = metadata_value
-                    .as_object()
-                    .cloned()
-                    .map(|obj| obj.into_iter().collect())
-                    .unwrap_or_default();
-
-                // Fetch block IDs for this note
-                let mut block_stmt = self
-                    .conn
-                    .prepare("SELECT id FROM block WHERE note_id = ?1 ORDER BY \"order\"")
-                    .map_err(crate::StorageError::from)?;
-
-                let block_ids: Result<Vec<BlockId>> = block_stmt
-                    .query_map(params![id.to_string()], |row| {
-                        let block_id_str: String = row.get(0)?;
-                        Ok(block_id_str)
-                    })
-                    .map_err(crate::StorageError::from)?
-                    .map(|result| {
-                        let block_id_str = result.map_err(crate::StorageError::from)?;
-                        let uuid = uuid::Uuid::parse_str(&block_id_str).map_err(|_| {
-                            pkm_core::CoreError::Invariant("invalid block uuid".into())
-                        })?;
-                        Ok(BlockId(uuid))
-                    })
-                    .collect();
-
-                let blocks = block_ids?;
-
-                Ok(Some(Note {
+                Ok(Block {
                     id,
-                    title,
-                    blocks,
-                    metadata,
-                    created_at,
+                    note_id,
+                    content,
+                    order,
                     created_by,
-                    version: version as u32,
+                    created_at,
+                    source_provenance_ref: None,
+                    version: u32::try_from(version).unwrap_or(1),
                     updated_at,
-                }))
+                })
+            })
+            .collect();
+
+        blocks
+    }
+}
+
+impl NoteRepo for SqliteNoteRepo<'_> {
+    fn create(&self, note: &Note) -> Result<()> {
+        // STEP 1: Fetch blocks to write the markdown file
+        let blocks = self.fetch_blocks(note.id)?;
+
+        // STEP 2: Generate markdown and write to disk
+        let markdown_text = markdown::note_to_markdown(note, &blocks);
+        let file_path = self.vault_path.join(note.file_name());
+        std::fs::write(&file_path, &markdown_text)
+            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write note file: {}", e)))?;
+
+        // STEP 3: Insert the note into SQLite, recording the file path
+        let created_at_str = note
+            .created_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
+        let updated_at_str = note
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
+        let metadata_json = serde_json::to_string(&note.metadata)?;
+        let created_by_json = serde_json::to_string(&note.created_by)?;
+        let file_path_str = file_path
+            .to_str()
+            .ok_or_else(|| pkm_core::CoreError::Invariant("invalid file path".into()))?;
+
+        self.conn
+            .execute(
+                "INSERT INTO note (id, title, created_at, created_by, version, updated_at, metadata, file_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    note.id.to_string(),
+                    note.title,
+                    created_at_str,
+                    created_by_json,
+                    note.version,
+                    updated_at_str,
+                    metadata_json,
+                    file_path_str,
+                ],
+            )
+            .map_err(crate::StorageError::from)?;
+
+        Ok(())
+    }
+
+    fn get(&self, id: NoteId) -> Result<Option<Note>> {
+        // Query SQLite to get all metadata including version
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT file_path, created_at, created_by, version, updated_at FROM note WHERE id = ?1",
+            )
+            .map_err(crate::StorageError::from)?;
+
+        let result = stmt.query_row(params![id.to_string()], |row| {
+            let file_path: String = row.get(0)?;
+            let created_at_str: String = row.get(1)?;
+            let created_by_json: String = row.get(2)?;
+            let version: i64 = row.get(3)?;
+            let updated_at_str: String = row.get(4)?;
+
+            Ok((file_path, created_at_str, created_by_json, version, updated_at_str))
+        });
+
+        match result {
+            Ok((file_path, created_at_str, created_by_json, version, updated_at_str)) => {
+                // Read the markdown file from disk
+                let markdown_text = std::fs::read_to_string(&file_path)
+                    .map_err(|e| pkm_core::CoreError::Invariant(
+                        format!("failed to read note file {}: {}", file_path, e)
+                    ))?;
+
+                // Parse the markdown into a Note and Blocks using the frontmatter
+                let created_at = pkm_core::Timestamp::now_utc();
+                let (mut note, _blocks) = markdown::markdown_to_note(
+                    &markdown_text,
+                    id,
+                    pkm_core::Actor::User,
+                    created_at,
+                )
+                .map_err(|e| pkm_core::CoreError::Invariant(
+                    format!("failed to parse markdown: {}", e)
+                ))?;
+
+                // Merge in database metadata: version, updated_at, and created timestamps
+                note.version = u32::try_from(version).unwrap_or(1);
+
+                let created_by = serde_json::from_str(&created_by_json)?;
+                note.created_by = created_by;
+
+                let created_at = time::OffsetDateTime::parse(
+                    &created_at_str,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+                note.created_at = created_at;
+
+                let updated_at = time::OffsetDateTime::parse(
+                    &updated_at_str,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+                note.updated_at = updated_at;
+
+                // Fetch full blocks from the database (they may have been updated independently)
+                let blocks = self.fetch_blocks(id)?;
+
+                // Reconstruct block IDs in the correct order
+                let block_ids: Vec<BlockId> = blocks.iter().map(|b| b.id).collect();
+                note.blocks = block_ids;
+
+                Ok(Some(note))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(crate::StorageError::from(e).into()),
@@ -226,21 +308,35 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     }
 
     fn update(&self, note: &Note) -> Result<()> {
+        // STEP 1: Fetch blocks for this note
+        let blocks = self.fetch_blocks(note.id)?;
+
+        // STEP 2: Generate markdown and write to disk
+        let markdown_text = markdown::note_to_markdown(note, &blocks);
+        let file_path = self.vault_path.join(note.file_name());
+        std::fs::write(&file_path, &markdown_text)
+            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write note file: {}", e)))?;
+
+        // STEP 3: Update the note in SQLite
         let updated_at_str = note
             .updated_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
 
         let metadata_json = serde_json::to_string(&note.metadata)?;
+        let file_path_str = file_path
+            .to_str()
+            .ok_or_else(|| pkm_core::CoreError::Invariant("invalid file path".into()))?;
 
         let rows = self.conn
             .execute(
-                "UPDATE note SET title = ?1, version = ?2, updated_at = ?3, metadata = ?4 WHERE id = ?5",
+                "UPDATE note SET title = ?1, version = ?2, updated_at = ?3, metadata = ?4, file_path = ?5 WHERE id = ?6",
                 params![
                     note.title,
                     note.version as i64,
                     updated_at_str,
                     metadata_json,
+                    file_path_str,
                     note.id.to_string(),
                 ],
             )
@@ -272,32 +368,69 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         block_id: BlockId,
         new_content: BlockContent,
     ) -> Result<Block> {
-        let content_json = serde_json::to_string(&new_content)?;
         let now = pkm_core::Timestamp::now_utc();
-        let updated_at_str = now
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| "unknown".to_string());
 
-        self.conn
-            .execute(
-                "UPDATE block SET content = ?1, version = version + 1, updated_at = ?2 WHERE id = ?3 AND note_id = ?4",
-                params![content_json, updated_at_str, block_id.to_string(), note_id.to_string()],
+        // STEP 1: Query SQLite for the file path
+        let file_path_str: String = self
+            .conn
+            .query_row(
+                "SELECT file_path FROM note WHERE id = ?1",
+                params![note_id.to_string()],
+                |row| row.get(0),
             )
             .map_err(crate::StorageError::from)?;
 
-        // Retrieve the updated block to return current state.
+        // STEP 2: Read the full markdown file
+        let markdown_text = std::fs::read_to_string(&file_path_str)
+            .map_err(|e| pkm_core::CoreError::Invariant(
+                format!("failed to read note file: {}", e)
+            ))?;
+
+        // STEP 3: Parse the markdown file into a Note and Blocks
+        let (_note, mut parsed_blocks) = markdown::markdown_to_note(
+            &markdown_text,
+            note_id,
+            pkm_core::Actor::User,
+            now,
+        )
+        .map_err(|e| pkm_core::CoreError::Invariant(
+            format!("failed to parse markdown: {}", e)
+        ))?;
+
+        // STEP 4: Find the block and update it
+        let mut updated_block = None;
+        for block in &mut parsed_blocks {
+            if block.id == block_id {
+                block.content = new_content.clone();
+                block.version += 1;
+                block.updated_at = now;
+                updated_block = Some(block.clone());
+                break;
+            }
+        }
+
+        let updated_block = updated_block
+            .ok_or_else(|| pkm_core::CoreError::Invariant(
+                format!("block {} not found in note {}", block_id, note_id)
+            ))?;
+
+        // STEP 5: Fetch the full note from the database
         let mut stmt = self
             .conn
-            .prepare("SELECT \"order\", created_at, created_by, version FROM block WHERE id = ?1")
+            .prepare(
+                "SELECT title, created_at, created_by, version, updated_at, metadata FROM note WHERE id = ?1",
+            )
             .map_err(crate::StorageError::from)?;
 
-        let (order, created_at_str, created_by_json, version) = stmt
-            .query_row(params![block_id.to_string()], |row| {
+        let (title, created_at_str, created_by_json, version, updated_at_str, metadata_json) = stmt
+            .query_row(params![note_id.to_string()], |row| {
                 Ok((
-                    row.get::<_, f32>(0)?,
+                    row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             })
             .map_err(crate::StorageError::from)?;
@@ -308,18 +441,60 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             &time::format_description::well_known::Rfc3339,
         )
         .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+        let updated_at = time::OffsetDateTime::parse(
+            &updated_at_str,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
 
-        Ok(Block {
-            id: block_id,
-            note_id,
-            content: new_content,
-            order,
+        let metadata_value: serde_json::Value = serde_json::from_str(&metadata_json)?;
+        let metadata = metadata_value
+            .as_object()
+            .cloned()
+            .map(|obj| obj.into_iter().collect())
+            .unwrap_or_default();
+
+        let block_ids: Vec<BlockId> = parsed_blocks.iter().map(|b| b.id).collect();
+
+        let note = Note {
+            id: note_id,
+            title,
+            blocks: block_ids,
+            metadata,
             created_by,
             created_at,
-            source_provenance_ref: None,
-            version: u32::try_from(version).unwrap_or(1),
-            updated_at: now,
-        })
+            version: version as u32,
+            updated_at,
+        };
+
+        // STEP 6: Re-serialize the whole note via note_to_markdown() and write back to disk
+        let new_markdown = markdown::note_to_markdown(&note, &parsed_blocks);
+        std::fs::write(&file_path_str, new_markdown)
+            .map_err(|e| pkm_core::CoreError::Invariant(
+                format!("failed to write note file: {}", e)
+            ))?;
+
+        // STEP 7: Update the block in SQLite
+        let content_json = serde_json::to_string(&updated_block.content)?;
+        let updated_at_str = updated_block
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        self.conn
+            .execute(
+                "UPDATE block SET content = ?1, version = ?2, updated_at = ?3 WHERE id = ?4 AND note_id = ?5",
+                params![
+                    content_json,
+                    updated_block.version as i64,
+                    updated_at_str,
+                    block_id.to_string(),
+                    note_id.to_string()
+                ],
+            )
+            .map_err(crate::StorageError::from)?;
+
+        Ok(updated_block)
     }
 }
 

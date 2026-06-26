@@ -53,8 +53,8 @@ fn open_is_idempotent() {
 
     // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    // There are now 9 migrations through 0009_fix_fts5_indexes.
-    assert_eq!(version1, "9");
+    // There are now 10 migrations through 0010_markdown_first.
+    assert_eq!(version1, "10");
 }
 
 #[test]
@@ -306,10 +306,12 @@ fn fts5_note_search_finds_created_notes() {
 
     let temp_dir = tempfile::TempDir::new().unwrap();
     let db_path = temp_dir.path().join("fts_test.db");
+    let vault_path = temp_dir.path().join("vault");
+    std::fs::create_dir_all(&vault_path).expect("failed to create vault dir");
 
     let conn = open(&db_path).expect("failed to open db");
 
-    let note_repo = SqliteNoteRepo { conn: &conn };
+    let note_repo = SqliteNoteRepo { conn: &conn, vault_path };
     let now = Timestamp::now_utc();
     let note = Note {
         id: pkm_core::id::NoteId::new(),
@@ -354,11 +356,13 @@ fn s2_propose_apply_and_rollback_block_update() {
 
     let temp_dir = tempfile::TempDir::new().unwrap();
     let db_path = temp_dir.path().join("test.db");
+    let vault_path = temp_dir.path().join("vault");
+    std::fs::create_dir_all(&vault_path).expect("failed to create vault dir");
 
     let conn = open(&db_path).expect("failed to open db");
 
     // Create note and block repos
-    let note_repo = SqliteNoteRepo { conn: &conn };
+    let note_repo = SqliteNoteRepo { conn: &conn, vault_path };
     let action_repo = SqliteAgentActionRepo { conn: &conn };
 
     // Step 1: Create a note and a block

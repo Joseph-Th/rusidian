@@ -45,6 +45,10 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0009_fix_fts5_indexes",
         include_str!("../migrations/0009_fix_fts5_indexes.sql"),
     ),
+    (
+        "0010_markdown_first",
+        include_str!("../migrations/0010_markdown_first.sql"),
+    ),
 ];
 
 /// Apply all pending migrations inside a transaction. Idempotent: safe to call

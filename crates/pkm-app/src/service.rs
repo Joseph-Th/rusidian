@@ -10,26 +10,123 @@ use pkm_search::parse_query;
 use pkm_storage::{open, SqliteNoteRepo, SqliteRetriever, SqliteSourceRepo, SqliteViewRepo};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use crate::watcher::{watch_vault, NoteWatcherEvent};
 
 type GraphNode = (String, f64, f64);
 
 /// The application service: aggregates all repositories and provides
 /// high-level operations for the Tauri frontend. The service manages
-/// the database connection and creates repository instances on-demand.
+/// the database connection, vault directory, and creates repository instances on-demand.
 pub struct AppService {
     conn: Arc<Mutex<Connection>>,
+    vault_path: PathBuf,
 }
 
 impl AppService {
-    /// Create a new AppService with the given database file.
-    pub fn new(db_path: &str) -> Result<Self, String> {
+    /// Create a new AppService with the given database file and vault directory.
+    /// If vault_path is not provided, it defaults to ./vault relative to the database.
+    pub fn new(db_path: &str, vault_path: Option<&str>) -> Result<Self, String> {
         let conn = open(Path::new(db_path)).map_err(|e| format!("Failed to open db: {}", e))?;
+
+        // Determine vault path
+        let vault = if let Some(path) = vault_path {
+            PathBuf::from(path)
+        } else {
+            let db = Path::new(db_path);
+            let db_dir = db.parent().unwrap_or_else(|| Path::new("."));
+            db_dir.join("vault")
+        };
+
+        // Create vault directory if it doesn't exist
+        std::fs::create_dir_all(&vault).map_err(|e| format!("Failed to create vault dir: {}", e))?;
 
         Ok(AppService {
             conn: Arc::new(Mutex::new(conn)),
+            vault_path: vault,
         })
+    }
+
+    /// Start watching the vault directory for external markdown file changes.
+    /// When a user edits a file in an external editor (VS Code, Notepad, etc.),
+    /// this method detects the change, parses the file, and syncs it to the database.
+    ///
+    /// The watcher runs in a background thread and continues until the receiver is dropped.
+    pub fn start_vault_watcher(&self) -> Result<(), String> {
+        let conn_clone = Arc::clone(&self.conn);
+        let vault_path = self.vault_path.clone();
+
+        // Start the file watcher
+        let watcher_rx = watch_vault(&vault_path)
+            .map_err(|e| format!("Failed to start vault watcher: {}", e))?;
+
+        // Spawn a background task to process watcher events
+        std::thread::spawn(move || {
+            while let Ok(event) = watcher_rx.recv() {
+                // Process the watcher event: sync to database
+                if let Err(e) = Self::sync_external_note(&conn_clone, event) {
+                    eprintln!("Failed to sync external note change: {}", e);
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Sync a note from an external file change into the database.
+    /// This is called when the file watcher detects a change to a markdown file.
+    fn sync_external_note(
+        conn: &Arc<Mutex<Connection>>,
+        event: NoteWatcherEvent,
+    ) -> Result<(), String> {
+        let conn = conn
+            .lock()
+            .map_err(|_| "Failed to acquire database lock".to_string())?;
+
+        // Insert or replace the note in the database
+        let note = &event.note;
+        let created_at_str = note
+            .created_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
+        let updated_at_str = note
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let metadata_json = serde_json::to_string(&note.metadata)
+            .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
+        let created_by_json = serde_json::to_string(&note.created_by)
+            .map_err(|e| format!("Failed to serialize actor: {}", e))?;
+        let file_path_str = event
+            .file_path
+            .to_str()
+            .ok_or_else(|| "Invalid file path".to_string())?;
+
+        // INSERT OR REPLACE the note
+        conn.execute(
+            "INSERT OR REPLACE INTO note (id, title, created_at, created_by, version, updated_at, metadata, file_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                note.id.to_string(),
+                note.title,
+                created_at_str,
+                created_by_json,
+                note.version as i64,
+                updated_at_str,
+                metadata_json,
+                file_path_str,
+            ],
+        )
+        .map_err(|e| format!("Failed to insert note: {}", e))?;
+
+        println!(
+            "✓ Synced external note: {} ({})",
+            note.title, event.file_path.display()
+        );
+
+        Ok(())
     }
 
     /// Create a new note and return its ID.
@@ -53,7 +150,7 @@ impl AppService {
             .lock()
             .map_err(|_| "Failed to acquire db lock".to_string())?;
 
-        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         note_repo
             .create(&note)
             .map_err(|e| format!("Failed to create note: {}", e))?;
@@ -72,7 +169,7 @@ impl AppService {
             .lock()
             .map_err(|_| "Failed to acquire db lock".to_string())?;
 
-        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let note = note_repo
             .get(parsed_id)
             .map_err(|e| format!("Failed to get note: {}", e))?;
@@ -87,7 +184,7 @@ impl AppService {
             .lock()
             .map_err(|_| "Failed to acquire db lock".to_string())?;
 
-        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let notes = note_repo
             .list(limit)
             .map_err(|e| format!("Failed to list notes: {}", e))?;
@@ -109,7 +206,7 @@ impl AppService {
             .lock()
             .map_err(|_| "Failed to acquire db lock".to_string())?;
 
-        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let note = note_repo
             .get(parsed_id)
             .map_err(|e| format!("Failed to get note: {}", e))?;
@@ -133,7 +230,7 @@ impl AppService {
             .lock()
             .map_err(|_| "Failed to acquire db lock".to_string())?;
 
-        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let mut note = note_repo
             .get(parsed_id)
             .map_err(|e| format!("Failed to get note: {}", e))?
@@ -162,7 +259,7 @@ impl AppService {
             .lock()
             .map_err(|_| "Failed to acquire db lock".to_string())?;
 
-        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         note_repo
             .delete(parsed_id)
             .map_err(|e| format!("Failed to delete note: {}", e))?;
@@ -309,7 +406,7 @@ impl AppService {
             .lock()
             .map_err(|_| "Failed to acquire db lock".to_string())?;
 
-        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let mut results = Vec::new();
 
         for hit in hits.iter().take(limit.unwrap_or(50)) {

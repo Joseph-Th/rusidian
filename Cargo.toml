@@ -20,6 +20,7 @@ rust-version = "1.94"
 # Dependency Policy questions in AGENTS.md. Keep this list small.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 thiserror = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
@@ -27,6 +28,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 tauri = "2"
 tauri-build = "2"
+notify = "6"
+tokio = { version = "1", features = ["full"] }
 
 # Internal crates referenced by path. Dependency direction is strict and
 # acyclic (see README "Dependency graph"):

@@ -33,6 +33,40 @@ pub struct Note {
     pub updated_at: Timestamp,
 }
 
+impl Note {
+    /// Generate a safe filename from the note title.
+    /// Converts to lowercase, replaces spaces with hyphens, removes special characters,
+    /// and appends .md extension.
+    /// Example: "My Great Idea!" -> "my-great-idea.md"
+    pub fn file_name(&self) -> String {
+        if self.title.is_empty() {
+            return "untitled.md".to_string();
+        }
+
+        let mut filename = String::new();
+        let mut last_was_separator = true;
+
+        for c in self.title.to_lowercase().chars() {
+            if c.is_alphanumeric() {
+                filename.push(c);
+                last_was_separator = false;
+            } else if (c.is_whitespace() || c == '_' || c == '-') && !last_was_separator {
+                filename.push('-');
+                last_was_separator = true;
+            }
+            // Skip all other special characters
+        }
+
+        let filename = filename.trim_matches('-').to_string();
+
+        if filename.is_empty() {
+            "untitled.md".to_string()
+        } else {
+            format!("{}.md", filename)
+        }
+    }
+}
+
 impl SyncEligible for Note {
     fn version(&self) -> u32 {
         self.version
@@ -74,5 +108,124 @@ mod tests {
         assert_eq!(back.metadata, note.metadata);
         assert_eq!(back.created_by, note.created_by);
         assert_eq!(back.version, note.version);
+    }
+
+    #[test]
+    fn file_name_basic() {
+        let now = crate::Timestamp::now_utc();
+        let note = Note {
+            id: NoteId::new(),
+            title: "My Great Idea".to_string(),
+            blocks: vec![],
+            metadata: BTreeMap::new(),
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        assert_eq!(note.file_name(), "my-great-idea.md");
+    }
+
+    #[test]
+    fn file_name_with_special_characters() {
+        let now = crate::Timestamp::now_utc();
+        let note = Note {
+            id: NoteId::new(),
+            title: "My Great Idea!".to_string(),
+            blocks: vec![],
+            metadata: BTreeMap::new(),
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        assert_eq!(note.file_name(), "my-great-idea.md");
+    }
+
+    #[test]
+    fn file_name_with_multiple_special_chars() {
+        let now = crate::Timestamp::now_utc();
+        let note = Note {
+            id: NoteId::new(),
+            title: "Test@#$%^&*() Note???".to_string(),
+            blocks: vec![],
+            metadata: BTreeMap::new(),
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        assert_eq!(note.file_name(), "test-note.md");
+    }
+
+    #[test]
+    fn file_name_with_only_whitespace() {
+        let now = crate::Timestamp::now_utc();
+        let note = Note {
+            id: NoteId::new(),
+            title: "   ".to_string(),
+            blocks: vec![],
+            metadata: BTreeMap::new(),
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        assert_eq!(note.file_name(), "untitled.md");
+    }
+
+    #[test]
+    fn file_name_empty_title() {
+        let now = crate::Timestamp::now_utc();
+        let note = Note {
+            id: NoteId::new(),
+            title: "".to_string(),
+            blocks: vec![],
+            metadata: BTreeMap::new(),
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        assert_eq!(note.file_name(), "untitled.md");
+    }
+
+    #[test]
+    fn file_name_with_hyphens_and_underscores() {
+        let now = crate::Timestamp::now_utc();
+        let note = Note {
+            id: NoteId::new(),
+            title: "My-Test_Note".to_string(),
+            blocks: vec![],
+            metadata: BTreeMap::new(),
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        assert_eq!(note.file_name(), "my-test-note.md");
+    }
+
+    #[test]
+    fn file_name_with_numbers() {
+        let now = crate::Timestamp::now_utc();
+        let note = Note {
+            id: NoteId::new(),
+            title: "Test 123 Note 456".to_string(),
+            blocks: vec![],
+            metadata: BTreeMap::new(),
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        assert_eq!(note.file_name(), "test-123-note-456.md");
     }
 }

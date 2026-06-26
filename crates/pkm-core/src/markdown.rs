@@ -13,7 +13,47 @@ use crate::block::{Block, BlockContent};
 use crate::id::{BlockId, NoteId};
 use crate::note::Note;
 use crate::{Actor, Timestamp};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+/// YAML frontmatter for notes. Serialized as the first block in markdown files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NoteFrontmatter {
+    id: String,
+    created_by: String,
+    created_at: String,
+    metadata: BTreeMap<String, serde_json::Value>,
+}
+
+/// Extract YAML frontmatter from the beginning of markdown text.
+/// Returns (frontmatter, remaining_text). If no frontmatter, returns None for frontmatter.
+fn extract_frontmatter(text: &str) -> (Option<NoteFrontmatter>, String) {
+    if !text.starts_with("---\n") {
+        return (None, text.to_string());
+    }
+
+    if let Some(end_pos) = text[4..].find("\n---\n") {
+        let frontmatter_str = &text[4..4 + end_pos];
+        let remaining = &text[4 + end_pos + 5..].to_string();
+
+        match serde_yaml::from_str::<NoteFrontmatter>(frontmatter_str) {
+            Ok(fm) => (Some(fm), remaining.to_string()),
+            Err(_) => (None, text.to_string()),
+        }
+    } else {
+        (None, text.to_string())
+    }
+}
+
+/// Create YAML frontmatter from note metadata.
+fn create_frontmatter(note: &Note) -> NoteFrontmatter {
+    NoteFrontmatter {
+        id: note.id.0.to_string(),
+        created_by: format!("{:?}", note.created_by),
+        created_at: note.created_at.to_string(),
+        metadata: note.metadata.clone(),
+    }
+}
 
 /// Convert blocks to markdown text. Each block becomes a paragraph or heading
 /// based on its content. Preserves order and block identity as HTML comments.
@@ -120,9 +160,17 @@ pub fn extract_title(text: &str) -> Option<String> {
 }
 
 /// Export a note and its blocks to markdown.
-/// Includes the note title as a level-1 heading, followed by blocks.
+/// Includes YAML frontmatter with note metadata, then the title as a level-1 heading, followed by blocks.
 pub fn note_to_markdown(note: &Note, blocks: &[Block]) -> String {
     let mut md = String::new();
+
+    // Write YAML frontmatter
+    let frontmatter = create_frontmatter(note);
+    if let Ok(yaml_str) = serde_yaml::to_string(&frontmatter) {
+        md.push_str("---\n");
+        md.push_str(&yaml_str);
+        md.push_str("---\n\n");
+    }
 
     // Write title as level-1 heading
     if !note.title.is_empty() {
@@ -138,24 +186,43 @@ pub fn note_to_markdown(note: &Note, blocks: &[Block]) -> String {
 }
 
 /// Import markdown into a new note with blocks.
+/// Extracts YAML frontmatter if present (uses id and metadata from it).
+/// Falls back to provided note_id and defaults if no frontmatter.
 /// Extracts the title from the first heading; creates blocks from paragraphs.
-/// All blocks are created with the same actor and timestamp.
 pub fn markdown_to_note(
     text: &str,
     note_id: NoteId,
     actor: Actor,
     created_at: Timestamp,
 ) -> Result<(Note, Vec<Block>), String> {
-    // Extract title from markdown
-    let title = extract_title(text).unwrap_or_default();
+    // Extract frontmatter if present
+    let (frontmatter, remaining_text) = extract_frontmatter(text);
+
+    // Use frontmatter id if available, otherwise use provided note_id
+    let final_note_id = if let Some(ref fm) = frontmatter {
+        uuid::Uuid::parse_str(&fm.id)
+            .map(NoteId)
+            .unwrap_or(note_id)
+    } else {
+        note_id
+    };
+
+    // Use frontmatter metadata if available, otherwise empty
+    let metadata = frontmatter
+        .as_ref()
+        .map(|fm| fm.metadata.clone())
+        .unwrap_or_default();
+
+    // Extract title from remaining markdown
+    let title = extract_title(&remaining_text).unwrap_or_default();
 
     // Parse blocks from markdown (without title line)
-    let mut blocks_text = text.to_string();
-    if let Some(newline_pos) = text.find('\n') {
-        blocks_text = text[newline_pos + 1..].to_string();
+    let mut blocks_text = remaining_text.to_string();
+    if let Some(newline_pos) = remaining_text.find('\n') {
+        blocks_text = remaining_text[newline_pos + 1..].to_string();
     }
 
-    let mut parsed_blocks = markdown_to_blocks(&blocks_text, note_id)?;
+    let mut parsed_blocks = markdown_to_blocks(&blocks_text, final_note_id)?;
 
     // Update blocks to use the provided actor and timestamp
     for block in &mut parsed_blocks {
@@ -166,10 +233,10 @@ pub fn markdown_to_note(
     let block_ids: Vec<BlockId> = parsed_blocks.iter().map(|b| b.id).collect();
 
     let note = Note {
-        id: note_id,
+        id: final_note_id,
         title,
         blocks: block_ids,
-        metadata: BTreeMap::new(),
+        metadata,
         created_by: actor,
         created_at,
         version: 1,
@@ -317,5 +384,57 @@ mod tests {
         assert!(exported.contains("# Test Note"));
         assert!(exported.contains("First paragraph"));
         assert!(exported.contains("Second paragraph"));
+    }
+
+    #[test]
+    fn yaml_frontmatter_round_trip() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+        let mut metadata = BTreeMap::new();
+        metadata.insert("project".to_string(), serde_json::json!("MyProject"));
+        metadata.insert("priority".to_string(), serde_json::json!(1));
+
+        let original_note = Note {
+            id: note_id,
+            title: "Test Note with Metadata".to_string(),
+            blocks: vec![],
+            metadata,
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Markdown {
+                text: "Some content".to_string(),
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        // Export to markdown with frontmatter
+        let exported = note_to_markdown(&original_note, &blocks);
+
+        // Verify frontmatter is present
+        assert!(exported.starts_with("---\n"));
+        assert!(exported.contains(&note_id.0.to_string()));
+        assert!(exported.contains("MyProject"));
+
+        // Re-parse the markdown
+        let dummy_id = NoteId::new();
+        let (imported_note, _imported_blocks) =
+            markdown_to_note(&exported, dummy_id, Actor::User, now).expect("parse note");
+
+        // Verify ID and metadata are preserved
+        assert_eq!(imported_note.id, original_note.id);
+        assert_eq!(imported_note.title, original_note.title);
+        assert_eq!(imported_note.metadata, original_note.metadata);
     }
 }

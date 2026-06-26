@@ -144,8 +144,16 @@ fn main() {
     }
 
     let service = Arc::new(Mutex::new(
-        AppService::new(&db_path).expect("failed to create AppService"),
+        AppService::new(&db_path, None).expect("failed to create AppService"),
     ));
+
+    // Start the vault file watcher to sync external markdown changes
+    {
+        let service_guard = service.lock().expect("failed to acquire service lock");
+        service_guard
+            .start_vault_watcher()
+            .expect("failed to start vault watcher");
+    }
 
     tauri::Builder::default()
         .menu(Menu::new)

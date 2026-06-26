@@ -96,69 +96,11 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ## Tasks
 
+### Completed
+
+1. **H4** — Web UI mobile support (✅) — Responsive layouts, touch controls, mobile search.
+2. **H5** — Visual workspace: canvas/graph view (✅) — Graph model, node dragging, edge visualization.
+
 ### Current
 
-Phase 7 tasks — expansion beyond the core system:
-
-1. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
-   browsers. Depends on: A0 (Tauri shell) (✅), H0 (views) (✅).
-   
-   Subtasks:
-   - H4a: Responsive layout for capture form (✅)
-   - H4b: Touch-friendly edit controls (✅)
-   - H4c: Mobile-optimized search interface (✅)
-   - H4d: Test on mobile browsers (✅)
-   
-   Notes (H4a-H4b): Added mobile-first CSS with viewport meta tag. Media queries
-   for tablets (768px) and phones (480px). Touch-friendly button/input heights
-   (min 44px). Flexible layouts with flexbox. Modal full-width on mobile.
-   Improved padding/margins for touch targets. All tests passing (110).
-   
-   Notes (H4c): Added search command to Tauri backend using pkm-search parsing
-   and SqliteRetriever. Search results display with mobile-optimized styling
-   (44px+ touch targets). Green left border for search results, distinct from
-   notes (blue). Enter key triggers search. Fuzzy text search by default. All 122
-   tests passing.
-   
-   Notes (H4d): Verified mobile responsive implementation. Viewport meta tag
-   configured. CSS media queries at 768px (tablets) and 480px (phones).
-   All button/input elements have min-height 44px for touch targets. Canvas
-   touch handlers (touchstart, touchmove, touchend) properly implemented with
-   preventDefault for smooth interaction. Modal and layouts responsive across
-   all breakpoints. No visual regressions in desktop view. H4 complete.
-
-2. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
-   and notes. Depends on: H0 (views) (✅), A0 (Tauri shell) (✅).
-   
-   Subtasks:
-   - H5a: Graph data model for spatial layout (✅)
-   - H5b: Canvas rendering with position persistence (✅)
-   - H5c: Interactive node dragging (✅)
-   - H5d: Link visualization on canvas (✅)
-   
-   Notes (H5a): Added GraphView kind with spatial layout support. GraphLayoutType
-   enum (ForceDirected, Hierarchical, Circular, Custom). NodePosition struct for
-   storing (x,y) coordinates. GraphViewParams with layout configuration. Integrated
-   into view rendering pipeline. 3 new tests added, all passing (108 total).
-   
-   Notes (H5b): Added get_graph_view_data command returning nodes with (x,y)
-   positions. Circular layout auto-generated for graphs without saved positions.
-   Canvas element renders nodes as circles with labels, grid background, and
-   metadata. Mobile-responsive: 600px (desktop), 400px (tablets), 300px (phones).
-   All 122 tests passing.
-   
-   Notes (H5c): Implemented mouse and touch drag support for graph nodes. Grab
-   cursor on hover, grabbing cursor while dragging. Hit detection finds nodes
-   within touch radius. Real-time position updates. Touch preventDefault prevents
-   default scrolling during drag. Mobile and desktop drag experience optimized.
-   Persistence deferred to future task (requires ViewRepo.update trait). All 122
-   tests passing.
-   
-   Notes (H5d): Added edge visualization: lines with directional arrow heads
-   connecting node pairs. Proximity-based edges (all pairs shown). show_edges
-   parameter from GraphViewParams controls edge rendering. Gray color for edges.
-   Edge count displayed in canvas statistics. Edges rendered before nodes for
-   proper layering. Complete H5 feature set: model, rendering, interaction, and
-   link visualization. All 122 tests passing.
-
-Further: mobile native editor, public publishing, collaboration, plugin API.
+None. Awaiting Phase 8 planning or deferred items.

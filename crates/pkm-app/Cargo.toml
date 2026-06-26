@@ -19,11 +19,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+time = { workspace = true }
 rusqlite = { workspace = true }
 tauri = { workspace = true, optional = true }
+notify = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 
 [build-dependencies]
