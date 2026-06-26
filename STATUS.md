@@ -161,10 +161,14 @@ All foundation, vertical-slice, entity merge, view model, app service, view impl
 - All tests pass; cargo check/clippy/fmt clean.
 - **Done when:** Fuzzy search returns results for partial/misspelled queries; tests verify. ✅
 
-### G2 · Add text snippets to search results ⬜
+### G2 · Add text snippets to search results ✅
 - **Depends on:** G1 ✅.
 - **Do:** Extract matching text with context (50 chars before/after match).
-- **Done when:** SearchHit.snippet populated with matched text; visible in UI.
+- Implemented extract_snippet() helper to extract text with 50-char context window.
+- Updated all search_*_exact functions to fetch content and populate snippet field.
+- Snippets show matching text with surrounding context (~150 chars max, trimmed).
+- All tests pass; cargo check/clippy/fmt clean.
+- **Done when:** SearchHit.snippet populated with matched text; visible in UI. ✅
 
 ### G3 · Link traversal search ⬜
 - **Depends on:** A0b ✅.

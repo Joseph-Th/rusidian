@@ -74,27 +74,60 @@ impl pkm_core::ports::Retriever for SqliteRetriever {
     }
 }
 
+/// Extract snippet around first occurrence of search term.
+/// Returns ~50 chars before + match + ~50 chars after, centered on the match.
+fn extract_snippet(text: &str, search_term: &str, max_len: usize) -> Option<String> {
+    let text_lower = text.to_lowercase();
+    let search_lower = search_term.to_lowercase();
+
+    if let Some(pos) = text_lower.find(&search_lower) {
+        let context_before = pos.saturating_sub(50);
+        let context_after = std::cmp::min(pos + search_term.len() + 50, text.len());
+
+        let snippet = &text[context_before..context_after];
+        if snippet.len() <= max_len {
+            Some(format!("...{}...", snippet.trim()))
+        } else {
+            Some(format!("...{}...", &snippet[..max_len].trim()))
+        }
+    } else {
+        None
+    }
+}
+
 /// Search notes with exact phrase matching.
 fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
     let mut stmt = conn
         .prepare("SELECT rowid FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&query.text], |row| {
-            let note_id: String = row.get(0)?;
-            Ok(SearchHit {
+    let note_ids: Vec<String> = stmt
+        .query_map([&query.text], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+
+    // For each note, fetch title and create snippet
+    for note_id in note_ids {
+        let mut title_stmt = conn
+            .prepare("SELECT title FROM note WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok(title) = title_stmt.query_row([&note_id], |row| row.get::<_, String>(0)) {
+            let snippet = extract_snippet(&title, &query.text, 150);
+
+            hits.push(SearchHit {
                 object: ObjectRef::Note(pkm_core::id::NoteId(
                     uuid::Uuid::parse_str(&note_id).unwrap(),
                 )),
                 status: ContentStatus::UserAuthored,
                 score: None,
-                snippet: None,
-            })
-        })
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+                snippet,
+            });
+        }
+    }
 
     Ok(hits)
 }
@@ -105,21 +138,32 @@ fn search_blocks_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
         .prepare("SELECT rowid FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&query.text], |row| {
-            let block_id: String = row.get(0)?;
-            Ok(SearchHit {
+    let block_ids: Vec<String> = stmt
+        .query_map([&query.text], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+
+    for block_id in block_ids {
+        let mut content_stmt = conn
+            .prepare("SELECT content FROM block WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok(content) = content_stmt.query_row([&block_id], |row| row.get::<_, String>(0)) {
+            let snippet = extract_snippet(&content, &query.text, 150);
+
+            hits.push(SearchHit {
                 object: ObjectRef::Block(pkm_core::id::BlockId(
                     uuid::Uuid::parse_str(&block_id).unwrap(),
                 )),
                 status: ContentStatus::UserAuthored,
                 score: None,
-                snippet: None,
-            })
-        })
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+                snippet,
+            });
+        }
+    }
 
     Ok(hits)
 }
@@ -133,21 +177,32 @@ fn search_sources_exact(
         .prepare("SELECT rowid FROM source_fts WHERE source_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&query.text], |row| {
-            let source_id: String = row.get(0)?;
-            Ok(SearchHit {
+    let source_ids: Vec<String> = stmt
+        .query_map([&query.text], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+
+    for source_id in source_ids {
+        let mut title_stmt = conn
+            .prepare("SELECT title FROM source WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok(title) = title_stmt.query_row([&source_id], |row| row.get::<_, String>(0)) {
+            let snippet = extract_snippet(&title, &query.text, 150);
+
+            hits.push(SearchHit {
                 object: ObjectRef::Source(pkm_core::id::SourceId(
                     uuid::Uuid::parse_str(&source_id).unwrap(),
                 )),
                 status: ContentStatus::RawSource,
                 score: None,
-                snippet: None,
-            })
-        })
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+                snippet,
+            });
+        }
+    }
 
     Ok(hits)
 }
@@ -161,21 +216,32 @@ fn search_entities_exact(
         .prepare("SELECT rowid FROM entity_fts WHERE entity_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-    let hits: Vec<SearchHit> = stmt
-        .query_map([&query.text], |row| {
-            let entity_id: String = row.get(0)?;
-            Ok(SearchHit {
+    let entity_ids: Vec<String> = stmt
+        .query_map([&query.text], |row| row.get(0))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, rusqlite::Error>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let mut hits = Vec::new();
+
+    for entity_id in entity_ids {
+        let mut name_stmt = conn
+            .prepare("SELECT name FROM entity WHERE id = ?")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        if let Ok(name) = name_stmt.query_row([&entity_id], |row| row.get::<_, String>(0)) {
+            let snippet = extract_snippet(&name, &query.text, 150);
+
+            hits.push(SearchHit {
                 object: ObjectRef::Entity(pkm_core::id::EntityId(
                     uuid::Uuid::parse_str(&entity_id).unwrap(),
                 )),
                 status: ContentStatus::ExtractedMetadata,
                 score: None,
-                snippet: None,
-            })
-        })
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
-        .collect::<Result<Vec<_>, rusqlite::Error>>()
-        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+                snippet,
+            });
+        }
+    }
 
     Ok(hits)
 }
