@@ -100,26 +100,20 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 Phase 7 tasks — expansion beyond the core system:
 
-### Phase 7: Expansion
-
-1. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
-   transport contract. Depends on: none (✅).
+1. **H0** — Presentation-first views. Build the view system: reading queue,
+   review queue, dossier, timeline, source map, entity pages, etc. Each view
+   type has a typed query model and layout rules. Depends on: A0 (✅).
    
    Subtasks:
-   - H3a: Design conflict detection rules (version/timestamp based) (✅)
-   - H3b: Define merge algorithm for diverged states (✅)
-   - H3c: Design transport contract (sync request/response format) (✅)
-   - H3d: Implement versioning checks for sync eligibility (✅)
-   
-   Notes: Created ADR 0006 with sync protocol design. Implemented SyncEligible
-   trait in pkm-core with conflict detection algorithm (last-write-wins for 
-   divergent timestamps, conflict for concurrent edits). Added SyncRef type for
-   tracking version/timestamp pairs. All domain types (Note, Source, Entity, Link,
-   View, Block) now implement SyncEligible. 14 tests added covering conflict
-   detection, merge logic, and edge cases. All tests passing, clippy clean.
+   - H0a: Define ViewKind enum and query model for reading_queue
+   - H0b: Implement query builder and view rendering for reading_queue
+   - H0c: Add review_queue view with filtering and state updates
+   - H0d: Add dossier view (entity-centered gathering)
+   - H0e: Add timeline view with date-based filtering
+   - H0f: Add source_map view for exploring source relationships
 
 2. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
-   browsers. Depends on: A0 (Tauri shell) (✅), H0 (views) (⬜ not started).
+   browsers. Depends on: A0 (Tauri shell) (✅), H0 (views) (⬜ in progress).
    
    Subtasks:
    - H4a: Responsive layout for capture form
@@ -128,7 +122,7 @@ Phase 7 tasks — expansion beyond the core system:
    - H4d: Test on mobile browsers
 
 3. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
-   and notes. Depends on: H0 (view system) (⬜ not started), A0 (Tauri shell) (✅).
+   and notes. Depends on: H0 (views) (⬜ in progress), A0 (Tauri shell) (✅).
    
    Subtasks:
    - H5a: Graph data model for spatial layout
@@ -140,28 +134,25 @@ Further: mobile native editor, public publishing, collaboration, plugin API.
 
 ---
 
-## Deferred / Blocked Items
+## Completed
 
 ### A0 — Tauri shell with service commands (✅)
 
-Implements a working desktop app with full CRUD operations for notes.
+Tauri desktop app with full CRUD for notes. Enables H4 and H5.
 
-Completed:
-- Tauri window and app structure ✅
-- Service layer with all CRUD operations ✅
-- Commands wired to Tauri handlers (create, list, get, update, delete) ✅
-- HTML/CSS/JS frontend with full CRUD UI ✅
-- Modal for viewing and editing notes ✅
-- Metadata support in notes ✅
-- command→service→repository→storage pipeline tested end-to-end ✅
-- Migration 0008 adds metadata column to notes table ✅
-- Comprehensive CRUD integration test (crud_workflow_end_to_end) ✅
-- All tests passing, clippy clean ✅
+- A0a: Get note endpoint and view modal (✅)
+- A0b: Update note command and inline editing UI (✅)
+- A0c: Delete note command and UI (✅)
+- A0d: Verify end-to-end CRUD workflow (✅)
 
-Subtasks:
-- A0a: Add get_note endpoint and view modal (✅)
-- A0b: Add update_note command and inline editing UI (✅)
-- A0c: Add delete_note command and UI (✅)
-- A0d: Verify app runs and basic CRUD works end-to-end (✅)
+### H3 — Sync protocol design (✅)
 
-A0 enables H4 (mobile UI) and H5 (visual workspace). Foundation is solid.
+Conflict detection and merge algorithm for diverged states.
+
+- H3a: Conflict detection rules (version/timestamp based) (✅)
+- H3b: Merge algorithm for diverged states (✅)
+- H3c: Transport contract (sync request/response format) (✅)
+- H3d: Versioning checks for sync eligibility (✅)
+
+ADR 0006 documents the design. SyncEligible trait implemented with
+last-write-wins for divergent timestamps, conflict for concurrent edits.

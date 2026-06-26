@@ -125,6 +125,68 @@ impl SourceRepo for SqliteSourceRepo<'_> {
             }
         }
     }
+
+    fn list(&self, limit: Option<usize>) -> Result<Vec<Source>> {
+        let query = "SELECT id, origin, title, raw_content, created_at, created_by,
+                        captured_at, content_hash, ingestion_state, version, updated_at FROM source ORDER BY captured_at DESC";
+        let mut stmt = self
+            .conn
+            .prepare(query)
+            .map_err(|e| {
+                let se = crate::StorageError::from(e);
+                let ce: CoreError = se.into();
+                ce
+            })?;
+
+        let sources: Result<Vec<Source>> = stmt
+            .query_map([], |row| {
+                let id_str: String = row.get(0)?;
+                let origin_json: String = row.get(1)?;
+                let title: Option<String> = row.get(2)?;
+                let raw_content: String = row.get(3)?;
+                let created_at_str: String = row.get(4)?;
+                let created_by_json: String = row.get(5)?;
+                let captured_at_str: String = row.get(6)?;
+                let content_hash: String = row.get(7)?;
+                let ingestion_state_str: String = row.get(8)?;
+                let version: i64 = row.get(9)?;
+                let updated_at_str: String = row.get(10)?;
+
+                Ok((
+                    id_str,
+                    origin_json,
+                    title,
+                    raw_content,
+                    created_at_str,
+                    created_by_json,
+                    captured_at_str,
+                    content_hash,
+                    ingestion_state_str,
+                    version,
+                    updated_at_str,
+                ))
+            })
+            .map_err(|e| {
+                let se = crate::StorageError::from(e);
+                let ce: CoreError = se.into();
+                ce
+            })?
+            .take(limit.unwrap_or(usize::MAX))
+            .map(|result| {
+                let fields = result.map_err(|e| {
+                    let se = crate::StorageError::from(e);
+                    let ce: CoreError = se.into();
+                    ce
+                })?;
+                build_source_from_fields(fields).map_err(|e| {
+                    let ce: CoreError = e.into();
+                    ce
+                })
+            })
+            .collect();
+
+        sources
+    }
 }
 
 /// Pure mapping function: builds a Source from extracted fields.

@@ -5,7 +5,8 @@
 //! and exposed through the Tauri command handler.
 
 use crate::service::AppService;
-use serde::Serialize;
+use pkm_core::view::{ViewKind, ViewParams};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -110,4 +111,108 @@ pub async fn delete_note(
         .map_err(|_| "Failed to acquire service lock".to_string())?;
 
     svc.delete_note(&note_id)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateViewResponse {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewInfo {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RenderViewResponse {
+    pub source_ids: Vec<String>,
+}
+
+pub async fn create_view(
+    kind: String,
+    title: String,
+    params: ViewParams,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<CreateViewResponse, String> {
+    let view_kind = match kind.as_str() {
+        "reading_queue" => ViewKind::ReadingQueue,
+        "review_queue" => ViewKind::ReviewQueue,
+        "timeline" => ViewKind::Timeline,
+        "dossier" => ViewKind::Dossier,
+        "project_dashboard" => ViewKind::ProjectDashboard,
+        "source_map" => ViewKind::SourceMap,
+        "decision_log" => ViewKind::DecisionLog,
+        "person_profile" => ViewKind::PersonProfile,
+        "entity_page" => ViewKind::EntityPage,
+        "briefing_page" => ViewKind::BriefingPage,
+        "open_questions" => ViewKind::OpenQuestions,
+        "action_list" => ViewKind::ActionList,
+        _ => return Err(format!("Unknown view kind: {}", kind)),
+    };
+
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let view_id = svc.create_view(view_kind, title.clone(), params)?;
+
+    Ok(CreateViewResponse {
+        id: view_id,
+        kind,
+        title,
+    })
+}
+
+pub async fn list_views(
+    limit: Option<usize>,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<Vec<ViewInfo>, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let views = svc.list_views(limit)?;
+
+    Ok(views
+        .into_iter()
+        .map(|v| ViewInfo {
+            id: v.id.to_string(),
+            kind: format!("{:?}", v.kind).to_lowercase(),
+            title: v.title,
+        })
+        .collect())
+}
+
+pub async fn get_view(
+    view_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<Option<ViewInfo>, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let view = svc.get_view(&view_id)?;
+
+    Ok(view.map(|v| ViewInfo {
+        id: v.id.to_string(),
+        kind: format!("{:?}", v.kind).to_lowercase(),
+        title: v.title,
+    }))
+}
+
+pub async fn render_view(
+    view_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<RenderViewResponse, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let source_ids = svc.render_view(&view_id)?;
+
+    Ok(RenderViewResponse { source_ids })
 }

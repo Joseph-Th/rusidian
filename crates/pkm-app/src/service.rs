@@ -3,9 +3,10 @@
 //! should happen. NO business logic in the UI layer.
 
 use pkm_core::note::Note;
-use pkm_core::ports::NoteRepo;
+use pkm_core::ports::{NoteRepo, ViewRepo, SourceRepo};
+use pkm_core::view::{View, ViewKind, ViewParams, DefaultViewModel, ViewModel};
 use pkm_core::{Actor, Timestamp};
-use pkm_storage::{open, SqliteNoteRepo};
+use pkm_storage::{open, SqliteNoteRepo, SqliteViewRepo, SqliteSourceRepo};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -164,5 +165,125 @@ impl AppService {
             .map_err(|e| format!("Failed to delete note: {}", e))?;
 
         Ok(())
+    }
+
+    /// Create a new view and return its ID.
+    pub fn create_view(
+        &self,
+        kind: ViewKind,
+        title: String,
+        params: ViewParams,
+    ) -> Result<String, String> {
+        let now = Timestamp::now_utc();
+        let view = View {
+            id: pkm_core::id::ViewId::new(),
+            kind,
+            title,
+            params,
+            created_by: Actor::User,
+            created_at: now,
+            version: 1,
+            updated_at: now,
+        };
+
+        let view_id = view.id.to_string();
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let view_repo = SqliteViewRepo { conn: &conn };
+        view_repo
+            .create(&view)
+            .map_err(|e| format!("Failed to create view: {}", e))?;
+
+        Ok(view_id)
+    }
+
+    /// List all views with optional limit.
+    pub fn list_views(&self, limit: Option<usize>) -> Result<Vec<View>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let view_repo = SqliteViewRepo { conn: &conn };
+        view_repo
+            .list(limit)
+            .map_err(|e| format!("Failed to list views: {}", e))
+    }
+
+    /// Get a view by ID.
+    pub fn get_view(&self, view_id: &str) -> Result<Option<View>, String> {
+        let uuid = uuid::Uuid::parse_str(view_id)
+            .map_err(|_| format!("Invalid view ID: {}", view_id))?;
+        let parsed_id = pkm_core::id::ViewId(uuid);
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let view_repo = SqliteViewRepo { conn: &conn };
+        view_repo
+            .get(parsed_id)
+            .map_err(|e| format!("Failed to get view: {}", e))
+    }
+
+    /// Render a view by ID, returning matching source IDs in order.
+    pub fn render_view(&self, view_id: &str) -> Result<Vec<String>, String> {
+        let view = self
+            .get_view(view_id)?
+            .ok_or_else(|| format!("View not found: {}", view_id))?;
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let source_repo = SqliteSourceRepo { conn: &conn };
+        let sources = source_repo
+            .list(None)
+            .map_err(|e| format!("Failed to list sources: {}", e))?;
+
+        let result = match &view.params {
+            ViewParams::ReadingQueue(params) => {
+                DefaultViewModel::render_reading_queue(params, &sources)
+            }
+            ViewParams::ReviewQueue(params) => {
+                DefaultViewModel::render_review_queue(params, &sources)
+            }
+            ViewParams::Timeline(params) => DefaultViewModel::render_timeline(params, &sources),
+            ViewParams::Dossier(params) => DefaultViewModel::render_dossier(params, &sources),
+            ViewParams::ProjectDashboard(params) => {
+                DefaultViewModel::render_project_dashboard(params, &sources)
+            }
+            ViewParams::SourceMap(params) => DefaultViewModel::render_source_map(params, &sources),
+            ViewParams::DecisionLog(params) => {
+                DefaultViewModel::render_decision_log(params, &sources)
+            }
+            ViewParams::PersonProfile(params) => {
+                DefaultViewModel::render_person_profile(params, &sources)
+            }
+            ViewParams::EntityPage(params) => {
+                DefaultViewModel::render_entity_page(params, &sources)
+            }
+            ViewParams::BriefingPage(params) => {
+                DefaultViewModel::render_briefing_page(params, &sources)
+            }
+            ViewParams::OpenQuestions(params) => {
+                DefaultViewModel::render_open_questions(params, &sources)
+            }
+            ViewParams::ActionList(params) => DefaultViewModel::render_action_list(params, &sources),
+            ViewParams::Stub(_) => Err("Stub view not yet implemented".to_string()),
+        }
+        .map_err(|e| format!("Failed to render view: {}", e))?;
+
+        Ok(result
+            .source_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect())
     }
 }

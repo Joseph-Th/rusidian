@@ -29,7 +29,9 @@ use crate::Result;
 pub trait SourceRepo {
     fn create(&self, source: &Source) -> Result<()>;
     fn get(&self, id: SourceId) -> Result<Option<Source>>;
-    // TODO(B2): list/filter, user_edit_raw (audited), soft-delete w/ recovery.
+    /// List all sources with optional limit.
+    fn list(&self, limit: Option<usize>) -> Result<Vec<Source>>;
+    // TODO(B2): filter, user_edit_raw (audited), soft-delete w/ recovery.
 }
 
 /// Persistence for [`Note`] and its blocks.

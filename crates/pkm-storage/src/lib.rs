@@ -27,7 +27,7 @@ pub mod retriever;
 
 pub use blob_store::BlobStore;
 pub use exporter::ExportConfig;
-pub use repositories::{SqliteAgentActionRepo, SqliteEntityRepo, SqliteNoteRepo, SqliteSourceRepo};
+pub use repositories::{SqliteAgentActionRepo, SqliteEntityRepo, SqliteNoteRepo, SqliteSourceRepo, SqliteViewRepo};
 pub use retriever::SqliteRetriever;
 
 use thiserror::Error;
