@@ -215,6 +215,7 @@ mod tests {
                 score: None,
                 snippet: None,
                 created_at: None,
+                project: None,
             },
             SearchHit {
                 object: pkm_core::id::ObjectRef::Note(NoteId::new()),
@@ -222,6 +223,7 @@ mod tests {
                 score: None,
                 snippet: None,
                 created_at: None,
+                project: None,
             },
         ];
 
@@ -247,6 +249,7 @@ mod tests {
             score: None,
             snippet: None,
             created_at: None,
+            project: None,
         }];
 
         let query = SearchQuery {

@@ -230,11 +230,15 @@ fn create_hit_for_object(
         ObjectRef::Note(id) => {
             let id_str = id.to_string();
             let mut stmt = conn
-                .prepare("SELECT title, created_at FROM note WHERE id = ?")
+                .prepare("SELECT title, created_at, project FROM note WHERE id = ?")
                 .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-            if let Ok((title, created_at)) = stmt.query_row([&id_str], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            if let Ok((title, created_at, project)) = stmt.query_row([&id_str], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             }) {
                 Ok(Some(SearchHit {
                     object: *obj,
@@ -242,6 +246,7 @@ fn create_hit_for_object(
                     score: None,
                     snippet: Some(format!("Note: {}", title)),
                     created_at: Some(created_at),
+                    project,
                 }))
             } else {
                 Ok(None)
@@ -262,6 +267,7 @@ fn create_hit_for_object(
                     score: None,
                     snippet: Some(format!("Source: {}", title)),
                     created_at: Some(created_at),
+                    project: None,
                 }))
             } else {
                 Ok(None)
@@ -282,6 +288,7 @@ fn create_hit_for_object(
                     score: None,
                     snippet: Some(format!("Entity: {}", name)),
                     created_at: Some(created_at),
+                    project: None,
                 }))
             } else {
                 Ok(None)
@@ -305,6 +312,7 @@ fn create_hit_for_object(
                         &content[..std::cmp::min(50, content.len())]
                     )),
                     created_at: Some(created_at),
+                    project: None,
                 }))
             } else {
                 Ok(None)
@@ -349,14 +357,18 @@ fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
 
     let mut hits = Vec::new();
 
-    // For each note, fetch title and created_at, create snippet
+    // For each note, fetch title, created_at, and project, create snippet
     for note_id in note_ids {
         let mut title_stmt = conn
-            .prepare("SELECT title, created_at FROM note WHERE id = ?")
+            .prepare("SELECT title, created_at, project FROM note WHERE id = ?")
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
-        if let Ok((title, created_at)) = title_stmt.query_row([&note_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        if let Ok((title, created_at, project)) = title_stmt.query_row([&note_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
         }) {
             let snippet = extract_snippet(&title, &query.text, 150);
 
@@ -368,6 +380,7 @@ fn search_notes_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
                 score: None,
                 snippet,
                 created_at: Some(created_at),
+                project,
             });
         }
     }
@@ -407,6 +420,7 @@ fn search_blocks_exact(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
                 score: None,
                 snippet,
                 created_at: Some(created_at),
+                project: None,
             });
         }
     }
@@ -449,6 +463,7 @@ fn search_sources_exact(
                 score: None,
                 snippet,
                 created_at: Some(created_at),
+                project: None,
             });
         }
     }
@@ -491,6 +506,7 @@ fn search_entities_exact(
                 score: None,
                 snippet,
                 created_at: Some(created_at),
+                project: None,
             });
         }
     }
@@ -515,9 +531,11 @@ fn search_notes_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
     let mut hits = Vec::new();
     for note_id in note_ids {
         let mut stmt = conn
-            .prepare("SELECT created_at FROM note WHERE id = ?")
+            .prepare("SELECT created_at, project FROM note WHERE id = ?")
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        let created_at: Option<String> = stmt.query_row([&note_id], |row| row.get(0)).ok();
+        let (created_at, project): (Option<String>, Option<String>) =
+            stmt.query_row([&note_id], |row| Ok((row.get(0).ok(), row.get(1).ok())))
+                .unwrap_or_default();
 
         hits.push(SearchHit {
             object: ObjectRef::Note(pkm_core::id::NoteId(
@@ -527,6 +545,7 @@ fn search_notes_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Resul
             score: None,
             snippet: None,
             created_at,
+            project,
         });
     }
 
@@ -561,6 +580,7 @@ fn search_blocks_fuzzy(conn: &Connection, query: &SearchQuery) -> pkm_core::Resu
             score: None,
             snippet: None,
             created_at,
+            project: None,
         });
     }
 
@@ -598,6 +618,7 @@ fn search_sources_fuzzy(
             score: None,
             snippet: None,
             created_at,
+            project: None,
         });
     }
 
@@ -635,6 +656,7 @@ fn search_entities_fuzzy(
             score: None,
             snippet: None,
             created_at,
+            project: None,
         });
     }
 
@@ -685,7 +707,15 @@ fn apply_filters(results: &mut Vec<SearchHit>, query: &SearchQuery) {
         });
     }
 
-    // TODO(G4b): implement project filter when project field is persisted
+    if let Some(ref project_filter) = filters.project {
+        results.retain(|hit| {
+            if let Some(ref proj) = hit.project {
+                proj == project_filter
+            } else {
+                false
+            }
+        });
+    }
 }
 
 #[cfg(test)]

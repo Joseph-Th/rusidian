@@ -154,4 +154,6 @@ pub struct SearchHit {
     pub snippet: Option<String>,
     /// Creation timestamp for date-based filtering (RFC3339 UTC).
     pub created_at: Option<String>,
+    /// Optional project/tag for filtering (from note metadata or explicit field).
+    pub project: Option<String>,
 }

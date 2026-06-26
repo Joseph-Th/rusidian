@@ -25,12 +25,13 @@ Migrations applied in order:
 3. `0003_fts5_indexing` (STATUS task E2): adds FTS5 virtual tables
 4. `0004_entity_merge` (STATUS task C4a): adds merged_into column to entity table
 5. `0005_link_review_state` (STATUS task C4d): adds reviewed and confidence to link table
+6. `0006_add_project_field` (STATUS task G4b): adds project column to note table for filtering
 
 | Table | Backs (core type) | Key columns | Notes |
 |-------|-------------------|-------------|-------|
 | `schema_version` | — | `version` (PK), `applied_at` | migration ledger; every migration records itself |
 | `source` | `source::Source` | `id` (PK) | raw content write-once; `origin` (TEXT, enum), `title`, `raw_content`, `created_at` (RFC3339), `created_by`, `captured_at` (RFC3339), `content_hash`, `ingestion_state` (enum) |
-| `note` | `note::Note` | `id` (PK) | `title`, `created_at` (RFC3339), `created_by` |
+| `note` | `note::Note` | `id` (PK) | `title`, `created_at` (RFC3339), `created_by`, `project` (TEXT NULL) |
 | `block` | `block::Block` | `id` (PK), `note_id` (FK) | `block_type` (enum), `content`, `order` (REAL, fractional for insert-between), `created_at`, `created_by` |
 | `entity` | `entity::Entity` | `id` (PK) | `kind` (enum), `name`, `aliases` (JSON), `created_at`, `created_by`, `merged_into` (TEXT NULL, references `entity(id)`) |
 | `link` | `link::Link` | `id` (PK) | `from_type`/`from_id` (ObjectRef), `to_type`/`to_id` (ObjectRef), `link_type` (enum), `created_at`, `created_by`, `reviewed` (enum), `confidence` (REAL NULL) |

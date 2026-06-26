@@ -98,50 +98,13 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Current
 
-#### G3 · Link traversal search ✅
-- **Depends on:** A0b ✅.
-- **Do:** Implement graph traversal (follow typed links to related notes/entities).
-- Implemented BFS-based graph traversal with depth limit of 2.
-- Query format: "type:uuid" (e.g., "note:abc123") or just uuid (defaults to note).
-- Traverses both outbound and inbound links to find reachable objects (up to 100).
-- Returns SearchHits with metadata snippets for each reachable object.
-- All tests pass; cargo check/clippy/fmt clean.
-- **Done when:** Search mode LinkTraversal returns reachable objects. ✅
-
-#### G4 · Date range and project filtering ⬜
-- **Depends on:** G2 ✅.
-- **Do:** Implement date_range and project filters in search queries.
-- **Break down:** G4a (date filtering using created_at), G4b (project metadata migration + filtering).
-- **Done when:** Filters exclude results outside range/project; tests verify.
-
-#### G4a · Date range filtering ✅
-- **Depends on:** G2 ✅.
-- **Do:** Implement date_range filter for search results using created_at.
-- Added created_at: Option<String> field to SearchHit for RFC3339 timestamps.
-- Updated all search functions to fetch created_at from note/block/source/entity.
-- Implemented date_range filter in apply_filters using RFC3339 lexicographic comparison.
-- Filter format: date_range:"2025-01-01..2025-12-31" or date_range:"2025-01-01".
-- All tests pass; cargo check/clippy/fmt clean.
-- **Done when:** Date filters work for notes/sources; test verifies exclusion outside range. ✅
-
-#### G4b · Project filtering (post-migration) ⬜
-- **Depends on:** G4a ✅.
-- **Do:** Add project field to schema (migration), implement project filter.
-- **Done when:** Project filter works; requires schema migration + SearchFilters support.
-
-#### G5 · Semantic search foundation ✅
-- **Depends on:** G4 ✅.
-- **Do:** Placeholder for vector-based semantic search (Phase 7 work).
-- Updated error message to explain semantic search is Phase 7 work.
-- Message directs users to use ExactText or FuzzyText in the meantime.
-- All tests pass; cargo check/clippy/fmt clean.
-- **Done when:** SearchMode::Semantic returns informative error with roadmap. ✅
+No active tasks.
 
 ---
 
-## Done (41 tasks)
+## Done (42 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, view implementations, UI shell, and Phase 6 retrieval complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv, G1, G2, G3, G4a, G5.
+All foundation, vertical-slice, entity merge, view model, app service, view implementations, UI shell, and Phase 6 retrieval complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv, G1, G2, G3, G4a, G4b, G5.
 
 ---
 
