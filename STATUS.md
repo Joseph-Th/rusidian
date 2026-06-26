@@ -118,10 +118,15 @@ Phase 7 tasks — expansion beyond the core system:
    and notes. Depends on: H0 (views) (✅), A0 (Tauri shell) (✅).
    
    Subtasks:
-   - H5a: Graph data model for spatial layout
-   - H5b: Canvas rendering with position persistence
-   - H5c: Interactive node dragging
-   - H5d: Link visualization on canvas
+   - H5a: Graph data model for spatial layout (✅)
+   - H5b: Canvas rendering with position persistence (⬜)
+   - H5c: Interactive node dragging (⬜)
+   - H5d: Link visualization on canvas (⬜)
+   
+   Notes (H5a): Added GraphView kind with spatial layout support. GraphLayoutType
+   enum (ForceDirected, Hierarchical, Circular, Custom). NodePosition struct for
+   storing (x,y) coordinates. GraphViewParams with layout configuration. Integrated
+   into view rendering pipeline. 3 new tests added, all passing (108 total).
 
 Further: mobile native editor, public publishing, collaboration, plugin API.
 
