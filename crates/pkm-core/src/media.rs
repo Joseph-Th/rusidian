@@ -67,12 +67,14 @@ impl EmbedProvider {
     }
 
     /// Detect provider from URL. Returns Generic for unrecognized URLs.
+    /// Handles both HTTP and HTTPS URLs.
     pub fn from_url(url: &str) -> Self {
-        if url.contains("youtube.com") || url.contains("youtu.be") {
+        let lower = url.to_lowercase();
+        if lower.contains("youtube.com") || lower.contains("youtu.be") {
             EmbedProvider::YouTube
-        } else if url.contains("twitter.com") || url.contains("x.com") {
+        } else if lower.contains("twitter.com") || lower.contains("x.com") {
             EmbedProvider::Twitter
-        } else if url.contains("docs.google.com") {
+        } else if lower.contains("docs.google.com") || lower.contains("drive.google.com") {
             EmbedProvider::GoogleDrive
         } else {
             EmbedProvider::Generic
@@ -99,7 +101,15 @@ mod tests {
             EmbedProvider::YouTube
         );
         assert_eq!(
+            EmbedProvider::from_url("https://youtu.be/dQw4w9WgXcQ"),
+            EmbedProvider::YouTube
+        );
+        assert_eq!(
             EmbedProvider::from_url("https://twitter.com/example/status/123"),
+            EmbedProvider::Twitter
+        );
+        assert_eq!(
+            EmbedProvider::from_url("https://x.com/example/status/123"),
             EmbedProvider::Twitter
         );
         assert_eq!(
@@ -107,8 +117,68 @@ mod tests {
             EmbedProvider::GoogleDrive
         );
         assert_eq!(
+            EmbedProvider::from_url("https://drive.google.com/file/d/abc"),
+            EmbedProvider::GoogleDrive
+        );
+        assert_eq!(
             EmbedProvider::from_url("https://example.com/page"),
             EmbedProvider::Generic
         );
+    }
+
+    #[test]
+    fn media_type_mime_types_are_correct() {
+        assert_eq!(MediaType::Image.mime_type(), "image/*");
+        assert_eq!(MediaType::Audio.mime_type(), "audio/*");
+        assert_eq!(MediaType::Video.mime_type(), "video/*");
+        assert_eq!(MediaType::Pdf.mime_type(), "application/pdf");
+    }
+
+    #[test]
+    fn embed_provider_from_url_is_case_insensitive() {
+        assert_eq!(
+            EmbedProvider::from_url("HTTPS://YOUTUBE.COM/WATCH"),
+            EmbedProvider::YouTube
+        );
+        assert_eq!(
+            EmbedProvider::from_url("HTTP://TWITTER.COM/STATUS"),
+            EmbedProvider::Twitter
+        );
+        assert_eq!(
+            EmbedProvider::from_url("https://DOCS.GOOGLE.COM/document"),
+            EmbedProvider::GoogleDrive
+        );
+    }
+
+    #[test]
+    fn embed_provider_serializes_correctly() {
+        let providers = vec![
+            EmbedProvider::YouTube,
+            EmbedProvider::Twitter,
+            EmbedProvider::GoogleDrive,
+            EmbedProvider::Generic,
+        ];
+
+        for provider in providers {
+            let json = serde_json::to_string(&provider).expect("serialize");
+            let back: EmbedProvider = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, provider);
+        }
+    }
+
+    #[test]
+    fn media_type_serializes_correctly() {
+        let types = vec![
+            MediaType::Image,
+            MediaType::Audio,
+            MediaType::Video,
+            MediaType::Pdf,
+        ];
+
+        for media_type in types {
+            let json = serde_json::to_string(&media_type).expect("serialize");
+            let back: MediaType = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, media_type);
+        }
     }
 }

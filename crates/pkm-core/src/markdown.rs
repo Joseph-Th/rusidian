@@ -117,8 +117,13 @@ fn block_content_to_markdown(content: &BlockContent) -> String {
 }
 
 /// Serialize a table as GitHub-flavored markdown.
+/// Note: This function pads shorter rows with empty cells to match header length.
 fn serialize_table(headers: &[String], rows: &[Vec<String>]) -> String {
     let mut result = String::new();
+
+    if headers.is_empty() {
+        return result;
+    }
 
     // Header row
     result.push('|');
@@ -139,14 +144,13 @@ fn serialize_table(headers: &[String], rows: &[Vec<String>]) -> String {
     // Data rows
     for row in rows {
         result.push('|');
-        for (i, cell) in row.iter().enumerate() {
+        for i in 0..headers.len() {
             result.push(' ');
+            // Get cell value, use empty string if row is shorter than headers
+            let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
             // Escape pipes in cell content
             result.push_str(&cell.replace('|', "\\|"));
             result.push_str(" |");
-            if i >= headers.len() - 1 {
-                break;
-            }
         }
         result.push('\n');
     }
@@ -833,5 +837,166 @@ mod tests {
 
         let md = blocks_to_markdown(&blocks);
         assert!(md.contains("if a \\| b"));
+    }
+
+    #[test]
+    fn table_with_mismatched_row_lengths() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        // Row with fewer cells than headers should be padded with empty cells
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Table {
+                headers: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+                rows: vec![vec!["1".to_string(), "2".to_string()]], // Only 2 cells
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        // Row should be padded to 3 cells: "| 1 | 2 |  |"
+        assert!(md.contains("| 1 | 2 |  |"), "Short row should be padded with empty cells");
+    }
+
+    #[test]
+    fn table_with_empty_cells() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Table {
+                headers: vec!["Name".to_string(), "Value".to_string()],
+                rows: vec![
+                    vec!["Item1".to_string(), "".to_string()],
+                    vec!["".to_string(), "100".to_string()],
+                ],
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("| Item1 |  |")); // Empty cell rendered as just spaces
+        assert!(md.contains("|  | 100 |")); // Empty cell rendered as just spaces
+    }
+
+    #[test]
+    fn empty_table_renders_without_data() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Table {
+                headers: vec!["A".to_string(), "B".to_string()],
+                rows: vec![],
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("| A | B |")); // Headers still render
+        assert!(md.contains("| --- | --- |")); // Separator still renders
+        // Should contain header, separator, comment, but no data
+        let line_count = md.lines().count();
+        assert!(line_count >= 3, "Table should have at least header, separator, and comment");
+    }
+
+    #[test]
+    fn malformed_image_syntax_falls_back_to_markdown() {
+        let note_id = NoteId::new();
+        let text = "![alt without close bracket(url)";
+
+        let blocks = markdown_to_blocks(text, note_id).expect("parse");
+        assert_eq!(blocks.len(), 1);
+        // Should fall back to Markdown block
+        match &blocks[0].content {
+            BlockContent::Markdown { .. } => (),
+            other => panic!("Expected Markdown block, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn valid_image_with_special_characters_in_alt() {
+        let note_id = NoteId::new();
+        let text = "![My (special) & image](image.png)";
+
+        let blocks = markdown_to_blocks(text, note_id).expect("parse");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].content {
+            BlockContent::Media {
+                hash_or_url,
+                alt_text,
+                media_type,
+            } => {
+                assert_eq!(hash_or_url, "image.png");
+                assert_eq!(alt_text, "My (special) & image");
+                assert_eq!(*media_type, MediaType::Image);
+            }
+            _ => panic!("Expected Media block"),
+        }
+    }
+
+    #[test]
+    fn math_with_newlines_in_display_mode() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Math {
+                expression: "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}".to_string(),
+                display_mode: true,
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("$$"));
+        assert!(md.contains("x = \\frac"));
+    }
+
+    #[test]
+    fn inline_math_with_backslashes() {
+        let note_id = NoteId::new();
+        let text = "$\\alpha + \\beta$";
+
+        let blocks = markdown_to_blocks(text, note_id).expect("parse");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].content {
+            BlockContent::Math {
+                expression,
+                display_mode,
+            } => {
+                assert_eq!(expression, "\\alpha + \\beta");
+                assert!(!display_mode);
+            }
+            _ => panic!("Expected Math block"),
+        }
     }
 }

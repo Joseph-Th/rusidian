@@ -214,8 +214,7 @@ mod tests {
 
     #[test]
     fn block_content_variants_are_serializable() {
-        let note_id = NoteId::new();
-        let now = Timestamp::now_utc();
+        use crate::id::ViewId;
 
         // Test that all BlockContent variants serialize correctly
         let variants = vec![
@@ -226,6 +225,10 @@ mod tests {
                 expression: "x^2".to_string(),
                 display_mode: true,
             },
+            BlockContent::Math {
+                expression: "x".to_string(),
+                display_mode: false,
+            },
             BlockContent::Table {
                 headers: vec!["A".to_string(), "B".to_string()],
                 rows: vec![vec!["1".to_string(), "2".to_string()]],
@@ -234,6 +237,10 @@ mod tests {
                 hash_or_url: "hash123".to_string(),
                 alt_text: "Image".to_string(),
                 media_type: crate::media::MediaType::Image,
+            },
+            BlockContent::InternalEmbed {
+                target: ObjectRef::View(ViewId::new()),
+                fallback_text: "View content".to_string(),
             },
             BlockContent::ExternalEmbed {
                 url: "https://example.com".to_string(),
