@@ -510,14 +510,20 @@ impl AppService {
             .map_err(|e| format!("Failed to get entity: {}", e))?
             .ok_or_else(|| format!("Entity not found: {}", entity_id))?;
 
+        let aliases_str = if entity.aliases.is_empty() {
+            String::new()
+        } else {
+            format!(" Also known as {}.", entity.aliases.join(", "))
+        };
+
         Ok(crate::commands::PreviewCard {
             id: entity.id.to_string(),
             name: entity.name,
             kind: format!("{:?}", entity.kind).to_lowercase(),
             aliases: entity.aliases,
             summary: format!(
-                "Entity created by {:?} on {}. Version {}.",
-                entity.created_by, entity.created_at, entity.version
+                "Created {} by {:?}. Version {}.{}",
+                entity.created_at, entity.created_by, entity.version, aliases_str
             ),
         })
     }

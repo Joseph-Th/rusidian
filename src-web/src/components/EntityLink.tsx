@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useFloating, offset, flip, shift } from '@floating-ui/react'
 import { invoke } from '@tauri-apps/api/core'
 import PreviewCard from './PreviewCard'
@@ -28,7 +28,15 @@ export default function EntityLink({ entityId, entityName }: EntityLinkProps) {
     middleware: [offset(10), flip(), shift()],
   })
 
-  const hoverTimeoutRef = useRef<NodeJS.Timeout>()
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleMouseEnter = async () => {
     // Debounce hover to avoid fetching on quick mouse passes
