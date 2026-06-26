@@ -110,6 +110,11 @@ Phase 7 tasks — implement in order for breadth and user value:
 
 3. **H2** — Local versioning foundation. Add version numbers to entities; track
    object history for sync/rollback. Depends on: none (✅).
+   
+   Notes: Core implementation complete with version and updated_at fields on all domain
+   types. Migration 0007_add_versioning fixed to properly set updated_at values. All
+   repositories (Source, Entity, Link, Note, View, Block) now persist and retrieve
+   version/updated_at correctly. All 98+ tests passing, clippy clean.
 
 4. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
    transport contract. Depends on: none (⬜).
