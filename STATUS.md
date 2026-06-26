@@ -119,7 +119,7 @@ Phase 7 tasks — expansion beyond the core system:
    detection, merge logic, and edge cases. All tests passing, clippy clean.
 
 2. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
-   browsers. Depends on: A0 (Tauri shell), H0 (views) (🚫 blocked by A0).
+   browsers. Depends on: A0 (Tauri shell) (✅), H0 (views) (⬜ not started).
    
    Subtasks:
    - H4a: Responsive layout for capture form
@@ -128,7 +128,7 @@ Phase 7 tasks — expansion beyond the core system:
    - H4d: Test on mobile browsers
 
 3. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
-   and notes. Depends on: H0 (view system), A0 (Tauri shell) (🚫 blocked by A0).
+   and notes. Depends on: H0 (view system) (⬜ not started), A0 (Tauri shell) (✅).
    
    Subtasks:
    - H5a: Graph data model for spatial layout
