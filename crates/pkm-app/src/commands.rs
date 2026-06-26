@@ -100,3 +100,14 @@ pub async fn update_note(
 
     svc.update_note(&note_id, title, metadata)
 }
+
+pub async fn delete_note(
+    note_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<(), String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.delete_note(&note_id)
+}

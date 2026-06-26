@@ -49,6 +49,15 @@ async fn update_note(
     commands::update_note(note_id, title, metadata, service).await
 }
 
+#[tauri::command]
+async fn delete_note(
+    note_id: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<(), String> {
+    let service = state.inner();
+    commands::delete_note(note_id, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -78,7 +87,8 @@ fn main() {
             create_note,
             list_notes,
             get_note,
-            update_note
+            update_note,
+            delete_note
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

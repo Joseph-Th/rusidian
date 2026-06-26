@@ -136,6 +136,7 @@
           <div id="modalBlockInfo"></div>
           <div class="modal-actions">
             <button onclick="enterEditMode()">Edit Note</button>
+            <button onclick="deleteCurrentNote()" style="background: #d9534f;">Delete Note</button>
           </div>
         </div>
 
@@ -284,6 +285,24 @@
           await listNotes();
         } catch (error) {
           alert('Error updating note: ' + error);
+        }
+      }
+
+      async function deleteCurrentNote() {
+        const noteId = window.currentNote.id;
+        const noteTitle = window.currentNote.title;
+
+        if (!confirm('Are you sure you want to delete "' + noteTitle + '"? This cannot be undone.')) {
+          return;
+        }
+
+        try {
+          await window.__TAURI__.invoke('delete_note', { note_id: noteId });
+          alert('Note deleted successfully');
+          closeNoteModal();
+          await listNotes();
+        } catch (error) {
+          alert('Error deleting note: ' + error);
         }
       }
 

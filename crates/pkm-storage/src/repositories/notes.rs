@@ -210,6 +210,13 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         Ok(())
     }
 
+    fn delete(&self, id: NoteId) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM note WHERE id = ?1", params![id.to_string()])
+            .map_err(crate::StorageError::from)?;
+        Ok(())
+    }
+
     fn update_block(
         &self,
         note_id: NoteId,

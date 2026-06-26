@@ -40,6 +40,8 @@ pub trait NoteRepo {
     fn list(&self, limit: Option<usize>) -> Result<Vec<Note>>;
     /// Update a note's title, metadata, version, and updated_at timestamp.
     fn update(&self, note: &Note) -> Result<()>;
+    /// Delete a note by ID.
+    fn delete(&self, id: NoteId) -> Result<()>;
     /// Update a block's content. Returns the updated block after applying the change.
     fn update_block(
         &self,

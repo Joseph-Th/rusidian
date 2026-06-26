@@ -964,6 +964,10 @@ mod tests {
             Ok(())
         }
 
+        fn delete(&self, _id: NoteId) -> pkm_core::Result<()> {
+            Ok(())
+        }
+
         fn update_block(
             &self,
             _note_id: NoteId,

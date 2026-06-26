@@ -155,7 +155,7 @@ Currently has:
 Subtasks:
 - A0a: Add get_note endpoint and view modal (✅)
 - A0b: Add update_note command and inline editing UI (✅)
-- A0c: Add delete_note command and UI (⬜)
+- A0c: Add delete_note command and UI (✅)
 - A0d: Verify app runs and basic CRUD works end-to-end (⬜)
 
 A0 blocks H4 (mobile UI) and H5 (visual workspace). H4/H5 require A0's UI foundation.

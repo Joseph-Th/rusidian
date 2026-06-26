@@ -146,4 +146,23 @@ impl AppService {
 
         Ok(())
     }
+
+    /// Delete a note by ID.
+    pub fn delete_note(&self, note_id: &str) -> Result<(), String> {
+        let uuid =
+            uuid::Uuid::parse_str(note_id).map_err(|_| format!("Invalid note ID: {}", note_id))?;
+        let parsed_id = pkm_core::id::NoteId(uuid);
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let note_repo = SqliteNoteRepo { conn: &conn };
+        note_repo
+            .delete(parsed_id)
+            .map_err(|e| format!("Failed to delete note: {}", e))?;
+
+        Ok(())
+    }
 }
