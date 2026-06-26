@@ -140,12 +140,22 @@ Further: mobile native editor, public publishing, collaboration, plugin API.
 
 ---
 
-## Blockers
+## Deferred / Blocked Items
 
-**A0 (Tauri shell with service commands)** must be implemented before H4 and H5 can proceed. A0 would:
-- Create a Tauri window and basic app structure
-- Wire service layer methods to Tauri commands
-- Provide HTML/CSS/JavaScript frontend for basic note capture/editing
-- Establish command→service→repository→storage pipeline
+### A0 — Tauri shell with service commands (🔨)
 
-Without A0, H4 (mobile UI) and H5 (visual workspace) have no UI foundation to work with.
+Currently has:
+- Tauri window and app structure ✅
+- Service layer with create_note, list_notes, get_note ✅
+- Commands wired to Tauri handlers ✅
+- HTML/CSS/JS frontend with create/list UI ✅
+- command→service→repository→storage pipeline ✅
+- Builds successfully and passes tests ✅
+
+Subtasks:
+- A0a: Add get_note endpoint and view modal (✅)
+- A0b: Add update_note command and inline editing UI (⬜)
+- A0c: Add delete_note command and UI (⬜)
+- A0d: Verify app runs and basic CRUD works end-to-end (⬜)
+
+A0 blocks H4 (mobile UI) and H5 (visual workspace). H4/H5 require A0's UI foundation.

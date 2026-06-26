@@ -6,6 +6,7 @@
 
 use crate::service::AppService;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -18,6 +19,19 @@ pub struct CreateNoteResponse {
 pub struct NoteInfo {
     pub id: String,
     pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GetNoteResponse {
+    pub id: String,
+    pub title: String,
+    pub blocks: Vec<String>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+    pub created_by: String,
+    pub created_at: String,
+    pub version: u32,
+    pub updated_at: String,
+    pub block_count: usize,
 }
 
 pub async fn create_note(
@@ -47,4 +61,29 @@ pub async fn list_notes(
         .into_iter()
         .map(|(id, title)| NoteInfo { id, title })
         .collect())
+}
+
+pub async fn get_note(
+    note_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<GetNoteResponse, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let note = svc
+        .get_note_full(&note_id)?
+        .ok_or_else(|| format!("Note not found: {}", note_id))?;
+
+    Ok(GetNoteResponse {
+        id: note.id.to_string(),
+        title: note.title,
+        blocks: note.blocks.iter().map(|b| b.to_string()).collect(),
+        metadata: note.metadata,
+        created_by: format!("{:?}", note.created_by),
+        created_at: note.created_at.to_string(),
+        version: note.version,
+        updated_at: note.updated_at.to_string(),
+        block_count: note.blocks.len(),
+    })
 }

@@ -93,4 +93,23 @@ impl AppService {
             .map(|n| (n.id.to_string(), n.title))
             .collect())
     }
+
+    /// Get a full note by ID, including all metadata and block count.
+    pub fn get_note_full(&self, note_id: &str) -> Result<Option<Note>, String> {
+        let uuid =
+            uuid::Uuid::parse_str(note_id).map_err(|_| format!("Invalid note ID: {}", note_id))?;
+        let parsed_id = pkm_core::id::NoteId(uuid);
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let note_repo = SqliteNoteRepo { conn: &conn };
+        let note = note_repo
+            .get(parsed_id)
+            .map_err(|e| format!("Failed to get note: {}", e))?;
+
+        Ok(note)
+    }
 }

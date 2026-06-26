@@ -50,6 +50,50 @@
         padding: 10px;
         margin: 5px 0;
         border-left: 4px solid #007acc;
+        cursor: pointer;
+      }
+      .note-item:hover {
+        background: #f0f0f0;
+      }
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.4);
+      }
+      .modal.show {
+        display: block;
+      }
+      .modal-content {
+        background-color: #fefefe;
+        margin: 10% auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+        max-width: 600px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      }
+      .modal-close {
+        color: #aaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .modal-close:hover {
+        color: black;
+      }
+      .modal-metadata {
+        background: #f9f9f9;
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 15px;
+        font-size: 12px;
       }
     </style>
   </head>
@@ -64,6 +108,17 @@
       </div>
       <div id="noteList"></div>
     </div>
+
+    <!-- Note View Modal -->
+    <div id="noteModal" class="modal">
+      <div class="modal-content">
+        <span class="modal-close" onclick="closeNoteModal()">&times;</span>
+        <h2 id="modalTitle"></h2>
+        <div id="modalMetadata" class="modal-metadata"></div>
+        <div id="modalBlockInfo"></div>
+      </div>
+    </div>
+
     <script>
       async function createNote() {
         const title = document.getElementById('noteTitle').value;
@@ -96,11 +151,51 @@
               const item = document.createElement('div');
               item.className = 'note-item';
               item.innerHTML = `<strong>${note.title}</strong><br><small>${note.id}</small>`;
+              item.onclick = () => viewNote(note.id);
               listDiv.appendChild(item);
             });
           }
         } catch (error) {
           alert('Error: ' + error);
+        }
+      }
+
+      async function viewNote(noteId) {
+        try {
+          const note = await window.__TAURI__.invoke('get_note', { note_id: noteId });
+          document.getElementById('modalTitle').textContent = note.title;
+
+          const metadataDiv = document.getElementById('modalMetadata');
+          metadataDiv.innerHTML = `
+            <div><strong>ID:</strong> ${note.id}</div>
+            <div><strong>Created:</strong> ${note.created_at}</div>
+            <div><strong>Updated:</strong> ${note.updated_at}</div>
+            <div><strong>Version:</strong> ${note.version}</div>
+            <div><strong>Created by:</strong> ${note.created_by}</div>
+          `;
+
+          const blockDiv = document.getElementById('modalBlockInfo');
+          blockDiv.innerHTML = `<p><strong>Blocks:</strong> ${note.block_count}</p>`;
+
+          if (Object.keys(note.metadata).length > 0) {
+            blockDiv.innerHTML += '<p><strong>Metadata:</strong></p><pre>' +
+              JSON.stringify(note.metadata, null, 2) + '</pre>';
+          }
+
+          document.getElementById('noteModal').classList.add('show');
+        } catch (error) {
+          alert('Error: ' + error);
+        }
+      }
+
+      function closeNoteModal() {
+        document.getElementById('noteModal').classList.remove('show');
+      }
+
+      window.onclick = function(event) {
+        const modal = document.getElementById('noteModal');
+        if (event.target === modal) {
+          modal.classList.remove('show');
         }
       }
     </script>

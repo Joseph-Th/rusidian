@@ -28,6 +28,15 @@ async fn list_notes(
     commands::list_notes(limit, service).await
 }
 
+#[tauri::command]
+async fn get_note(
+    note_id: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::GetNoteResponse, String> {
+    let service = state.inner();
+    commands::get_note(note_id, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -53,7 +62,7 @@ fn main() {
     tauri::Builder::default()
         .menu(Menu::new)
         .manage(service)
-        .invoke_handler(tauri::generate_handler![create_note, list_notes])
+        .invoke_handler(tauri::generate_handler![create_note, list_notes, get_note])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_, _| {})
