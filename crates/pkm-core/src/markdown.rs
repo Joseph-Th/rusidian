@@ -68,8 +68,10 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
                     },
                     order,
                     created_by: Actor::User,
-                    created_at: now,
+                    created_at: now.clone(),
                     source_provenance_ref: None,
+                    version: 1,
+                    updated_at: now.clone(),
                 };
                 blocks.push(block);
                 order += 1.0;
@@ -95,8 +97,10 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
             },
             order,
             created_by: Actor::User,
-            created_at: now,
+            created_at: now.clone(),
             source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
         };
         blocks.push(block);
     }
@@ -167,7 +171,9 @@ pub fn markdown_to_note(
         blocks: block_ids,
         metadata: BTreeMap::new(),
         created_by: actor,
-        created_at,
+        created_at: created_at.clone(),
+        version: 1,
+        updated_at: created_at,
     };
 
     Ok((note, parsed_blocks))
@@ -191,8 +197,10 @@ mod tests {
                 },
                 order: 1.0,
                 created_by: Actor::User,
-                created_at: now,
+                created_at: now.clone(),
                 source_provenance_ref: None,
+                version: 1,
+                updated_at: now.clone(),
             },
             Block {
                 id: BlockId::new(),
@@ -202,8 +210,10 @@ mod tests {
                 },
                 order: 2.0,
                 created_by: Actor::User,
-                created_at: now,
+                created_at: now.clone(),
                 source_provenance_ref: None,
+                version: 1,
+                updated_at: now,
             },
         ];
 
@@ -263,7 +273,9 @@ mod tests {
             blocks: vec![],
             metadata: std::collections::BTreeMap::new(),
             created_by: Actor::User,
-            created_at: now,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now.clone(),
         };
 
         let blocks = vec![Block {
@@ -274,8 +286,10 @@ mod tests {
             },
             order: 1.0,
             created_by: Actor::User,
-            created_at: now,
+            created_at: now.clone(),
             source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
         }];
 
         let md = note_to_markdown(&note, &blocks);

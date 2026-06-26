@@ -24,20 +24,25 @@ use std::collections::BTreeMap;
 /// A minimal example [`Source`] (a pasted-text capture).
 pub fn sample_source() -> Source {
     let raw = "Raw captured text that must never be overwritten.";
+    let now = Timestamp::now_utc();
     Source {
         id: SourceId::new(),
         origin: SourceOrigin::PastedText,
         title: Some("Example source".to_string()),
         raw_content: raw.to_string(),
-        captured_at: Timestamp::now_utc(),
+        captured_at: now.clone(),
         content_hash: "5b2c6b6c1d5e0a1b7c9d3e8f2a4c6e9a".to_string(),
         ingestion_state: IngestionState::Captured,
         created_by: Actor::User,
+        created_at: now.clone(),
+        version: 1,
+        updated_at: now,
     }
 }
 
 /// A minimal example [`Block`] (markdown text).
 pub fn sample_block() -> Block {
+    let now = Timestamp::now_utc();
     Block {
         id: BlockId::new(),
         note_id: NoteId::new(),
@@ -46,8 +51,10 @@ pub fn sample_block() -> Block {
         },
         order: 1.0,
         created_by: Actor::User,
-        created_at: Timestamp::now_utc(),
+        created_at: now.clone(),
         source_provenance_ref: None,
+        version: 1,
+        updated_at: now,
     }
 }
 
@@ -59,13 +66,16 @@ pub fn sample_note() -> Note {
         serde_json::json!("example_value"),
     );
 
+    let now = Timestamp::now_utc();
     Note {
         id: NoteId::new(),
         title: "Example note".to_string(),
         blocks: vec![BlockId::new()],
         metadata,
         created_by: Actor::User,
-        created_at: Timestamp::now_utc(),
+        created_at: now.clone(),
+        version: 1,
+        updated_at: now,
     }
 }
 

@@ -41,6 +41,10 @@ pub struct Link {
     pub reviewed: crate::review::ReviewState,
     /// Optional confidence score (0.0-1.0) for inferred links.
     pub confidence: Option<f32>,
+    /// Current version number (increments on each update).
+    pub version: u32,
+    /// When this version was created.
+    pub updated_at: crate::Timestamp,
 }
 
 #[cfg(test)]
@@ -60,15 +64,18 @@ mod tests {
 
     #[test]
     fn link_round_trips() {
+        let now = Timestamp::now_utc();
         let link = Link {
             id: LinkId::new(),
             from: ObjectRef::Note(NoteId::new()),
             to: ObjectRef::Note(NoteId::new()),
             link_type: LinkType::RelatedTo,
             created_by: Actor::User,
-            created_at: Timestamp::now_utc(),
+            created_at: now.clone(),
             reviewed: ReviewState::Proposed,
             confidence: Some(0.85),
+            version: 1,
+            updated_at: now,
         };
 
         let json = serde_json::to_string(&link).expect("serialize");
@@ -81,5 +88,6 @@ mod tests {
         assert_eq!(back.created_by, link.created_by);
         assert_eq!(back.reviewed, link.reviewed);
         assert_eq!(back.confidence, link.confidence);
+        assert_eq!(back.version, link.version);
     }
 }

@@ -98,30 +98,22 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Current
 
-No active tasks.
-
----
-
-## Done (44 tasks)
-
-All foundation, vertical-slice, entity merge, view model, app service, view implementations, UI shell, Phase 6 retrieval, and Phase 7 foundation complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6, A0b-i, A0b-ii, A0b-iii, A0b-iv, G1, G2, G3, G4a, G4b, G5, H0, H1.
-
----
-
-## Deferred (post Phase 6)
-
 Phase 7 tasks — implement in order for breadth and user value:
 
 ### Phase 7: Expansion
 
 1. **H0** — ViewRepo trait + SqliteViewRepo impl + 0006_views schema migration.
-   Foundation for persisting custom views. Depends on: none (⬜).
+   Foundation for persisting custom views. Depends on: none (✅).
 
 2. **H1** — Export as publishable markdown. Create a markdown folder hierarchy
-   from a note tree that's suitable for static-site generation. Depends on: none (⬜).
+   from a note tree that's suitable for static-site generation. Depends on: none (✅).
 
 3. **H2** — Local versioning foundation. Add version numbers to entities; track
    object history for sync/rollback. Depends on: none (⬜).
+   
+   Notes: Core implementation complete - migration, domain types, and storage layer
+   updated to support version and updated_at fields. Remaining work: fix test
+   instantiations (Source, Entity, Link, Note, Block, View) that need new fields.
 
 4. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
    transport contract. Depends on: none (⬜).

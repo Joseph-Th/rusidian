@@ -59,7 +59,7 @@ impl SourceRepo for SqliteSourceRepo<'_> {
             .conn
             .prepare(
                 "SELECT id, origin, title, raw_content, created_at, created_by,
-                    captured_at, content_hash, ingestion_state FROM source WHERE id = ?",
+                    captured_at, content_hash, ingestion_state, version, updated_at FROM source WHERE id = ?",
             )
             .map_err(|e| {
                 let se = crate::StorageError::from(e);
@@ -80,6 +80,8 @@ impl SourceRepo for SqliteSourceRepo<'_> {
             let captured_at_str: String = row.get(6)?;
             let content_hash: String = row.get(7)?;
             let ingestion_state_str: String = row.get(8)?;
+            let version: i64 = row.get(9)?;
+            let updated_at_str: String = row.get(10)?;
 
             // Parse and return as a tuple to avoid nesting errors
             Ok((
@@ -92,6 +94,8 @@ impl SourceRepo for SqliteSourceRepo<'_> {
                 captured_at_str,
                 content_hash,
                 ingestion_state_str,
+                version,
+                updated_at_str,
             ))
         });
 
@@ -126,6 +130,8 @@ fn build_source_from_fields(
         String,
         String,
         String,
+        i64,
+        String,
     ),
 ) -> crate::Result<Source> {
     let (
@@ -133,11 +139,13 @@ fn build_source_from_fields(
         origin_json,
         title,
         raw_content,
-        _created_at_str,
+        created_at_str,
         created_by_json,
         captured_at_str,
         content_hash,
         ingestion_state_str,
+        version,
+        updated_at_str,
     ) = fields;
 
     let id = Uuid::parse_str(&id_str).map(SourceId).map_err(|e| {
@@ -147,6 +155,17 @@ fn build_source_from_fields(
     let origin: SourceOrigin = serde_json::from_str(&origin_json)?;
     let created_by = parse_actor(&created_by_json);
     let ingestion_state = parse_ingestion_state(&ingestion_state_str);
+
+    let created_at = time::OffsetDateTime::parse(
+        &created_at_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!(
+            "invalid timestamp: {}: {}",
+            created_at_str, e
+        )))
+    })?;
 
     let captured_at = time::OffsetDateTime::parse(
         &captured_at_str,
@@ -159,6 +178,17 @@ fn build_source_from_fields(
         )))
     })?;
 
+    let updated_at = time::OffsetDateTime::parse(
+        &updated_at_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!(
+            "invalid timestamp: {}: {}",
+            updated_at_str, e
+        )))
+    })?;
+
     Ok(Source {
         id,
         origin,
@@ -168,6 +198,9 @@ fn build_source_from_fields(
         content_hash,
         ingestion_state,
         created_by,
+        created_at,
+        version: version as u32,
+        updated_at,
     })
 }
 

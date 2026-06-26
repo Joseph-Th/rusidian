@@ -91,8 +91,10 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     title,
                     blocks,
                     metadata: BTreeMap::new(), // TODO(S2): add metadata to schema
-                    created_at,
+                    created_at: created_at.clone(),
                     created_by,
+                    version: 1,
+                    updated_at: created_at,
                 }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -138,8 +140,10 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                     title,
                     blocks: vec![],
                     metadata: BTreeMap::new(),
-                    created_at,
+                    created_at: created_at.clone(),
                     created_by,
+                    version: 1,
+                    updated_at: created_at,
                 })
             })
             .collect();
@@ -193,8 +197,10 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             content: new_content,
             order,
             created_by,
-            created_at,
+            created_at: created_at.clone(),
             source_provenance_ref: None,
+            version: 1,
+            updated_at: created_at,
         })
     }
 }

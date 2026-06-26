@@ -30,13 +30,16 @@ impl AppService {
 
     /// Create a new note and return its ID.
     pub fn create_note(&self, title: String) -> Result<String, String> {
+        let now = Timestamp::now_utc();
         let note = Note {
             id: pkm_core::id::NoteId::new(),
             title,
             blocks: vec![],
             metadata: BTreeMap::new(),
             created_by: Actor::User,
-            created_at: Timestamp::now_utc(),
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
 
         let note_id = note.id.to_string();

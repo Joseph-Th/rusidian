@@ -26,6 +26,10 @@ pub struct Note {
     pub created_by: Actor,
     /// When this note was created.
     pub created_at: Timestamp,
+    /// Current version number (increments on each update).
+    pub version: u32,
+    /// When this version was created.
+    pub updated_at: Timestamp,
 }
 
 #[cfg(test)]
@@ -38,13 +42,16 @@ mod tests {
         metadata.insert("project".to_string(), serde_json::json!("MyProject"));
         metadata.insert("priority".to_string(), serde_json::json!(1));
 
+        let now = crate::Timestamp::now_utc();
         let note = Note {
             id: NoteId::new(),
             title: "Test Note".to_string(),
             blocks: vec![BlockId::new(), BlockId::new()],
             metadata,
             created_by: Actor::User,
-            created_at: crate::Timestamp::now_utc(),
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
 
         let json = serde_json::to_string(&note).expect("serialize");
@@ -55,5 +62,6 @@ mod tests {
         assert_eq!(back.blocks, note.blocks);
         assert_eq!(back.metadata, note.metadata);
         assert_eq!(back.created_by, note.created_by);
+        assert_eq!(back.version, note.version);
     }
 }

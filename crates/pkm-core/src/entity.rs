@@ -41,6 +41,10 @@ pub struct Entity {
     pub created_by: Actor,
     /// When this entity was created.
     pub created_at: Timestamp,
+    /// Current version number (increments on each update).
+    pub version: u32,
+    /// When this version was created.
+    pub updated_at: Timestamp,
 }
 
 #[cfg(test)]
@@ -66,5 +70,28 @@ mod tests {
             let back: EntityKind = serde_json::from_str(&json).unwrap();
             assert_eq!(back, kind);
         }
+    }
+
+    #[test]
+    fn entity_round_trips() {
+        let now = crate::Timestamp::now_utc();
+        let entity = Entity {
+            id: EntityId::new(),
+            kind: EntityKind::Person,
+            name: "John Doe".to_string(),
+            aliases: vec!["J. Doe".to_string()],
+            merged_into: None,
+            created_by: Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
+        };
+
+        let json = serde_json::to_string(&entity).unwrap();
+        let back: Entity = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(back.id, entity.id);
+        assert_eq!(back.name, entity.name);
+        assert_eq!(back.version, entity.version);
     }
 }

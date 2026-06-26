@@ -40,6 +40,9 @@ pub struct Source {
     pub content_hash: String,
     pub ingestion_state: IngestionState,
     pub created_by: Actor,
+    pub created_at: Timestamp,
+    pub version: u32,
+    pub updated_at: Timestamp,
     // TODO(D4): byte_attachment_ref for binary content.
 }
 
@@ -49,6 +52,7 @@ mod tests {
 
     #[test]
     fn source_round_trips() {
+        let now = crate::Timestamp::now_utc();
         let source = Source {
             id: SourceId::new(),
             origin: SourceOrigin::WebArticle {
@@ -56,10 +60,13 @@ mod tests {
             },
             title: Some("Example Article".to_string()),
             raw_content: "Some content".to_string(),
-            captured_at: crate::Timestamp::now_utc(),
+            captured_at: now.clone(),
             content_hash: "abc123def456".to_string(),
             ingestion_state: IngestionState::Captured,
             created_by: Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
 
         let json = serde_json::to_string(&source).expect("serialize");
@@ -71,5 +78,6 @@ mod tests {
         assert_eq!(back.content_hash, source.content_hash);
         assert_eq!(back.ingestion_state, source.ingestion_state);
         assert_eq!(back.created_by, source.created_by);
+        assert_eq!(back.version, source.version);
     }
 }

@@ -8,6 +8,7 @@ use pkm_core::ports::ViewRepo;
 use pkm_core::view::View;
 use pkm_core::CoreError;
 use pkm_core::Result;
+use pkm_core::Actor;
 
 /// View persistence backed by SQLite.
 pub struct SqliteViewRepo<'c> {
@@ -46,7 +47,7 @@ impl ViewRepo for SqliteViewRepo<'_> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, kind, title, params, created_at, created_by
+                "SELECT id, kind, title, params, created_at, created_by, version, updated_at
                  FROM view WHERE id = ?",
             )
             .map_err(|e| {
@@ -62,6 +63,8 @@ impl ViewRepo for SqliteViewRepo<'_> {
             let params_json: String = row.get(3)?;
             let created_at_str: String = row.get(4)?;
             let created_by_json: String = row.get(5)?;
+            let version: i64 = row.get(6)?;
+            let updated_at_str: String = row.get(7)?;
 
             Ok((
                 id_str,
@@ -70,6 +73,8 @@ impl ViewRepo for SqliteViewRepo<'_> {
                 params_json,
                 created_at_str,
                 created_by_json,
+                version,
+                updated_at_str,
             ))
         });
 
@@ -93,7 +98,7 @@ impl ViewRepo for SqliteViewRepo<'_> {
     fn list(&self, limit: Option<usize>) -> Result<Vec<View>> {
         let limit_clause = limit.map(|l| format!(" LIMIT {}", l)).unwrap_or_default();
         let query = format!(
-            "SELECT id, kind, title, params, created_at, created_by
+            "SELECT id, kind, title, params, created_at, created_by, version, updated_at
              FROM view ORDER BY created_at DESC{}",
             limit_clause
         );
@@ -112,6 +117,8 @@ impl ViewRepo for SqliteViewRepo<'_> {
                 let params_json: String = row.get(3)?;
                 let created_at_str: String = row.get(4)?;
                 let created_by_json: String = row.get(5)?;
+                let version: i64 = row.get(6)?;
+                let updated_at_str: String = row.get(7)?;
 
                 Ok((
                     id_str,
@@ -120,6 +127,8 @@ impl ViewRepo for SqliteViewRepo<'_> {
                     params_json,
                     created_at_str,
                     created_by_json,
+                    version,
+                    updated_at_str,
                 ))
             })
             .map_err(|e| {
@@ -146,11 +155,16 @@ impl ViewRepo for SqliteViewRepo<'_> {
     }
 }
 
+/// Parse an Actor from JSON.
+fn parse_actor(json: &str) -> Actor {
+    serde_json::from_str(json).unwrap_or(Actor::User)
+}
+
 /// Pure mapping function: builds a View from extracted fields.
 fn build_view_from_fields(
-    fields: (String, String, String, String, String, String),
+    fields: (String, String, String, String, String, String, i64, String),
 ) -> crate::Result<View> {
-    let (id_str, kind_str, title, params_json, _created_at_str, _created_by_json) = fields;
+    let (id_str, kind_str, title, params_json, created_at_str, created_by_json, version, updated_at_str) = fields;
 
     let id = Uuid::parse_str(&id_str).map(ViewId).map_err(|e| {
         crate::StorageError::Core(CoreError::Invariant(format!("invalid view id: {}", e)))
@@ -159,12 +173,39 @@ fn build_view_from_fields(
     let kind = parse_view_kind(&kind_str);
     let params: pkm_core::view::ViewParams =
         serde_json::from_str(&params_json).map_err(crate::StorageError::from)?;
+    let created_by = parse_actor(&created_by_json);
+
+    let created_at = time::OffsetDateTime::parse(
+        &created_at_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!(
+            "invalid timestamp: {}: {}",
+            created_at_str, e
+        )))
+    })?;
+
+    let updated_at = time::OffsetDateTime::parse(
+        &updated_at_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!(
+            "invalid timestamp: {}: {}",
+            updated_at_str, e
+        )))
+    })?;
 
     Ok(View {
         id,
         kind,
         title,
         params,
+        created_by,
+        created_at,
+        version: version as u32,
+        updated_at,
     })
 }
 
@@ -224,11 +265,16 @@ mod tests {
         let conn = test_db();
         let repo = SqliteViewRepo { conn: &conn };
 
+        let now = pkm_core::Timestamp::now_utc();
         let view = View {
             id: ViewId::new(),
             kind: ViewKind::ReadingQueue,
             title: "My Reading Queue".to_string(),
             params: ViewParams::reading_queue(),
+            created_by: pkm_core::Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
 
         let view_id = view.id;
@@ -248,18 +294,28 @@ mod tests {
         let conn = test_db();
         let repo = SqliteViewRepo { conn: &conn };
 
+        let now = pkm_core::Timestamp::now_utc();
         let view1 = View {
             id: ViewId::new(),
             kind: ViewKind::Timeline,
             title: "Timeline View".to_string(),
             params: ViewParams::timeline(),
+            created_by: pkm_core::Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now.clone(),
         };
 
+        let now = pkm_core::Timestamp::now_utc();
         let view2 = View {
             id: ViewId::new(),
             kind: ViewKind::ReadingQueue,
             title: "Reading Queue".to_string(),
             params: ViewParams::reading_queue(),
+            created_by: pkm_core::Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
 
         repo.create(&view1).expect("Failed to create view1");
@@ -275,11 +331,16 @@ mod tests {
         let repo = SqliteViewRepo { conn: &conn };
 
         for i in 0..10 {
+            let now = pkm_core::Timestamp::now_utc();
             let view = View {
                 id: ViewId::new(),
                 kind: ViewKind::ReadingQueue,
                 title: format!("View {}", i),
                 params: ViewParams::reading_queue(),
+                created_by: pkm_core::Actor::User,
+                created_at: now.clone(),
+                version: 1,
+                updated_at: now,
             };
             repo.create(&view).expect("Failed to create view");
         }
@@ -302,11 +363,16 @@ mod tests {
         let conn = test_db();
         let repo = SqliteViewRepo { conn: &conn };
 
+        let now = pkm_core::Timestamp::now_utc();
         let view = View {
             id: ViewId::new(),
             kind: ViewKind::Dossier,
             title: "Dossier on Entity X".to_string(),
             params: ViewParams::dossier("entity-123".to_string()),
+            created_by: pkm_core::Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
 
         let view_id = view.id;
@@ -326,11 +392,16 @@ mod tests {
         let conn = test_db();
         let repo = SqliteViewRepo { conn: &conn };
 
+        let now = pkm_core::Timestamp::now_utc();
         let view = View {
             id: ViewId::new(),
             kind: ViewKind::Timeline,
             title: "Monthly Timeline".to_string(),
             params: ViewParams::timeline(),
+            created_by: pkm_core::Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
 
         let view_id = view.id;

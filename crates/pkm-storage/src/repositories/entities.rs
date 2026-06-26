@@ -52,7 +52,7 @@ impl EntityRepo for SqliteEntityRepo<'_> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, kind, name, aliases, created_at, created_by, merged_into
+                "SELECT id, kind, name, aliases, created_at, created_by, merged_into, version, updated_at
                  FROM entity WHERE id = ?",
             )
             .map_err(|e| {
@@ -69,6 +69,8 @@ impl EntityRepo for SqliteEntityRepo<'_> {
             let created_at_str: String = row.get(4)?;
             let created_by_json: String = row.get(5)?;
             let merged_into_str: Option<String> = row.get(6)?;
+            let version: i64 = row.get(7)?;
+            let updated_at_str: String = row.get(8)?;
 
             Ok((
                 id_str,
@@ -78,6 +80,8 @@ impl EntityRepo for SqliteEntityRepo<'_> {
                 created_at_str,
                 created_by_json,
                 merged_into_str,
+                version,
+                updated_at_str,
             ))
         });
 
@@ -137,10 +141,21 @@ fn build_entity_from_fields(
         String,
         String,
         Option<String>,
+        i64,
+        String,
     ),
 ) -> crate::Result<Entity> {
-    let (id_str, kind_str, name, aliases_json, created_at_str, created_by_json, merged_into_str) =
-        fields;
+    let (
+        id_str,
+        kind_str,
+        name,
+        aliases_json,
+        created_at_str,
+        created_by_json,
+        merged_into_str,
+        version,
+        updated_at_str,
+    ) = fields;
 
     let id = Uuid::parse_str(&id_str).map(EntityId).map_err(|e| {
         crate::StorageError::Core(CoreError::Invariant(format!("invalid entity id: {}", e)))
@@ -161,6 +176,17 @@ fn build_entity_from_fields(
         )))
     })?;
 
+    let updated_at = time::OffsetDateTime::parse(
+        &updated_at_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!(
+            "invalid timestamp: {}: {}",
+            updated_at_str, e
+        )))
+    })?;
+
     let merged_into = merged_into_str.and_then(|s| Uuid::parse_str(&s).ok().map(EntityId));
 
     Ok(Entity {
@@ -171,6 +197,8 @@ fn build_entity_from_fields(
         created_by,
         created_at,
         merged_into,
+        version: version as u32,
+        updated_at,
     })
 }
 

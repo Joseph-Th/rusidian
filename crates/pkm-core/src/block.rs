@@ -39,6 +39,10 @@ pub struct Block {
     pub created_at: Timestamp,
     /// If this block was extracted/derived from a source, reference it here.
     pub source_provenance_ref: Option<ObjectRef>,
+    /// Current version number (increments on each update).
+    pub version: u32,
+    /// When this version was created.
+    pub updated_at: Timestamp,
 }
 
 #[cfg(test)]
@@ -60,8 +64,10 @@ mod tests {
                 },
                 order: 1.0,
                 created_by: Actor::User,
-                created_at: now,
+                created_at: now.clone(),
                 source_provenance_ref: None,
+                version: 1,
+                updated_at: now.clone(),
             },
             Block {
                 id: BlockId::new(),
@@ -71,8 +77,10 @@ mod tests {
                 },
                 order: 3.0,
                 created_by: Actor::User,
-                created_at: now,
+                created_at: now.clone(),
                 source_provenance_ref: None,
+                version: 1,
+                updated_at: now.clone(),
             },
             Block {
                 id: BlockId::new(),
@@ -82,8 +90,10 @@ mod tests {
                 },
                 order: 2.0,
                 created_by: Actor::User,
-                created_at: now,
+                created_at: now.clone(),
                 source_provenance_ref: None,
+                version: 1,
+                updated_at: now,
             },
         ];
 
@@ -110,8 +120,10 @@ mod tests {
             },
             order: 1.0,
             created_by: Actor::User,
-            created_at: now,
+            created_at: now.clone(),
             source_provenance_ref: None,
+            version: 1,
+            updated_at: now.clone(),
         };
 
         let last = Block {
@@ -122,8 +134,10 @@ mod tests {
             },
             order: 3.0,
             created_by: Actor::User,
-            created_at: now,
+            created_at: now.clone(),
             source_provenance_ref: None,
+            version: 1,
+            updated_at: now.clone(),
         };
 
         // Insert a new block between them (order = 2.0, which is between 1.0 and 3.0).
@@ -135,8 +149,10 @@ mod tests {
             },
             order: 2.0,
             created_by: Actor::User,
-            created_at: now,
+            created_at: now.clone(),
             source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
         };
 
         // Verify ordering: 1.0 < 2.0 < 3.0

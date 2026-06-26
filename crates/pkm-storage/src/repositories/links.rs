@@ -59,7 +59,7 @@ impl LinkRepo for SqliteLinkRepo<'_> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence
+                "SELECT id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence, version, updated_at
                  FROM link WHERE id = ?",
             )
             .map_err(|e| {
@@ -79,6 +79,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
             let created_by_json: String = row.get(7)?;
             let reviewed_str: String = row.get(8)?;
             let confidence: Option<f32> = row.get(9)?;
+            let version: i64 = row.get(10)?;
+            let updated_at_str: String = row.get(11)?;
 
             Ok((
                 id_str,
@@ -91,6 +93,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
                 created_by_json,
                 reviewed_str,
                 confidence,
+                version,
+                updated_at_str,
             ))
         });
 
@@ -117,7 +121,7 @@ impl LinkRepo for SqliteLinkRepo<'_> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence
+                "SELECT id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence, version, updated_at
                  FROM link WHERE to_type = ? AND to_id = ?",
             )
             .map_err(|e| {
@@ -138,6 +142,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
                 let created_by_json: String = row.get(7)?;
                 let reviewed_str: String = row.get(8)?;
                 let confidence: Option<f32> = row.get(9)?;
+                let version: i64 = row.get(10)?;
+                let updated_at_str: String = row.get(11)?;
 
                 Ok((
                     id_str,
@@ -150,6 +156,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
                     created_by_json,
                     reviewed_str,
                     confidence,
+                    version,
+                    updated_at_str,
                 ))
             })
             .map_err(|e| {
@@ -180,7 +188,7 @@ impl LinkRepo for SqliteLinkRepo<'_> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence
+                "SELECT id, from_type, from_id, to_type, to_id, link_type, created_at, created_by, reviewed, confidence, version, updated_at
                  FROM link WHERE from_type = ? AND from_id = ?",
             )
             .map_err(|e| {
@@ -201,6 +209,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
                 let created_by_json: String = row.get(7)?;
                 let reviewed_str: String = row.get(8)?;
                 let confidence: Option<f32> = row.get(9)?;
+                let version: i64 = row.get(10)?;
+                let updated_at_str: String = row.get(11)?;
 
                 Ok((
                     id_str,
@@ -213,6 +223,8 @@ impl LinkRepo for SqliteLinkRepo<'_> {
                     created_by_json,
                     reviewed_str,
                     confidence,
+                    version,
+                    updated_at_str,
                 ))
             })
             .map_err(|e| {
@@ -317,6 +329,8 @@ fn build_link_from_fields(
         String,
         String,
         Option<f32>,
+        i64,
+        String,
     ),
 ) -> crate::Result<Link> {
     let (
@@ -330,6 +344,8 @@ fn build_link_from_fields(
         created_by_json,
         reviewed_str,
         confidence,
+        version,
+        updated_at_str,
     ) = fields;
 
     let id = Uuid::parse_str(&id_str).map(LinkId).map_err(|e| {
@@ -353,6 +369,17 @@ fn build_link_from_fields(
         )))
     })?;
 
+    let updated_at = time::OffsetDateTime::parse(
+        &updated_at_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .map_err(|e| {
+        crate::StorageError::Core(CoreError::Invariant(format!(
+            "invalid timestamp: {}: {}",
+            updated_at_str, e
+        )))
+    })?;
+
     Ok(Link {
         id,
         from,
@@ -362,6 +389,8 @@ fn build_link_from_fields(
         created_at,
         reviewed,
         confidence,
+        version: version as u32,
+        updated_at,
     })
 }
 

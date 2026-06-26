@@ -467,6 +467,14 @@ pub struct View {
     pub title: String,
     /// Typed, kind-specific parameters (filters, entity focus, date range).
     pub params: ViewParams,
+    /// Who created this view (user or agent).
+    pub created_by: crate::Actor,
+    /// When this view was created.
+    pub created_at: crate::Timestamp,
+    /// Current version number (increments on each update).
+    pub version: u32,
+    /// When this version was created.
+    pub updated_at: crate::Timestamp,
 }
 
 /// Result of rendering a view: a list of source IDs in order.
@@ -799,16 +807,22 @@ mod tests {
 
     #[test]
     fn view_with_typed_params_round_trips() {
+        let now = crate::Timestamp::now_utc();
         let view = View {
             id: ViewId::new(),
             kind: ViewKind::ReadingQueue,
             title: "My Reading Queue".to_string(),
             params: ViewParams::reading_queue(),
+            created_by: crate::Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         };
         let json = serde_json::to_string(&view).unwrap();
         let back: View = serde_json::from_str(&json).unwrap();
         assert_eq!(back.kind, view.kind);
         assert_eq!(back.title, view.title);
+        assert_eq!(back.version, view.version);
     }
 
     #[test]
@@ -821,20 +835,26 @@ mod tests {
                 origin: SourceOrigin::PastedText,
                 title: Some("Source 1".to_string()),
                 raw_content: "content1".to_string(),
-                captured_at: now,
+                captured_at: now.clone(),
                 content_hash: "hash1".to_string(),
                 ingestion_state: IngestionState::Captured,
                 created_by: Actor::User,
+                created_at: now.clone(),
+                version: 1,
+                updated_at: now.clone(),
             },
             Source {
                 id: SourceId::new(),
                 origin: SourceOrigin::PastedText,
                 title: Some("Source 2".to_string()),
                 raw_content: "content2".to_string(),
-                captured_at: now,
+                captured_at: now.clone(),
                 content_hash: "hash2".to_string(),
                 ingestion_state: IngestionState::Indexed,
                 created_by: Actor::User,
+                created_at: now.clone(),
+                version: 1,
+                updated_at: now,
             },
         ];
 
@@ -855,10 +875,13 @@ mod tests {
                 origin: SourceOrigin::PastedText,
                 title: Some(format!("Source {}", i)),
                 raw_content: format!("content{}", i),
-                captured_at: now,
+                captured_at: now.clone(),
                 content_hash: format!("hash{}", i),
                 ingestion_state: IngestionState::Captured,
                 created_by: Actor::User,
+                created_at: now.clone(),
+                version: 1,
+                updated_at: now.clone(),
             })
             .collect();
 
@@ -876,10 +899,13 @@ mod tests {
             origin: SourceOrigin::PastedText,
             title: Some("Reading Item".to_string()),
             raw_content: "content".to_string(),
-            captured_at: now,
+            captured_at: now.clone(),
             content_hash: "hash".to_string(),
             ingestion_state: IngestionState::Captured,
             created_by: Actor::User,
+            created_at: now.clone(),
+            version: 1,
+            updated_at: now,
         }];
 
         let view = View {
@@ -920,30 +946,39 @@ mod tests {
             origin: SourceOrigin::PastedText,
             title: Some("Oldest".to_string()),
             raw_content: "content1".to_string(),
-            captured_at: base - time::Duration::days(2),
+            captured_at: base.clone() - time::Duration::days(2),
             content_hash: "hash1".to_string(),
             ingestion_state: IngestionState::Captured,
             created_by: Actor::User,
+            created_at: base.clone(),
+            version: 1,
+            updated_at: base.clone(),
         };
         let source2 = Source {
             id: SourceId::new(),
             origin: SourceOrigin::PastedText,
             title: Some("Middle".to_string()),
             raw_content: "content2".to_string(),
-            captured_at: base - time::Duration::days(1),
+            captured_at: base.clone() - time::Duration::days(1),
             content_hash: "hash2".to_string(),
             ingestion_state: IngestionState::Captured,
             created_by: Actor::User,
+            created_at: base.clone(),
+            version: 1,
+            updated_at: base.clone(),
         };
         let source3 = Source {
             id: SourceId::new(),
             origin: SourceOrigin::PastedText,
             title: Some("Newest".to_string()),
             raw_content: "content3".to_string(),
-            captured_at: base,
+            captured_at: base.clone(),
             content_hash: "hash3".to_string(),
             ingestion_state: IngestionState::Captured,
             created_by: Actor::User,
+            created_at: base.clone(),
+            version: 1,
+            updated_at: base.clone(),
         };
 
         let sources = vec![source1.clone(), source2.clone(), source3.clone()];
@@ -968,10 +1003,13 @@ mod tests {
                 origin: SourceOrigin::PastedText,
                 title: Some(format!("Item {}", i)),
                 raw_content: format!("content{}", i),
-                captured_at: base - time::Duration::days(i as i64),
+                captured_at: base.clone() - time::Duration::days(i as i64),
                 content_hash: format!("hash{}", i),
                 ingestion_state: IngestionState::Captured,
                 created_by: Actor::User,
+                created_at: base.clone(),
+                version: 1,
+                updated_at: base.clone(),
             })
             .collect();
 
@@ -1033,30 +1071,39 @@ mod tests {
                 origin: SourceOrigin::PastedText,
                 title: Some("Awaiting Review 1".to_string()),
                 raw_content: "content1".to_string(),
-                captured_at: now,
+                captured_at: now.clone(),
                 content_hash: "hash1".to_string(),
                 ingestion_state: IngestionState::AwaitingReview,
                 created_by: Actor::User,
+                created_at: now.clone(),
+                version: 1,
+                updated_at: now.clone(),
             },
             Source {
                 id: SourceId::new(),
                 origin: SourceOrigin::PastedText,
                 title: Some("Promoted".to_string()),
                 raw_content: "content2".to_string(),
-                captured_at: now,
+                captured_at: now.clone(),
                 content_hash: "hash2".to_string(),
                 ingestion_state: IngestionState::Promoted,
                 created_by: Actor::User,
+                created_at: now.clone(),
+                version: 1,
+                updated_at: now.clone(),
             },
             Source {
                 id: SourceId::new(),
                 origin: SourceOrigin::PastedText,
                 title: Some("Awaiting Review 2".to_string()),
                 raw_content: "content3".to_string(),
-                captured_at: now - time::Duration::days(1),
+                captured_at: now.clone() - time::Duration::days(1),
                 content_hash: "hash3".to_string(),
                 ingestion_state: IngestionState::AwaitingReview,
                 created_by: Actor::User,
+                created_at: now.clone(),
+                version: 1,
+                updated_at: now.clone(),
             },
         ];
 
