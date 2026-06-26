@@ -424,6 +424,7 @@
       <div id="searchResults"></div>
 
       <h2>Graph View</h2>
+      <p style="font-size: 12px; color: #666;">Drag nodes to reposition them (changes shown but not persisted yet)</p>
       <div class="canvas-container">
         <div class="canvas-controls">
           <input type="text" id="graphViewId" placeholder="Enter view ID" />
@@ -655,6 +656,106 @@
       });
 
       window.currentGraphData = null;
+      window.draggingNode = null;
+      window.dragOffsetX = 0;
+      window.dragOffsetY = 0;
+
+      const nodeRadius = 20;
+
+      function findNodeAtPosition(x, y) {
+        if (!window.currentGraphData || !window.currentGraphData.nodes) {
+          return null;
+        }
+        const canvas = document.getElementById('graphCanvas');
+        for (let i = 0; i < window.currentGraphData.nodes.length; i++) {
+          const node = window.currentGraphData.nodes[i];
+          const nodeX = node.x % canvas.width;
+          const nodeY = node.y % canvas.height;
+          const distance = Math.sqrt((x - nodeX) ** 2 + (y - nodeY) ** 2);
+          if (distance <= nodeRadius) {
+            return i;
+          }
+        }
+        return null;
+      }
+
+      const canvas = document.getElementById('graphCanvas');
+      canvas.addEventListener('mousedown', function(event) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        const nodeIndex = findNodeAtPosition(x, y);
+        if (nodeIndex !== null && window.currentGraphData) {
+          window.draggingNode = nodeIndex;
+          const node = window.currentGraphData.nodes[nodeIndex];
+          window.dragOffsetX = x - (node.x % canvas.width);
+          window.dragOffsetY = y - (node.y % canvas.height);
+          canvas.style.cursor = 'grabbing';
+        }
+      });
+
+      canvas.addEventListener('mousemove', function(event) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        if (window.draggingNode !== null && window.currentGraphData) {
+          const node = window.currentGraphData.nodes[window.draggingNode];
+          node.x = x - window.dragOffsetX;
+          node.y = y - window.dragOffsetY;
+          renderGraph(window.currentGraphData);
+        } else {
+          const nodeIndex = findNodeAtPosition(x, y);
+          canvas.style.cursor = nodeIndex !== null ? 'grab' : 'default';
+        }
+      });
+
+      canvas.addEventListener('mouseup', function() {
+        if (window.draggingNode !== null) {
+          window.draggingNode = null;
+          canvas.style.cursor = 'default';
+        }
+      });
+
+      canvas.addEventListener('mouseleave', function() {
+        window.draggingNode = null;
+        canvas.style.cursor = 'default';
+      });
+
+      // Touch support for mobile
+      canvas.addEventListener('touchstart', function(event) {
+        event.preventDefault();
+        const touch = event.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        const nodeIndex = findNodeAtPosition(x, y);
+        if (nodeIndex !== null && window.currentGraphData) {
+          window.draggingNode = nodeIndex;
+          const node = window.currentGraphData.nodes[nodeIndex];
+          window.dragOffsetX = x - (node.x % canvas.width);
+          window.dragOffsetY = y - (node.y % canvas.height);
+        }
+      });
+
+      canvas.addEventListener('touchmove', function(event) {
+        event.preventDefault();
+        if (window.draggingNode !== null && window.currentGraphData) {
+          const touch = event.touches[0];
+          const rect = canvas.getBoundingClientRect();
+          const x = touch.clientX - rect.left;
+          const y = touch.clientY - rect.top;
+          const node = window.currentGraphData.nodes[window.draggingNode];
+          node.x = x - window.dragOffsetX;
+          node.y = y - window.dragOffsetY;
+          renderGraph(window.currentGraphData);
+        }
+      });
+
+      canvas.addEventListener('touchend', function(event) {
+        event.preventDefault();
+        window.draggingNode = null;
+      });
 
       async function loadGraphView() {
         const viewId = document.getElementById('graphViewId').value;
