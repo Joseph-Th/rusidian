@@ -116,12 +116,13 @@ Do not start a later step while an earlier one is 🔨/🚫.
 #### C4d · Entity merge: Link re-pointing ✅
 - Added LinkRepo trait with create/get/get_by_to/get_by_from/set_to/set_from. Implemented SqliteLinkRepo with full persistence. Created migration 0005 for link review state/confidence columns. Updated apply_action() to re-point all links when MergeEntities is applied. Added merge_entities_apply_repoints_links test verifying link re-pointing. All tests pass.
 
+#### C4e · Entity merge: Rollback path ✅
+- Added clear_merged_into() to EntityRepo. Updated execute() to populate diff with loser_ids. Updated rollback_action() to restore merged_into and re-point links. Added merge_entities_apply_and_rollback test. All tests pass.
+
 #### C5 · Finalize Provenance ✅
 - Added originating_action and extraction_span fields to Provenance. 7 tests verify round-trip serialization.
 
 ### Active — Next to work on
-
-#### C4e · Entity merge: Rollback path ⬜
 - **Depends on:** C4d.
 - **Do:** Implement rollback_merge in AgentActionRepo. Restore merged_into→NULL,
   re-point links back to loser. Verify pre-merge state is fully recoverable.
@@ -152,9 +153,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (19 tasks)
+## Done (20 tasks)
 
-All foundation, vertical-slice, and entity merge work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C5.
+All foundation, vertical-slice, and entity merge work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5.
 
 ---
 
