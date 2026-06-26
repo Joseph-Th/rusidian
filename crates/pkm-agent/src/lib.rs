@@ -960,6 +960,10 @@ mod tests {
             Ok(vec![])
         }
 
+        fn update(&self, _note: &pkm_core::note::Note) -> pkm_core::Result<()> {
+            Ok(())
+        }
+
         fn update_block(
             &self,
             _note_id: NoteId,

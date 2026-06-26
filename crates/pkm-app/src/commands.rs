@@ -87,3 +87,16 @@ pub async fn get_note(
         block_count: note.blocks.len(),
     })
 }
+
+pub async fn update_note(
+    note_id: String,
+    title: String,
+    metadata: BTreeMap<String, serde_json::Value>,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<(), String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.update_note(&note_id, title, metadata)
+}

@@ -112,4 +112,38 @@ impl AppService {
 
         Ok(note)
     }
+
+    /// Update a note's title and metadata.
+    pub fn update_note(
+        &self,
+        note_id: &str,
+        title: String,
+        metadata: BTreeMap<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        let uuid =
+            uuid::Uuid::parse_str(note_id).map_err(|_| format!("Invalid note ID: {}", note_id))?;
+        let parsed_id = pkm_core::id::NoteId(uuid);
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let note_repo = SqliteNoteRepo { conn: &conn };
+        let mut note = note_repo
+            .get(parsed_id)
+            .map_err(|e| format!("Failed to get note: {}", e))?
+            .ok_or_else(|| format!("Note not found: {}", note_id))?;
+
+        note.title = title;
+        note.metadata = metadata;
+        note.version += 1;
+        note.updated_at = Timestamp::now_utc();
+
+        note_repo
+            .update(&note)
+            .map_err(|e| format!("Failed to update note: {}", e))?;
+
+        Ok(())
+    }
 }

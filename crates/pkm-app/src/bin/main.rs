@@ -7,6 +7,7 @@
 )]
 
 use pkm_app::{commands, AppService};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tauri::menu::Menu;
 
@@ -37,6 +38,17 @@ async fn get_note(
     commands::get_note(note_id, service).await
 }
 
+#[tauri::command]
+async fn update_note(
+    note_id: String,
+    title: String,
+    metadata: BTreeMap<String, serde_json::Value>,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<(), String> {
+    let service = state.inner();
+    commands::update_note(note_id, title, metadata, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -62,7 +74,12 @@ fn main() {
     tauri::Builder::default()
         .menu(Menu::new)
         .manage(service)
-        .invoke_handler(tauri::generate_handler![create_note, list_notes, get_note])
+        .invoke_handler(tauri::generate_handler![
+            create_note,
+            list_notes,
+            get_note,
+            update_note
+        ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_, _| {})

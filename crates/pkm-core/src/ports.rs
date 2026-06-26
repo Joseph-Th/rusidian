@@ -38,6 +38,8 @@ pub trait NoteRepo {
     fn get(&self, id: NoteId) -> Result<Option<Note>>;
     /// List all notes with optional limit.
     fn list(&self, limit: Option<usize>) -> Result<Vec<Note>>;
+    /// Update a note's title, metadata, version, and updated_at timestamp.
+    fn update(&self, note: &Note) -> Result<()>;
     /// Update a block's content. Returns the updated block after applying the change.
     fn update_block(
         &self,

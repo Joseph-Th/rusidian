@@ -186,6 +186,30 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         notes
     }
 
+    fn update(&self, note: &Note) -> Result<()> {
+        let updated_at_str = note
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let metadata_json = serde_json::to_string(&note.metadata)?;
+
+        self.conn
+            .execute(
+                "UPDATE note SET title = ?1, version = ?2, updated_at = ?3, metadata = ?4 WHERE id = ?5",
+                params![
+                    note.title,
+                    note.version as i64,
+                    updated_at_str,
+                    metadata_json,
+                    note.id.to_string(),
+                ],
+            )
+            .map_err(crate::StorageError::from)?;
+
+        Ok(())
+    }
+
     fn update_block(
         &self,
         note_id: NoteId,

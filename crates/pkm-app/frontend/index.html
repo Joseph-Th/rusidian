@@ -95,6 +95,22 @@
         margin-top: 15px;
         font-size: 12px;
       }
+      .modal-actions {
+        margin-top: 20px;
+        border-top: 1px solid #ddd;
+        padding-top: 15px;
+      }
+      .edit-field {
+        width: 100%;
+        padding: 8px;
+        margin: 8px 0;
+        font-size: 14px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+      .hidden {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -113,9 +129,24 @@
     <div id="noteModal" class="modal">
       <div class="modal-content">
         <span class="modal-close" onclick="closeNoteModal()">&times;</span>
-        <h2 id="modalTitle"></h2>
-        <div id="modalMetadata" class="modal-metadata"></div>
-        <div id="modalBlockInfo"></div>
+
+        <div id="viewMode">
+          <h2 id="modalTitle"></h2>
+          <div id="modalMetadata" class="modal-metadata"></div>
+          <div id="modalBlockInfo"></div>
+          <div class="modal-actions">
+            <button onclick="enterEditMode()">Edit Note</button>
+          </div>
+        </div>
+
+        <div id="editMode" class="hidden">
+          <input type="text" id="editTitle" class="edit-field" placeholder="Note title" />
+          <div id="editMetadata"></div>
+          <div class="modal-actions">
+            <button onclick="saveNote()">Save</button>
+            <button onclick="exitEditMode()">Cancel</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -160,9 +191,13 @@
         }
       }
 
+      window.currentNote = null;
+
       async function viewNote(noteId) {
         try {
           const note = await window.__TAURI__.invoke('get_note', { note_id: noteId });
+          window.currentNote = note;
+
           document.getElementById('modalTitle').textContent = note.title;
 
           const metadataDiv = document.getElementById('modalMetadata');
@@ -182,6 +217,8 @@
               JSON.stringify(note.metadata, null, 2) + '</pre>';
           }
 
+          document.getElementById('viewMode').classList.remove('hidden');
+          document.getElementById('editMode').classList.add('hidden');
           document.getElementById('noteModal').classList.add('show');
         } catch (error) {
           alert('Error: ' + error);
@@ -190,6 +227,64 @@
 
       function closeNoteModal() {
         document.getElementById('noteModal').classList.remove('show');
+      }
+
+      function enterEditMode() {
+        const modalTitle = document.getElementById('modalTitle');
+        document.getElementById('editTitle').value = modalTitle.textContent;
+
+        const note = window.currentNote;
+        const metadataDiv = document.getElementById('editMetadata');
+        metadataDiv.innerHTML = '<p><strong>Metadata:</strong></p>';
+        for (const [key, value] of Object.entries(note.metadata)) {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'edit-field';
+          input.placeholder = 'Metadata: ' + key;
+          input.value = JSON.stringify(value);
+          input.dataset.key = key;
+          metadataDiv.appendChild(input);
+        }
+
+        document.getElementById('viewMode').classList.add('hidden');
+        document.getElementById('editMode').classList.remove('hidden');
+      }
+
+      function exitEditMode() {
+        document.getElementById('viewMode').classList.remove('hidden');
+        document.getElementById('editMode').classList.add('hidden');
+      }
+
+      async function saveNote() {
+        const noteId = window.currentNote.id;
+        const title = document.getElementById('editTitle').value;
+
+        const metadata = {};
+        const inputs = document.getElementById('editMetadata').querySelectorAll('input');
+        inputs.forEach(input => {
+          if (input.dataset.key) {
+            try {
+              metadata[input.dataset.key] = JSON.parse(input.value);
+            } catch {
+              alert('Invalid JSON for metadata key: ' + input.dataset.key);
+              throw new Error('Invalid metadata');
+            }
+          }
+        });
+
+        try {
+          await window.__TAURI__.invoke('update_note', {
+            note_id: noteId,
+            title: title,
+            metadata: metadata
+          });
+          alert('Note updated successfully');
+          exitEditMode();
+          await viewNote(noteId);
+          await listNotes();
+        } catch (error) {
+          alert('Error updating note: ' + error);
+        }
       }
 
       window.onclick = function(event) {
