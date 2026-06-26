@@ -14,8 +14,9 @@
 //! asserting exact ids/times.
 
 use crate::block::{Block, BlockContent};
-use crate::id::{BlockId, NoteId, SourceId};
+use crate::id::{BlockId, NoteId, ObjectRef, SourceId, ViewId};
 use crate::ingestion::IngestionState;
+use crate::media::{EmbedProvider, MediaType};
 use crate::note::Note;
 use crate::source::{Source, SourceOrigin};
 use crate::{Actor, Timestamp};
@@ -74,6 +75,105 @@ pub fn sample_note() -> Note {
         metadata,
         created_by: Actor::User,
         created_at: now,
+        version: 1,
+        updated_at: now,
+    }
+}
+
+/// A [`Block`] containing a math equation (display mode).
+pub fn sample_math_block() -> Block {
+    let now = Timestamp::now_utc();
+    Block {
+        id: BlockId::new(),
+        note_id: NoteId::new(),
+        content: BlockContent::Math {
+            expression: "E = mc^2".to_string(),
+            display_mode: true,
+        },
+        order: 1.0,
+        created_by: Actor::User,
+        created_at: now,
+        source_provenance_ref: None,
+        version: 1,
+        updated_at: now,
+    }
+}
+
+/// A [`Block`] containing a table.
+pub fn sample_table_block() -> Block {
+    let now = Timestamp::now_utc();
+    Block {
+        id: BlockId::new(),
+        note_id: NoteId::new(),
+        content: BlockContent::Table {
+            headers: vec!["Name".to_string(), "Value".to_string()],
+            rows: vec![
+                vec!["Alpha".to_string(), "1".to_string()],
+                vec!["Beta".to_string(), "2".to_string()],
+            ],
+        },
+        order: 1.0,
+        created_by: Actor::User,
+        created_at: now,
+        source_provenance_ref: None,
+        version: 1,
+        updated_at: now,
+    }
+}
+
+/// A [`Block`] containing an image.
+pub fn sample_image_block() -> Block {
+    let now = Timestamp::now_utc();
+    Block {
+        id: BlockId::new(),
+        note_id: NoteId::new(),
+        content: BlockContent::Media {
+            hash_or_url: "image-abc123.png".to_string(),
+            alt_text: "Example image".to_string(),
+            media_type: MediaType::Image,
+        },
+        order: 1.0,
+        created_by: Actor::User,
+        created_at: now,
+        source_provenance_ref: None,
+        version: 1,
+        updated_at: now,
+    }
+}
+
+/// A [`Block`] containing an embedded YouTube video.
+pub fn sample_youtube_embed_block() -> Block {
+    let now = Timestamp::now_utc();
+    Block {
+        id: BlockId::new(),
+        note_id: NoteId::new(),
+        content: BlockContent::ExternalEmbed {
+            url: "https://youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
+            provider: EmbedProvider::YouTube,
+        },
+        order: 1.0,
+        created_by: Actor::User,
+        created_at: now,
+        source_provenance_ref: None,
+        version: 1,
+        updated_at: now,
+    }
+}
+
+/// A [`Block`] containing an internal embed (e.g., embedding another View).
+pub fn sample_internal_embed_block() -> Block {
+    let now = Timestamp::now_utc();
+    Block {
+        id: BlockId::new(),
+        note_id: NoteId::new(),
+        content: BlockContent::InternalEmbed {
+            target: ObjectRef::View(ViewId::new()),
+            fallback_text: "Embedded View: Project Dashboard".to_string(),
+        },
+        order: 1.0,
+        created_by: Actor::User,
+        created_at: now,
+        source_provenance_ref: None,
         version: 1,
         updated_at: now,
     }

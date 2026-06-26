@@ -7,10 +7,13 @@
 //! - Title as a level-1 heading (# Title)
 //! - Blocks as paragraphs separated by blank lines
 //! - Block IDs preserved as HTML comments for round-tripping
-//! - Note metadata as YAML front matter (future extension)
+//! - Rich blocks (tables, math, media) serialized as standard markdown
+//! - Complex UI (views, Kanban) serialized with fallback text + HTML comments
+//! - Note metadata as YAML front matter
 
 use crate::block::{Block, BlockContent};
 use crate::id::{BlockId, NoteId};
+use crate::media::{EmbedProvider, MediaType};
 use crate::note::Note;
 use crate::{Actor, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -55,19 +58,125 @@ fn create_frontmatter(note: &Note) -> NoteFrontmatter {
     }
 }
 
-/// Convert blocks to markdown text. Each block becomes a paragraph or heading
-/// based on its content. Preserves order and block identity as HTML comments.
+/// Serialize a single block to markdown. Rich block types are converted to
+/// standard markdown (tables as GFM, math as $$, images as ![]()), and complex
+/// blocks use HTML comments + fallback text so they're readable outside the app.
+fn block_content_to_markdown(content: &BlockContent) -> String {
+    match content {
+        BlockContent::Markdown { text } => text.clone(),
+
+        BlockContent::Math {
+            expression,
+            display_mode,
+        } => {
+            if *display_mode {
+                format!("$$\n{}\n$$", expression)
+            } else {
+                format!("${expression}$")
+            }
+        }
+
+        BlockContent::Media {
+            hash_or_url,
+            alt_text,
+            media_type: _,
+        } => format!("![{alt_text}]({hash_or_url})"),
+
+        BlockContent::Table { headers, rows } => serialize_table(headers, rows),
+
+        BlockContent::InternalEmbed {
+            target,
+            fallback_text,
+        } => {
+            // Internal embeds use HTML comment + blockquote fallback
+            format!(
+                "<!-- embed:internal:{:?} -->\n\n> **[Embedded: {}]**\n> \n> {}\n> \n> *[This is a dynamic view embedded here. Open in app to interact.]*",
+                target,
+                target_display_name(target),
+                fallback_text.lines().map(|l| format!("> {}", l)).collect::<Vec<_>>().join("\n")
+            )
+        }
+
+        BlockContent::ExternalEmbed { url, provider } => {
+            // External embeds use HTML comment + link fallback
+            format!(
+                "<!-- embed:external:{}:{} -->\n\n[{}]({}) *[{}]*",
+                provider.domain(),
+                url,
+                url,
+                url,
+                match provider {
+                    EmbedProvider::YouTube => "YouTube Video",
+                    EmbedProvider::Twitter => "Tweet",
+                    EmbedProvider::GoogleDrive => "Google Drive Document",
+                    EmbedProvider::Generic => "External Embed",
+                }
+            )
+        }
+    }
+}
+
+/// Serialize a table as GitHub-flavored markdown.
+fn serialize_table(headers: &[String], rows: &[Vec<String>]) -> String {
+    let mut result = String::new();
+
+    // Header row
+    result.push('|');
+    for header in headers {
+        result.push(' ');
+        result.push_str(header);
+        result.push_str(" |");
+    }
+    result.push('\n');
+
+    // Separator row
+    result.push('|');
+    for _ in headers {
+        result.push_str(" --- |");
+    }
+    result.push('\n');
+
+    // Data rows
+    for row in rows {
+        result.push('|');
+        for (i, cell) in row.iter().enumerate() {
+            result.push(' ');
+            // Escape pipes in cell content
+            result.push_str(&cell.replace('|', "\\|"));
+            result.push_str(" |");
+            if i >= headers.len() - 1 {
+                break;
+            }
+        }
+        result.push('\n');
+    }
+
+    result.trim_end().to_string()
+}
+
+/// Get a display name for an ObjectRef for use in fallback text.
+fn target_display_name(target: &crate::id::ObjectRef) -> String {
+    match target {
+        crate::id::ObjectRef::Note(id) => format!("Note {}", id),
+        crate::id::ObjectRef::View(id) => format!("View {}", id),
+        crate::id::ObjectRef::Block(id) => format!("Block {}", id),
+        crate::id::ObjectRef::Entity(id) => format!("Entity {}", id),
+        crate::id::ObjectRef::Link(id) => format!("Link {}", id),
+        crate::id::ObjectRef::Source(id) => format!("Source {}", id),
+    }
+}
+
+/// Convert blocks to markdown text. Each block is serialized to standard markdown
+/// so the file remains readable in any markdown editor. Block IDs are preserved
+/// as HTML comments for round-tripping.
 pub fn blocks_to_markdown(blocks: &[Block]) -> String {
     let mut md = String::new();
 
     for block in blocks {
-        // Add the block content as markdown
-        match &block.content {
-            BlockContent::Markdown { text } => {
-                md.push_str(text);
-                md.push_str("\n\n");
-            }
-        }
+        // Serialize block content
+        let content_md = block_content_to_markdown(&block.content);
+        md.push_str(&content_md);
+        md.push_str("\n\n");
 
         // Add a block id reference as an HTML comment for round-tripping
         md.push_str(&format!("<!-- block:{} -->\n\n", block.id));
@@ -76,65 +185,141 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
     md.trim_end().to_string()
 }
 
-/// Parse markdown into blocks. Each paragraph or heading becomes a block.
-/// Extracts block IDs from HTML comments where present; generates new ones otherwise.
-/// Returns blocks in the order they appear, with fractional order keys.
+/// Deserialize a table from markdown-like content.
+/// This is a best-effort parser for GFM tables found in markdown.
+fn deserialize_table(text: &str) -> Option<(Vec<String>, Vec<Vec<String>>)> {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() < 3 {
+        return None;
+    }
+
+    // Try to parse first line as header row
+    let header_line = lines[0];
+    if !header_line.starts_with('|') || !header_line.ends_with('|') {
+        return None;
+    }
+
+    let headers: Vec<String> = header_line
+        .trim_start_matches('|')
+        .trim_end_matches('|')
+        .split('|')
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    // Check for separator line (line 2)
+    let sep_line = lines[1];
+    if !sep_line.contains("---") {
+        return None;
+    }
+
+    // Parse data rows
+    let mut rows = Vec::new();
+    for line in &lines[2..] {
+        if !line.starts_with('|') || !line.ends_with('|') {
+            break;
+        }
+
+        let row: Vec<String> = line
+            .trim_start_matches('|')
+            .trim_end_matches('|')
+            .split('|')
+            .map(|s| s.trim().replace("\\|", "|"))
+            .collect();
+
+        if row.len() == headers.len() {
+            rows.push(row);
+        }
+    }
+
+    Some((headers, rows))
+}
+
+/// Parse markdown into blocks. Recognizes rich block types (tables, math, media)
+/// and converts them back to their BlockContent variants. Falls back to Markdown
+/// blocks for unrecognized content. Block IDs (<!-- block:uuid -->) are associated
+/// with the block that follows them.
 pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, String> {
     let mut blocks = Vec::new();
     let mut order = 1.0_f32;
     let now = Timestamp::now_utc();
 
     let lines = text.lines().collect::<Vec<_>>();
-    let mut current_block = String::new();
-    let mut block_id: Option<BlockId> = None;
+    let mut i = 0;
+    let mut pending_block_id: Option<BlockId> = None;
 
-    for line in lines {
-        // Check for block ID comment
+    while i < lines.len() {
+        let line = lines[i];
+
+        // Check for block ID comment — if found, store it for the next block
         if line.starts_with("<!-- block:") && line.ends_with(" -->") {
             let id_str = line
                 .trim_start_matches("<!-- block:")
                 .trim_end_matches(" -->");
             if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                block_id = Some(BlockId(uuid));
+                pending_block_id = Some(BlockId(uuid));
             }
-        } else if line.is_empty() {
-            // Empty line marks block boundary
-            if !current_block.trim().is_empty() {
-                let block = Block {
-                    id: block_id.unwrap_or_else(BlockId::new),
-                    note_id,
-                    content: BlockContent::Markdown {
-                        text: current_block.trim().to_string(),
-                    },
-                    order,
-                    created_by: Actor::User,
-                    created_at: now,
-                    source_provenance_ref: None,
-                    version: 1,
-                    updated_at: now,
-                };
-                blocks.push(block);
-                order += 1.0;
-                current_block.clear();
-                block_id = None;
+            i += 1;
+            continue;
+        }
+
+        // Skip blank lines
+        if line.trim().is_empty() {
+            i += 1;
+            continue;
+        }
+
+        // Collect block content until next blank line or block ID comment
+        let mut block_text = String::new();
+        while i < lines.len() {
+            let current = lines[i];
+            if current.is_empty() || (current.starts_with("<!-- block:") && current.ends_with(" -->")) {
+                break;
+            }
+            if !block_text.is_empty() {
+                block_text.push('\n');
+            }
+            block_text.push_str(current);
+            i += 1;
+        }
+
+        if block_text.trim().is_empty() {
+            continue;
+        }
+
+        // Try to parse the block content as a rich type; fall back to Markdown
+        let content = if let Some((headers, rows)) = deserialize_table(&block_text) {
+            BlockContent::Table { headers, rows }
+        } else if block_text.starts_with("$$") && block_text.ends_with("$$") {
+            let expr = block_text
+                .trim_start_matches("$$")
+                .trim_end_matches("$$")
+                .trim()
+                .to_string();
+            BlockContent::Math {
+                expression: expr,
+                display_mode: true,
+            }
+        } else if let Some(caps) = try_parse_inline_math(&block_text) {
+            BlockContent::Math {
+                expression: caps,
+                display_mode: false,
+            }
+        } else if let Some((url, alt)) = try_parse_image(&block_text) {
+            BlockContent::Media {
+                hash_or_url: url,
+                alt_text: alt,
+                media_type: MediaType::Image,
             }
         } else {
-            // Accumulate content
-            if !current_block.is_empty() {
-                current_block.push('\n');
+            BlockContent::Markdown {
+                text: block_text.trim().to_string(),
             }
-            current_block.push_str(line);
-        }
-    }
+        };
 
-    // Don't forget the last block
-    if !current_block.trim().is_empty() {
         let block = Block {
-            id: block_id.unwrap_or_else(BlockId::new),
+            id: pending_block_id.take().unwrap_or_else(BlockId::new),
             note_id,
-            content: BlockContent::Markdown {
-                text: current_block.trim().to_string(),
-            },
+            content,
             order,
             created_by: Actor::User,
             created_at: now,
@@ -143,9 +328,36 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
             updated_at: now,
         };
         blocks.push(block);
+        order += 1.0;
     }
 
     Ok(blocks)
+}
+
+/// Try to parse inline math (e.g., $expression$).
+fn try_parse_inline_math(text: &str) -> Option<String> {
+    if text.starts_with('$') && text.ends_with('$') && !text.starts_with("$$") {
+        Some(text[1..text.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+/// Try to parse image markdown (e.g., ![alt](url)).
+fn try_parse_image(text: &str) -> Option<(String, String)> {
+    if !text.starts_with("![") {
+        return None;
+    }
+    if let Some(close_bracket) = text.find(']') {
+        if close_bracket + 1 < text.len() && text.chars().nth(close_bracket + 1) == Some('(') {
+            if let Some(close_paren) = text[close_bracket + 2..].find(')') {
+                let alt = text[2..close_bracket].to_string();
+                let url = text[close_bracket + 2..close_bracket + 2 + close_paren].to_string();
+                return Some((url, alt));
+            }
+        }
+    }
+    None
 }
 
 /// Extract title from markdown text (first line that looks like a heading).
@@ -436,5 +648,190 @@ mod tests {
         assert_eq!(imported_note.id, original_note.id);
         assert_eq!(imported_note.title, original_note.title);
         assert_eq!(imported_note.metadata, original_note.metadata);
+    }
+
+    #[test]
+    fn serialize_math_block_display_mode() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Math {
+                expression: "E = mc^2".to_string(),
+                display_mode: true,
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("$$\nE = mc^2\n$$"));
+    }
+
+    #[test]
+    fn parse_math_block_display_mode() {
+        let note_id = NoteId::new();
+        let text = "$$\nE = mc^2\n$$";
+
+        let blocks = markdown_to_blocks(text, note_id).expect("parse");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].content {
+            BlockContent::Math {
+                expression,
+                display_mode,
+            } => {
+                assert_eq!(expression, "E = mc^2");
+                assert!(*display_mode);
+            }
+            _ => panic!("Expected Math block"),
+        }
+    }
+
+    #[test]
+    fn serialize_table_block() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Table {
+                headers: vec!["Name".to_string(), "Price".to_string()],
+                rows: vec![
+                    vec!["Apple".to_string(), "$1".to_string()],
+                    vec!["Orange".to_string(), "$2".to_string()],
+                ],
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("| Name | Price |"));
+        assert!(md.contains("| Apple | $1 |"));
+        assert!(md.contains("| Orange | $2 |"));
+    }
+
+    #[test]
+    fn parse_table_block() {
+        let note_id = NoteId::new();
+        let text = "| Name | Price |\n| --- | --- |\n| Apple | $1 |\n| Orange | $2 |";
+
+        let blocks = markdown_to_blocks(text, note_id).expect("parse");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].content {
+            BlockContent::Table { headers, rows } => {
+                assert_eq!(headers, &vec!["Name".to_string(), "Price".to_string()]);
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0], vec!["Apple".to_string(), "$1".to_string()]);
+            }
+            _ => panic!("Expected Table block"),
+        }
+    }
+
+    #[test]
+    fn serialize_media_block() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Media {
+                hash_or_url: "image-hash-abc123.png".to_string(),
+                alt_text: "A beautiful sunset".to_string(),
+                media_type: MediaType::Image,
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("![A beautiful sunset](image-hash-abc123.png)"));
+    }
+
+    #[test]
+    fn parse_media_block() {
+        let note_id = NoteId::new();
+        let text = "![A sunset](sunset.png)";
+
+        let blocks = markdown_to_blocks(text, note_id).expect("parse");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0].content {
+            BlockContent::Media {
+                hash_or_url,
+                alt_text,
+                media_type,
+            } => {
+                assert_eq!(hash_or_url, "sunset.png");
+                assert_eq!(alt_text, "A sunset");
+                assert_eq!(*media_type, MediaType::Image);
+            }
+            _ => panic!("Expected Media block"),
+        }
+    }
+
+    #[test]
+    fn serialize_external_embed_block() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::ExternalEmbed {
+                url: "https://youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
+                provider: EmbedProvider::YouTube,
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("<!-- embed:external:youtube.com:https://youtube.com/watch?v=dQw4w9WgXcQ -->"));
+        assert!(md.contains("youtube.com"));
+        assert!(md.contains("[https://youtube.com/watch?v=dQw4w9WgXcQ](https://youtube.com/watch?v=dQw4w9WgXcQ)"));
+    }
+
+    #[test]
+    fn table_with_pipe_characters_escapes_properly() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        let blocks = vec![Block {
+            id: BlockId::new(),
+            note_id,
+            content: BlockContent::Table {
+                headers: vec!["Code".to_string()],
+                rows: vec![vec!["if a | b".to_string()]],
+            },
+            order: 1.0,
+            created_by: Actor::User,
+            created_at: now,
+            source_provenance_ref: None,
+            version: 1,
+            updated_at: now,
+        }];
+
+        let md = blocks_to_markdown(&blocks);
+        assert!(md.contains("if a \\| b"));
     }
 }

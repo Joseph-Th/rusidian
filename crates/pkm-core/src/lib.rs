@@ -27,6 +27,7 @@ pub mod agent_action;
 pub mod block;
 pub mod entity;
 pub mod link;
+pub mod media;
 pub mod note;
 pub mod source;
 pub mod view;

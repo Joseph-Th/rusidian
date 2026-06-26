@@ -11,17 +11,58 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::{BlockId, NoteId, ObjectRef};
+use crate::media::{EmbedProvider, MediaType};
 use crate::sync::SyncEligible;
 use crate::{Actor, Timestamp};
 
-/// What a block holds. Start markdown-compatible; richer block kinds (tables,
-/// embeds, generated sections) come later per STATUS.md task C2.
+/// What a block holds. Each variant is strongly typed to prevent AI agents from
+/// generating malformed syntax. Markdown serialization is handled in the markdown module.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BlockContent {
     /// A markdown text span (paragraph, heading, list item, etc.).
     Markdown { text: String },
-    // TODO(C2+): Generated { text, provenance }, Embed { object_ref }, Table {..}.
+
+    /// LaTeX math equation.
+    Math {
+        expression: String,
+        /// True for display mode ($$), false for inline ($)
+        display_mode: bool,
+    },
+
+    /// Local media (images, PDFs) backed by BlobStore, or remote URLs.
+    Media {
+        /// Either a local blob hash (from BlobStore) or remote URL.
+        hash_or_url: String,
+        /// Descriptive alt text for accessibility.
+        alt_text: String,
+        /// Type of media (image, audio, video, PDF).
+        media_type: MediaType,
+    },
+
+    /// Strictly structured table. Rows must all have the same length as headers.
+    Table {
+        /// Column headers.
+        headers: Vec<String>,
+        /// Table rows. Each row is a list of cells.
+        rows: Vec<Vec<String>>,
+    },
+
+    /// Internal transclusion (embedding another Note, View, or Block).
+    InternalEmbed {
+        /// Reference to the embedded object.
+        target: ObjectRef,
+        /// Text snapshot for markdown fallback (shown when opened outside app).
+        fallback_text: String,
+    },
+
+    /// External iFrame embed (YouTube, Twitter, Google Drive, etc.).
+    ExternalEmbed {
+        /// URL to embed.
+        url: String,
+        /// Provider (used to detect embed type and construct embed code).
+        provider: EmbedProvider,
+    },
 }
 
 /// A stable, addressable unit inside a note. Blocks support fine-grained edits
@@ -169,5 +210,41 @@ mod tests {
         // Verify ordering: 1.0 < 2.0 < 3.0
         assert!(first.order < middle.order);
         assert!(middle.order < last.order);
+    }
+
+    #[test]
+    fn block_content_variants_are_serializable() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        // Test that all BlockContent variants serialize correctly
+        let variants = vec![
+            BlockContent::Markdown {
+                text: "Test".to_string(),
+            },
+            BlockContent::Math {
+                expression: "x^2".to_string(),
+                display_mode: true,
+            },
+            BlockContent::Table {
+                headers: vec!["A".to_string(), "B".to_string()],
+                rows: vec![vec!["1".to_string(), "2".to_string()]],
+            },
+            BlockContent::Media {
+                hash_or_url: "hash123".to_string(),
+                alt_text: "Image".to_string(),
+                media_type: crate::media::MediaType::Image,
+            },
+            BlockContent::ExternalEmbed {
+                url: "https://example.com".to_string(),
+                provider: crate::media::EmbedProvider::Generic,
+            },
+        ];
+
+        for variant in variants {
+            let json = serde_json::to_string(&variant).expect("serialize");
+            let back: BlockContent = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, variant);
+        }
     }
 }
