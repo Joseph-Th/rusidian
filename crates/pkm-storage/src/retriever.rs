@@ -58,9 +58,7 @@ impl pkm_core::ports::Retriever for SqliteRetriever {
                 results.extend(search_sources_fuzzy(&conn, query)?);
             }
             SearchMode::LinkTraversal => {
-                return Err(pkm_core::CoreError::Invariant(
-                    "link traversal search not yet implemented".to_string(),
-                ));
+                results.extend(search_link_traversal(&conn, query)?);
             }
         }
 
@@ -71,6 +69,233 @@ impl pkm_core::ports::Retriever for SqliteRetriever {
         let ranked = rank(query, results);
 
         Ok(ranked)
+    }
+}
+
+/// Search for objects reachable via typed links (graph traversal).
+/// Parses the query text as "type:id" (e.g., "note:abc123") or just an id.
+/// Traverses links up to depth 2 to find related objects.
+fn search_link_traversal(
+    conn: &Connection,
+    query: &SearchQuery,
+) -> pkm_core::Result<Vec<SearchHit>> {
+    // Parse starting object from query text
+    let starting_obj = parse_starting_object(&query.text)?;
+    let mut hits = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+    let mut depth = std::collections::HashMap::new();
+
+    queue.push_back(starting_obj);
+    visited.insert(object_ref_to_string(&starting_obj));
+    depth.insert(object_ref_to_string(&starting_obj), 0);
+
+    // BFS traversal with depth limit of 2
+    const MAX_DEPTH: usize = 2;
+    let mut results_limit = 100;
+
+    while let Some(current) = queue.pop_front() {
+        let current_depth = *depth.get(&object_ref_to_string(&current)).unwrap_or(&0);
+
+        if current_depth < MAX_DEPTH && results_limit > 0 {
+            // Get links from current object
+            let linked_objects = get_linked_objects(conn, &current)?;
+
+            for obj in linked_objects {
+                let obj_str = object_ref_to_string(&obj);
+                if !visited.contains(&obj_str) {
+                    visited.insert(obj_str.clone());
+                    depth.insert(obj_str, current_depth + 1);
+                    queue.push_back(obj);
+                    results_limit -= 1;
+                }
+            }
+        }
+
+        // Add current object to results (except the starting object itself)
+        if object_ref_to_string(&current) != object_ref_to_string(&starting_obj) {
+            if let Some(hit) = create_hit_for_object(conn, &current)? {
+                hits.push(hit);
+            }
+        }
+    }
+
+    Ok(hits)
+}
+
+/// Get all objects that are linked to or from the given object.
+fn get_linked_objects(conn: &Connection, obj: &ObjectRef) -> pkm_core::Result<Vec<ObjectRef>> {
+    let (obj_type, obj_id) = object_ref_to_string_parts(obj);
+    let mut results = Vec::new();
+
+    // Get objects this object links to (outgoing edges)
+    let mut stmt = conn
+        .prepare("SELECT to_type, to_id FROM link WHERE from_type = ? AND from_id = ? LIMIT 50")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let to_objects: Vec<(String, String)> = stmt
+        .query_map([obj_type, &obj_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    for (type_str, id_str) in to_objects {
+        if let Ok(obj_ref) = string_to_object_ref(&type_str, &id_str) {
+            results.push(obj_ref);
+        }
+    }
+
+    // Get objects that link to this object (incoming edges)
+    let mut stmt = conn
+        .prepare("SELECT from_type, from_id FROM link WHERE to_type = ? AND to_id = ? LIMIT 50")
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    let from_objects: Vec<(String, String)> = stmt
+        .query_map([obj_type, &obj_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+    for (type_str, id_str) in from_objects {
+        if let Ok(obj_ref) = string_to_object_ref(&type_str, &id_str) {
+            results.push(obj_ref);
+        }
+    }
+
+    Ok(results)
+}
+
+/// Convert an ObjectRef to a string for use as a HashMap key (type:id).
+fn object_ref_to_string(obj: &ObjectRef) -> String {
+    let (type_str, id_str) = object_ref_to_string_parts(obj);
+    format!("{}:{}", type_str, id_str)
+}
+
+/// Convert an ObjectRef to (type, id) parts.
+fn object_ref_to_string_parts(obj: &ObjectRef) -> (&'static str, String) {
+    match obj {
+        ObjectRef::Source(id) => ("source", id.to_string()),
+        ObjectRef::Note(id) => ("note", id.to_string()),
+        ObjectRef::Block(id) => ("block", id.to_string()),
+        ObjectRef::Entity(id) => ("entity", id.to_string()),
+        ObjectRef::Link(id) => ("link", id.to_string()),
+        ObjectRef::View(id) => ("view", id.to_string()),
+    }
+}
+
+/// Parse a string ("type:id" or just "id") into an ObjectRef.
+fn string_to_object_ref(type_str: &str, id_str: &str) -> pkm_core::Result<ObjectRef> {
+    let uuid = uuid::Uuid::parse_str(id_str)
+        .map_err(|_| pkm_core::CoreError::Invariant("invalid uuid".to_string()))?;
+
+    Ok(match type_str {
+        "source" => ObjectRef::Source(pkm_core::id::SourceId(uuid)),
+        "note" => ObjectRef::Note(pkm_core::id::NoteId(uuid)),
+        "block" => ObjectRef::Block(pkm_core::id::BlockId(uuid)),
+        "entity" => ObjectRef::Entity(pkm_core::id::EntityId(uuid)),
+        "link" => ObjectRef::Link(pkm_core::id::LinkId(uuid)),
+        "view" => ObjectRef::View(pkm_core::id::ViewId(uuid)),
+        _ => {
+            return Err(pkm_core::CoreError::Invariant(
+                "unknown object type".to_string(),
+            ))
+        }
+    })
+}
+
+/// Parse the starting object from query text.
+/// Formats: "note:uuid", "source:uuid", or just "uuid" (defaults to note).
+fn parse_starting_object(text: &str) -> pkm_core::Result<ObjectRef> {
+    let text = text.trim();
+
+    if let Some(idx) = text.find(':') {
+        let (type_part, id_part) = text.split_at(idx);
+        let id_part = &id_part[1..]; // skip ':'
+        string_to_object_ref(type_part.trim(), id_part.trim())
+    } else {
+        // Try parsing as a raw UUID, default to Note
+        string_to_object_ref("note", text)
+    }
+}
+
+/// Create a SearchHit for an object by fetching its metadata from the database.
+fn create_hit_for_object(
+    conn: &Connection,
+    obj: &ObjectRef,
+) -> pkm_core::Result<Option<SearchHit>> {
+    match obj {
+        ObjectRef::Note(id) => {
+            let id_str = id.to_string();
+            let mut stmt = conn
+                .prepare("SELECT title FROM note WHERE id = ?")
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+            if let Ok(title) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+                Ok(Some(SearchHit {
+                    object: *obj,
+                    status: ContentStatus::UserAuthored,
+                    score: None,
+                    snippet: Some(format!("Note: {}", title)),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+        ObjectRef::Source(id) => {
+            let id_str = id.to_string();
+            let mut stmt = conn
+                .prepare("SELECT title FROM source WHERE id = ?")
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+            if let Ok(title) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+                Ok(Some(SearchHit {
+                    object: *obj,
+                    status: ContentStatus::RawSource,
+                    score: None,
+                    snippet: Some(format!("Source: {}", title)),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+        ObjectRef::Entity(id) => {
+            let id_str = id.to_string();
+            let mut stmt = conn
+                .prepare("SELECT name FROM entity WHERE id = ?")
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+            if let Ok(name) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+                Ok(Some(SearchHit {
+                    object: *obj,
+                    status: ContentStatus::ExtractedMetadata,
+                    score: None,
+                    snippet: Some(format!("Entity: {}", name)),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+        ObjectRef::Block(id) => {
+            let id_str = id.to_string();
+            let mut stmt = conn
+                .prepare("SELECT content FROM block WHERE id = ?")
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+            if let Ok(content) = stmt.query_row([&id_str], |row| row.get::<_, String>(0)) {
+                Ok(Some(SearchHit {
+                    object: *obj,
+                    status: ContentStatus::UserAuthored,
+                    score: None,
+                    snippet: Some(format!(
+                        "Block: {}",
+                        &content[..std::cmp::min(50, content.len())]
+                    )),
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+        _ => Ok(None),
     }
 }
 
