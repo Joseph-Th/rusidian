@@ -119,10 +119,12 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - 2 tests verify: params serialization and link chain display.
 - All tests pass; placeholder ready for integration with typed link chains when available.
 
-#### F6 · DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList ⬜
-- **Depends on:** F0 ✅.
-- **Do:** Implement remaining views (DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList).
-- **Done when:** All views render and have basic tests.
+#### F6 · DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList ✅
+- Implemented 6 view parameter types: DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList.
+- Each has default limit (50) and with_limit() builder method.
+- Implemented render methods for all 6 views (placeholders, show all sources sorted by recency).
+- 1 comprehensive test verifies all 6 views render and respect limits.
+- All tests pass; ready for filtering/aggregation logic when metadata becomes available.
 
 #### A0b · Tauri desktop shell (`pkm-app` binary) ⬜
 - **Depends on:** A0a ✅, B2 ✅.

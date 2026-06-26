@@ -243,6 +243,147 @@ impl Default for SourceMapParams {
     }
 }
 
+/// Parameters for DecisionLog view: shows decisions and their context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecisionLogParams {
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl DecisionLogParams {
+    pub fn new() -> Self {
+        Self { limit: Some(50) }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+impl Default for DecisionLogParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Parameters for PersonProfile view: shows information about a person entity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonProfileParams {
+    /// The person entity to show.
+    pub person_id: String,
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl PersonProfileParams {
+    pub fn new(person_id: String) -> Self {
+        Self {
+            person_id,
+            limit: Some(50),
+        }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+/// Parameters for EntityPage view: shows a specific entity and its relationships.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityPageParams {
+    /// The entity to show.
+    pub entity_id: String,
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl EntityPageParams {
+    pub fn new(entity_id: String) -> Self {
+        Self {
+            entity_id,
+            limit: Some(50),
+        }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+/// Parameters for BriefingPage view: shows a summary/briefing on a topic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BriefingPageParams {
+    /// Topic or entity to brief on.
+    pub topic: String,
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl BriefingPageParams {
+    pub fn new(topic: String) -> Self {
+        Self {
+            topic,
+            limit: Some(50),
+        }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+/// Parameters for OpenQuestions view: shows unresolved questions and gaps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenQuestionsParams {
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl OpenQuestionsParams {
+    pub fn new() -> Self {
+        Self { limit: Some(50) }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+impl Default for OpenQuestionsParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Parameters for ActionList view: shows actionable items and tasks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionListParams {
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl ActionListParams {
+    pub fn new() -> Self {
+        Self { limit: Some(50) }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+impl Default for ActionListParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stub params for unimplemented views (task F1+).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StubViewParams;
@@ -257,6 +398,12 @@ pub enum ViewParams {
     Dossier(DossierParams),
     ProjectDashboard(ProjectDashboardParams),
     SourceMap(SourceMapParams),
+    DecisionLog(DecisionLogParams),
+    PersonProfile(PersonProfileParams),
+    EntityPage(EntityPageParams),
+    BriefingPage(BriefingPageParams),
+    OpenQuestions(OpenQuestionsParams),
+    ActionList(ActionListParams),
     // Stub: other views will be implemented in F1+
     Stub(StubViewParams),
 }
@@ -284,6 +431,30 @@ impl ViewParams {
 
     pub fn source_map() -> Self {
         ViewParams::SourceMap(SourceMapParams::default())
+    }
+
+    pub fn decision_log() -> Self {
+        ViewParams::DecisionLog(DecisionLogParams::default())
+    }
+
+    pub fn person_profile(person_id: String) -> Self {
+        ViewParams::PersonProfile(PersonProfileParams::new(person_id))
+    }
+
+    pub fn entity_page(entity_id: String) -> Self {
+        ViewParams::EntityPage(EntityPageParams::new(entity_id))
+    }
+
+    pub fn briefing_page(topic: String) -> Self {
+        ViewParams::BriefingPage(BriefingPageParams::new(topic))
+    }
+
+    pub fn open_questions() -> Self {
+        ViewParams::OpenQuestions(OpenQuestionsParams::default())
+    }
+
+    pub fn action_list() -> Self {
+        ViewParams::ActionList(ActionListParams::default())
     }
 }
 
@@ -337,6 +508,36 @@ pub trait ViewModel {
 
     fn render_source_map(
         params: &SourceMapParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_decision_log(
+        params: &DecisionLogParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_person_profile(
+        params: &PersonProfileParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_entity_page(
+        params: &EntityPageParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_briefing_page(
+        params: &BriefingPageParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_open_questions(
+        params: &OpenQuestionsParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_action_list(
+        params: &ActionListParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
@@ -457,6 +658,96 @@ impl ViewModel for DefaultViewModel {
         let mut filtered: Vec<_> = sources.iter().collect();
 
         // Sort by captured_at descending (most recent first)
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_decision_log(
+        params: &DecisionLogParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: decision log shows all sources. In production, this would filter
+        // for sources and notes marked as decisions.
+        let mut filtered: Vec<_> = sources.iter().collect();
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_person_profile(
+        params: &PersonProfileParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: person profile shows all sources. In production, this would filter
+        // for sources and notes related to the specified person entity.
+        let mut filtered: Vec<_> = sources.iter().collect();
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_entity_page(
+        params: &EntityPageParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: entity page shows all sources. In production, this would filter
+        // for sources and notes related to the specified entity.
+        let mut filtered: Vec<_> = sources.iter().collect();
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_briefing_page(
+        params: &BriefingPageParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: briefing page shows all sources. In production, this would filter
+        // for sources and notes related to the specified topic.
+        let mut filtered: Vec<_> = sources.iter().collect();
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_open_questions(
+        params: &OpenQuestionsParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: open questions shows all sources. In production, this would filter
+        // for sources and notes marked as open questions or unresolved.
+        let mut filtered: Vec<_> = sources.iter().collect();
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_action_list(
+        params: &ActionListParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: action list shows all sources. In production, this would filter
+        // for sources and notes marked as actionable items or tasks.
+        let mut filtered: Vec<_> = sources.iter().collect();
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(50);
@@ -851,5 +1142,52 @@ mod tests {
         assert_eq!(result.source_ids.len(), 15);
         // Should be sorted by captured_at descending (most recent first)
         assert_eq!(result.source_ids[0], sources[0].id);
+    }
+
+    #[test]
+    fn all_remaining_views_render_successfully() {
+        let now = Timestamp::now_utc();
+        let sources: Vec<_> = (0..20)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Item {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: now - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: IngestionState::Promoted,
+                created_by: Actor::User,
+            })
+            .collect();
+
+        // Test DecisionLog
+        let params = DecisionLogParams::default().with_limit(10);
+        let result = DefaultViewModel::render_decision_log(&params, &sources).unwrap();
+        assert_eq!(result.source_ids.len(), 10);
+
+        // Test PersonProfile
+        let params = PersonProfileParams::new("person-123".to_string()).with_limit(10);
+        let result = DefaultViewModel::render_person_profile(&params, &sources).unwrap();
+        assert_eq!(result.source_ids.len(), 10);
+
+        // Test EntityPage
+        let params = EntityPageParams::new("entity-456".to_string()).with_limit(10);
+        let result = DefaultViewModel::render_entity_page(&params, &sources).unwrap();
+        assert_eq!(result.source_ids.len(), 10);
+
+        // Test BriefingPage
+        let params = BriefingPageParams::new("topic-789".to_string()).with_limit(10);
+        let result = DefaultViewModel::render_briefing_page(&params, &sources).unwrap();
+        assert_eq!(result.source_ids.len(), 10);
+
+        // Test OpenQuestions
+        let params = OpenQuestionsParams::default().with_limit(10);
+        let result = DefaultViewModel::render_open_questions(&params, &sources).unwrap();
+        assert_eq!(result.source_ids.len(), 10);
+
+        // Test ActionList
+        let params = ActionListParams::default().with_limit(10);
+        let result = DefaultViewModel::render_action_list(&params, &sources).unwrap();
+        assert_eq!(result.source_ids.len(), 10);
     }
 }
