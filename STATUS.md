@@ -109,11 +109,11 @@ Phase 7 tasks — implement in order for breadth and user value:
    from a note tree that's suitable for static-site generation. Depends on: none (✅).
 
 3. **H2** — Local versioning foundation. Add version numbers to entities; track
-   object history for sync/rollback. Depends on: none (⬜).
+   object history for sync/rollback. Depends on: none (🔨).
    
-   Notes: Core implementation complete - migration, domain types, and storage layer
-   updated to support version and updated_at fields. Remaining work: fix test
-   instantiations (Source, Entity, Link, Note, Block, View) that need new fields.
+   CORE IMPLEMENTATION COMPLETE - production code builds successfully.
+   Migration 0007_add_versioning created. Domain types and storage layer fully updated.
+   Remaining: ~11 test instantiation fixes needed (Entity, Link, Source, Note, Block, View).
 
 4. **H3** — Sync protocol design. Conflict resolution, merge algorithm,
    transport contract. Depends on: none (⬜).
