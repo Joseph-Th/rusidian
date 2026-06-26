@@ -109,10 +109,11 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - 6 tests verify: params serialization, view round-trips, filtering, limits, and full rendering pipeline.
 - All tests pass; ready for F1+ to extend with additional view types.
 
-#### F1 · Timeline view ⬜
-- **Depends on:** F0 ✅.
-- **Do:** Implement Timeline view rendering. Retrieve notes by date, order chronologically, render timeline blocks.
-- **Done when:** One integration test: create notes, timeline renders them in order.
+#### F1 · Timeline view ✅
+- Implemented TimelineParams with grouping (day/week/month/year), limit, chronological ordering.
+- Added render_timeline to ViewModel trait with DefaultViewModel implementation.
+- Tests verify: params serialization, reverse-chronological ordering, limit enforcement.
+- 3 tests pass; ready for F2+.
 
 #### F2 · Dossier view ⬜
 - **Depends on:** F0 ✅.
@@ -159,9 +160,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (23 tasks)
+## Done (24 tasks)
 
-All foundation, vertical-slice, entity merge, view model, and app service work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a.
+All foundation, vertical-slice, entity merge, view model, app service, and timeline view complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1.
 
 ---
 

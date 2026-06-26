@@ -85,6 +85,58 @@ impl Default for ReviewQueueParams {
     }
 }
 
+/// How to group timeline events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineGrouping {
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
+/// Parameters for Timeline view: shows notes in chronological order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimelineParams {
+    /// How to group events in the timeline.
+    pub grouping: TimelineGrouping,
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+    /// If true, show newest first; if false, show oldest first.
+    pub reverse_chronological: bool,
+}
+
+impl TimelineParams {
+    pub fn new() -> Self {
+        Self {
+            grouping: TimelineGrouping::Month,
+            limit: Some(100),
+            reverse_chronological: true,
+        }
+    }
+
+    pub fn with_grouping(mut self, grouping: TimelineGrouping) -> Self {
+        self.grouping = grouping;
+        self
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    pub fn with_chronological(mut self, reverse: bool) -> Self {
+        self.reverse_chronological = reverse;
+        self
+    }
+}
+
+impl Default for TimelineParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stub params for unimplemented views (task F1+).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StubViewParams;
@@ -95,6 +147,7 @@ pub struct StubViewParams;
 pub enum ViewParams {
     ReadingQueue(ReadingQueueParams),
     ReviewQueue(ReviewQueueParams),
+    Timeline(TimelineParams),
     // Stub: other views will be implemented in F1+
     Stub(StubViewParams),
 }
@@ -106,6 +159,10 @@ impl ViewParams {
 
     pub fn review_queue() -> Self {
         ViewParams::ReviewQueue(ReviewQueueParams::default())
+    }
+
+    pub fn timeline() -> Self {
+        ViewParams::Timeline(TimelineParams::default())
     }
 }
 
@@ -139,6 +196,11 @@ pub trait ViewModel {
 
     fn render_review_queue(
         params: &ReviewQueueParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_timeline(
+        params: &TimelineParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
@@ -181,6 +243,25 @@ impl ViewModel for DefaultViewModel {
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(50);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_timeline(
+        params: &TimelineParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        let mut filtered: Vec<_> = sources.iter().collect();
+
+        // Sort by captured_at; direction depends on reverse_chronological flag
+        if params.reverse_chronological {
+            filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+        } else {
+            filtered.sort_by(|a, b| a.captured_at.cmp(&b.captured_at));
+        }
+
+        let limit = params.limit.unwrap_or(100);
         let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
 
         Ok(ViewRenderResult { source_ids })
@@ -328,5 +409,86 @@ mod tests {
             }
             _ => panic!("Expected ReadingQueue params"),
         }
+    }
+
+    #[test]
+    fn timeline_params_serialize_and_deserialize() {
+        let params = TimelineParams::default()
+            .with_grouping(TimelineGrouping::Week)
+            .with_limit(75)
+            .with_chronological(false);
+        let json = serde_json::to_string(&params).unwrap();
+        let back: TimelineParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, params);
+    }
+
+    #[test]
+    fn timeline_view_renders_in_reverse_chronological_order() {
+        let base = Timestamp::now_utc();
+        // Create sources with different timestamps
+        let source1 = Source {
+            id: SourceId::new(),
+            origin: SourceOrigin::PastedText,
+            title: Some("Oldest".to_string()),
+            raw_content: "content1".to_string(),
+            captured_at: base - time::Duration::days(2),
+            content_hash: "hash1".to_string(),
+            ingestion_state: IngestionState::Captured,
+            created_by: Actor::User,
+        };
+        let source2 = Source {
+            id: SourceId::new(),
+            origin: SourceOrigin::PastedText,
+            title: Some("Middle".to_string()),
+            raw_content: "content2".to_string(),
+            captured_at: base - time::Duration::days(1),
+            content_hash: "hash2".to_string(),
+            ingestion_state: IngestionState::Captured,
+            created_by: Actor::User,
+        };
+        let source3 = Source {
+            id: SourceId::new(),
+            origin: SourceOrigin::PastedText,
+            title: Some("Newest".to_string()),
+            raw_content: "content3".to_string(),
+            captured_at: base,
+            content_hash: "hash3".to_string(),
+            ingestion_state: IngestionState::Captured,
+            created_by: Actor::User,
+        };
+
+        let sources = vec![source1.clone(), source2.clone(), source3.clone()];
+
+        // Render with reverse chronological (default)
+        let params = TimelineParams::default();
+        let result = DefaultViewModel::render_timeline(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 3);
+        // Should be newest first
+        assert_eq!(result.source_ids[0], source3.id);
+        assert_eq!(result.source_ids[1], source2.id);
+        assert_eq!(result.source_ids[2], source1.id);
+    }
+
+    #[test]
+    fn timeline_view_respects_limit() {
+        let base = Timestamp::now_utc();
+        let sources: Vec<_> = (0..50)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Item {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: base - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: IngestionState::Captured,
+                created_by: Actor::User,
+            })
+            .collect();
+
+        let params = TimelineParams::default().with_limit(10);
+        let result = DefaultViewModel::render_timeline(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 10);
     }
 }
