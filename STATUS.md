@@ -128,15 +128,30 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 #### A0b · Tauri desktop shell (`pkm-app` binary) ⬜
 - **Depends on:** A0a ✅, B2 ✅.
-- **Do:** Add Tauri main.rs binary that wires AppService and exposes commands.
-  Set up window, menu, data dir. Write ADR confirming UI-shell choice.
-- **Done when:** App launches, opens db, creates + lists note via frontend commands.
+- **Do:** Break down into subtasks A0b-i, A0b-ii, A0b-iii (see below).
+- **Done when:** All subtasks complete.
+
+#### A0b-i · ADR 0005: UI shell architecture choice ✅
+- Created `docs/adr/0005-ui-shell-choice.md`. Documents decision to use Tauri as UI shell.
+- Rationale: Rust alignment, lightweight, local-first, mature ecosystem.
+- Alternatives considered: Electron (rejected: heavy), GTK/Qt (rejected: less design flexibility), web-only (rejected: violates local-first), CLI/TUI (rejected: can't deliver visual presentation).
+- Consequences: Tauri binary in pkm-app, command API, single executable, cross-platform support.
+
+#### A0b-ii · Tauri + AppService wiring ⬜
+- **Depends on:** A0a ✅, A0b-i ✅.
+- **Do:** Add Tauri binary and wire AppService commands (create_note, list_notes).
+- **Done when:** App binary can create and list notes via RPC.
+
+#### A0b-iii · Window, menu, data dir setup ⬜
+- **Depends on:** A0b-ii ✅.
+- **Do:** Set up Tauri window, menu bar, persistent data directory.
+- **Done when:** App launches, opens db, shows UI with basic controls.
 
 ---
 
-## Done (25 tasks)
+## Done (29 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, timeline, and dossier views complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2.
+All foundation, vertical-slice, entity merge, view model, app service, view implementations complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2, F3, F4, F5, F6.
 
 ---
 
