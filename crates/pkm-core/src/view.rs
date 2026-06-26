@@ -69,13 +69,28 @@ impl Default for ReadingQueueParams {
 /// Parameters for ReviewQueue view: shows items awaiting review/approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewQueueParams {
+    /// Filter by ingestion state (e.g., show only awaiting_review sources).
+    pub ingestion_state_filter: Option<IngestionState>,
     /// Maximum number of items to show.
     pub limit: Option<usize>,
 }
 
 impl ReviewQueueParams {
     pub fn new() -> Self {
-        Self { limit: Some(50) }
+        Self {
+            ingestion_state_filter: None,
+            limit: Some(50),
+        }
+    }
+
+    pub fn with_state(mut self, state: IngestionState) -> Self {
+        self.ingestion_state_filter = Some(state);
+        self
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
     }
 }
 
@@ -270,9 +285,18 @@ impl ViewModel for DefaultViewModel {
         params: &ReviewQueueParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String> {
-        let mut filtered: Vec<_> = sources.iter().collect();
+        let mut filtered: Vec<_> = sources
+            .iter()
+            .filter(|s| {
+                if let Some(state) = params.ingestion_state_filter {
+                    s.ingestion_state == state
+                } else {
+                    true
+                }
+            })
+            .collect();
 
-        // For review queue, show all sources, sorted by captured_at descending
+        // For review queue, sort by captured_at descending (most recent first)
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(50);
@@ -573,5 +597,61 @@ mod tests {
         let result = DefaultViewModel::render_dossier(&params, &sources).unwrap();
 
         assert_eq!(result.source_ids.len(), 20);
+    }
+
+    #[test]
+    fn review_queue_params_serialize_and_deserialize() {
+        let params = ReviewQueueParams::default()
+            .with_state(IngestionState::AwaitingReview)
+            .with_limit(25);
+        let json = serde_json::to_string(&params).unwrap();
+        let back: ReviewQueueParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, params);
+    }
+
+    #[test]
+    fn review_queue_filters_by_ingestion_state() {
+        let now = Timestamp::now_utc();
+        let sources = vec![
+            Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some("Awaiting Review 1".to_string()),
+                raw_content: "content1".to_string(),
+                captured_at: now,
+                content_hash: "hash1".to_string(),
+                ingestion_state: IngestionState::AwaitingReview,
+                created_by: Actor::User,
+            },
+            Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some("Promoted".to_string()),
+                raw_content: "content2".to_string(),
+                captured_at: now,
+                content_hash: "hash2".to_string(),
+                ingestion_state: IngestionState::Promoted,
+                created_by: Actor::User,
+            },
+            Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some("Awaiting Review 2".to_string()),
+                raw_content: "content3".to_string(),
+                captured_at: now - time::Duration::days(1),
+                content_hash: "hash3".to_string(),
+                ingestion_state: IngestionState::AwaitingReview,
+                created_by: Actor::User,
+            },
+        ];
+
+        // Render with filter for AwaitingReview state
+        let params = ReviewQueueParams::default().with_state(IngestionState::AwaitingReview);
+        let result = DefaultViewModel::render_review_queue(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 2);
+        // Should be sorted by captured_at descending (most recent first)
+        assert_eq!(result.source_ids[0], sources[0].id);
+        assert_eq!(result.source_ids[1], sources[2].id);
     }
 }

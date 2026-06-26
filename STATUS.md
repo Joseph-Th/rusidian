@@ -98,10 +98,12 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ### Next to work on
 
-#### F3 · ReviewQueue view ⬜
-- **Depends on:** F0 ✅.
-- **Do:** Complete ReviewQueue view implementation. Show sources/blocks awaiting review, filter by review state.
-- **Done when:** Test: review queue filters by proposed/awaiting review status.
+#### F3 · ReviewQueue view ✅
+- Added `ingestion_state_filter` to ReviewQueueParams to allow filtering by ingestion state.
+- Updated `render_review_queue` to filter sources by AwaitingReview or other states.
+- Added helper methods `with_state()` and `with_limit()` for fluent configuration.
+- 2 tests verify: params serialization and filtering by AwaitingReview status.
+- All tests pass; ready for integration with UI layer.
 
 #### F4 · ProjectDashboard view ⬜
 - **Depends on:** F0 ✅.
