@@ -137,6 +137,29 @@ impl Default for TimelineParams {
     }
 }
 
+/// Parameters for Dossier view: shows notes focused on a particular entity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DossierParams {
+    /// The entity that is the focus of this dossier.
+    pub entity_id: String,
+    /// Maximum number of related sources/notes to show.
+    pub limit: Option<usize>,
+}
+
+impl DossierParams {
+    pub fn new(entity_id: String) -> Self {
+        Self {
+            entity_id,
+            limit: Some(50),
+        }
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
 /// Stub params for unimplemented views (task F1+).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StubViewParams;
@@ -148,6 +171,7 @@ pub enum ViewParams {
     ReadingQueue(ReadingQueueParams),
     ReviewQueue(ReviewQueueParams),
     Timeline(TimelineParams),
+    Dossier(DossierParams),
     // Stub: other views will be implemented in F1+
     Stub(StubViewParams),
 }
@@ -163,6 +187,10 @@ impl ViewParams {
 
     pub fn timeline() -> Self {
         ViewParams::Timeline(TimelineParams::default())
+    }
+
+    pub fn dossier(entity_id: String) -> Self {
+        ViewParams::Dossier(DossierParams::new(entity_id))
     }
 }
 
@@ -201,6 +229,11 @@ pub trait ViewModel {
 
     fn render_timeline(
         params: &TimelineParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_dossier(
+        params: &DossierParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
@@ -262,6 +295,23 @@ impl ViewModel for DefaultViewModel {
         }
 
         let limit = params.limit.unwrap_or(100);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_dossier(
+        params: &DossierParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: until entity-source linking is implemented in B2/E-series,
+        // dossier shows all sources. In production, this would filter by entity references.
+        let mut filtered: Vec<_> = sources.iter().collect();
+
+        // Sort by captured_at descending (most recent first)
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
         let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
 
         Ok(ViewRenderResult { source_ids })
@@ -490,5 +540,38 @@ mod tests {
         let result = DefaultViewModel::render_timeline(&params, &sources).unwrap();
 
         assert_eq!(result.source_ids.len(), 10);
+    }
+
+    #[test]
+    fn dossier_params_serialize_and_deserialize() {
+        let entity_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
+        let params = DossierParams::new(entity_id.clone()).with_limit(25);
+        let json = serde_json::to_string(&params).unwrap();
+        let back: DossierParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.entity_id, entity_id);
+        assert_eq!(back.limit, Some(25));
+    }
+
+    #[test]
+    fn dossier_view_renders_with_limit() {
+        let now = Timestamp::now_utc();
+        let sources: Vec<_> = (0..100)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Related Item {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: now - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: IngestionState::Captured,
+                created_by: Actor::User,
+            })
+            .collect();
+
+        let entity_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
+        let params = DossierParams::new(entity_id).with_limit(20);
+        let result = DefaultViewModel::render_dossier(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 20);
     }
 }

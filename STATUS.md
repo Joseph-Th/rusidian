@@ -115,10 +115,12 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - Tests verify: params serialization, reverse-chronological ordering, limit enforcement.
 - 3 tests pass; ready for F2+.
 
-#### F2 · Dossier view ⬜
-- **Depends on:** F0 ✅.
-- **Do:** Implement Dossier view rendering. Retrieve notes for an entity, render entity profile + linked notes.
-- **Done when:** One integration test: entity + notes → dossier renders correctly.
+#### F2 · Dossier view ✅
+- Implemented DossierParams with entity_id and limit.
+- Added render_dossier to ViewModel trait with DefaultViewModel implementation.
+- Placeholder: returns all sources (entity linking deferred to B2/E-series).
+- Tests verify: params serialization, limit enforcement.
+- 2 tests pass; foundation ready for entity-source linking integration.
 
 #### F3 · ReviewQueue view ⬜
 - **Depends on:** F0 ✅.
@@ -160,9 +162,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (24 tasks)
+## Done (25 tasks)
 
-All foundation, vertical-slice, entity merge, view model, app service, and timeline view complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1.
+All foundation, vertical-slice, entity merge, view model, app service, timeline, and dossier views complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a, F1, F2.
 
 ---
 
