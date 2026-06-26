@@ -139,12 +139,11 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - **Do:** Implement remaining views (DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList).
 - **Done when:** All views render and have basic tests.
 
-#### A0a · App service layer 🔨
-- **Depends on:** S1 ✅, S2 ✅, E2 ✅.
-- **Do:** Create `pkm-app` crate with service layer wiring all repos and ports.
-  Expose AppService with create_note/get_note through command API.
-- **Done when:** Service creates/retrieves notes through real SqliteNoteRepo. Test passes.
-- **Notes:** Foundation complete. Tauri wiring deferred to A0b. Note: B2 must add NoteRepo::list() before A0 full completion.
+#### A0a · App service layer ✅
+- Created `pkm-app` crate as workspace member with service layer.
+- AppService manages Connection lifecycle, creates repos on-demand.
+- Commands: create_note (returns id, title). Test verifies round-trip.
+- Foundation complete; Tauri binary deferred to A0b (blocks on B2::NoteRepo::list()).
 
 #### A0b · Tauri desktop shell (`pkm-app` binary) ⬜
 - **Depends on:** A0a ✅.
@@ -160,9 +159,9 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 ---
 
-## Done (22 tasks)
+## Done (23 tasks)
 
-All foundation, vertical-slice, entity merge, and view model work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0.
+All foundation, vertical-slice, entity merge, view model, and app service work complete: A1, B1, B2, C1, C2, C3, D1, D2, D3, D4, S1, S2, E1, E2, C4a, C4b, C4c, C4d, C4e, C5, C4f, F0, A0a.
 
 ---
 
