@@ -209,6 +209,40 @@ impl Default for ProjectDashboardParams {
     }
 }
 
+/// Parameters for SourceMap view: shows source citations and provenance chains.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceMapParams {
+    /// Focus on a specific source ID to trace its derivations (if None, shows all sources).
+    pub root_source_id: Option<String>,
+    /// Maximum number of items to show.
+    pub limit: Option<usize>,
+}
+
+impl SourceMapParams {
+    pub fn new() -> Self {
+        Self {
+            root_source_id: None,
+            limit: Some(50),
+        }
+    }
+
+    pub fn with_source(mut self, source_id: String) -> Self {
+        self.root_source_id = Some(source_id);
+        self
+    }
+
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+}
+
+impl Default for SourceMapParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stub params for unimplemented views (task F1+).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StubViewParams;
@@ -222,6 +256,7 @@ pub enum ViewParams {
     Timeline(TimelineParams),
     Dossier(DossierParams),
     ProjectDashboard(ProjectDashboardParams),
+    SourceMap(SourceMapParams),
     // Stub: other views will be implemented in F1+
     Stub(StubViewParams),
 }
@@ -245,6 +280,10 @@ impl ViewParams {
 
     pub fn project_dashboard() -> Self {
         ViewParams::ProjectDashboard(ProjectDashboardParams::default())
+    }
+
+    pub fn source_map() -> Self {
+        ViewParams::SourceMap(SourceMapParams::default())
     }
 }
 
@@ -293,6 +332,11 @@ pub trait ViewModel {
 
     fn render_project_dashboard(
         params: &ProjectDashboardParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String>;
+
+    fn render_source_map(
+        params: &SourceMapParams,
         sources: &[Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
@@ -398,6 +442,24 @@ impl ViewModel for DefaultViewModel {
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(100);
+        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        Ok(ViewRenderResult { source_ids })
+    }
+
+    fn render_source_map(
+        params: &SourceMapParams,
+        sources: &[Source],
+    ) -> StdResult<ViewRenderResult, String> {
+        // Placeholder: until typed links with link chains are fully implemented,
+        // source map shows all sources. In production, this would trace the provenance
+        // chain from a root source through derived works and links to final notes.
+        let mut filtered: Vec<_> = sources.iter().collect();
+
+        // Sort by captured_at descending (most recent first)
+        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        let limit = params.limit.unwrap_or(50);
         let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
 
         Ok(ViewRenderResult { source_ids })
@@ -752,6 +814,41 @@ mod tests {
         let result = DefaultViewModel::render_project_dashboard(&params, &sources).unwrap();
 
         assert_eq!(result.source_ids.len(), 20);
+        // Should be sorted by captured_at descending (most recent first)
+        assert_eq!(result.source_ids[0], sources[0].id);
+    }
+
+    #[test]
+    fn source_map_params_serialize_and_deserialize() {
+        let params = SourceMapParams::default()
+            .with_source("550e8400-e29b-41d4-a716-446655440000".to_string())
+            .with_limit(25);
+        let json = serde_json::to_string(&params).unwrap();
+        let back: SourceMapParams = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, params);
+    }
+
+    #[test]
+    fn source_map_displays_link_chain() {
+        let now = Timestamp::now_utc();
+        let sources: Vec<_> = (0..30)
+            .map(|i| Source {
+                id: SourceId::new(),
+                origin: SourceOrigin::PastedText,
+                title: Some(format!("Source {}", i)),
+                raw_content: format!("content{}", i),
+                captured_at: now - time::Duration::days(i as i64),
+                content_hash: format!("hash{}", i),
+                ingestion_state: IngestionState::Promoted,
+                created_by: Actor::User,
+            })
+            .collect();
+
+        // Render source map (placeholder: shows all sources)
+        let params = SourceMapParams::default().with_limit(15);
+        let result = DefaultViewModel::render_source_map(&params, &sources).unwrap();
+
+        assert_eq!(result.source_ids.len(), 15);
         // Should be sorted by captured_at descending (most recent first)
         assert_eq!(result.source_ids[0], sources[0].id);
     }

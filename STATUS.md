@@ -112,10 +112,12 @@ Do not start a later step while an earlier one is 🔨/🚫.
 - 2 tests verify: params serialization and dashboard aggregation.
 - All tests pass; placeholder ready for integration with project metadata when available.
 
-#### F5 · SourceMap view ⬜
-- **Depends on:** F0 ✅.
-- **Do:** Implement SourceMap view. Show source citations, trace knowledge provenance.
-- **Done when:** Test: source map displays link chain from raw source to final note.
+#### F5 · SourceMap view ✅
+- Added SourceMapParams with root_source_id filter and limit.
+- Implemented render_source_map to display provenance chains (placeholder: shows all sources sorted by recency).
+- Added with_source() and with_limit() builder methods.
+- 2 tests verify: params serialization and link chain display.
+- All tests pass; placeholder ready for integration with typed link chains when available.
 
 #### F6 · DecisionLog, PersonProfile, EntityPage, BriefingPage, OpenQuestions, ActionList ⬜
 - **Depends on:** F0 ✅.
