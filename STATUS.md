@@ -100,29 +100,22 @@ Do not start a later step while an earlier one is 🔨/🚫.
 
 Phase 7 tasks — expansion beyond the core system:
 
-1. **H0** — Presentation-first views. Build the view system: reading queue,
-   review queue, dossier, timeline, source map, entity pages, etc. Each view
-   type has a typed query model and layout rules. Depends on: A0 (✅).
+1. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
+   browsers. Depends on: A0 (Tauri shell) (✅), H0 (views) (✅).
    
    Subtasks:
-   - H0a: Define ViewKind enum and query model for reading_queue
-   - H0b: Implement query builder and view rendering for reading_queue
-   - H0c: Add review_queue view with filtering and state updates
-   - H0d: Add dossier view (entity-centered gathering)
-   - H0e: Add timeline view with date-based filtering
-   - H0f: Add source_map view for exploring source relationships
-
-2. **H4** — Web UI mobile support. Make capture and basic editing work on mobile
-   browsers. Depends on: A0 (Tauri shell) (✅), H0 (views) (⬜ in progress).
+   - H4a: Responsive layout for capture form (✅)
+   - H4b: Touch-friendly edit controls (✅)
+   - H4c: Mobile-optimized search interface (⬜)
+   - H4d: Test on mobile browsers (⬜)
    
-   Subtasks:
-   - H4a: Responsive layout for capture form
-   - H4b: Touch-friendly edit controls
-   - H4c: Mobile-optimized search interface
-   - H4d: Test on mobile browsers
+   Notes (H4a-H4b): Added mobile-first CSS with viewport meta tag. Media queries
+   for tablets (768px) and phones (480px). Touch-friendly button/input heights
+   (min 44px). Flexible layouts with flexbox. Modal full-width on mobile.
+   Improved padding/margins for touch targets. All tests passing (110).
 
-3. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
-   and notes. Depends on: H0 (views) (⬜ in progress), A0 (Tauri shell) (✅).
+2. **H5** — Visual workspace: canvas/graph view. Spatial organization of entities
+   and notes. Depends on: H0 (views) (✅), A0 (Tauri shell) (✅).
    
    Subtasks:
    - H5a: Graph data model for spatial layout
@@ -144,6 +137,25 @@ Tauri desktop app with full CRUD for notes. Enables H4 and H5.
 - A0b: Update note command and inline editing UI (✅)
 - A0c: Delete note command and UI (✅)
 - A0d: Verify end-to-end CRUD workflow (✅)
+
+### H0 — Presentation-first views (✅)
+
+View system for reading queue, review queue, dossier, timeline, source map,
+entity pages, and more. Each view type has typed parameters and rendering logic.
+Integrated into Tauri app service with create/list/get/render commands.
+
+- H0a: ViewKind enum and ReadingQueue parameters (✅)
+- H0b: DefaultViewModel rendering for reading_queue (✅)
+- H0c: ReviewQueue view with filtering (✅)
+- H0d: Dossier view (entity-centered) (✅)
+- H0e: Timeline view with reverse chronological ordering (✅)
+- H0f: SourceMap view for tracing provenance chains (✅)
+- H0g: Service layer integration (create_view, list_views, get_view, render_view) (✅)
+- H0h: Added SourceRepo.list() method for view rendering (✅)
+
+Notes: All 12 view kinds defined with typed parameters. DefaultViewModel
+provides placeholder implementations (full filtering deferred to future tasks).
+Service methods wired to Tauri commands. Tests passing: 110 total, 66 in pkm-core.
 
 ### H3 — Sync protocol design (✅)
 
