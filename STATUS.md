@@ -127,7 +127,7 @@ Phase 7 tasks — expansion beyond the core system:
    - H5a: Graph data model for spatial layout (✅)
    - H5b: Canvas rendering with position persistence (✅)
    - H5c: Interactive node dragging (✅)
-   - H5d: Link visualization on canvas (⬜)
+   - H5d: Link visualization on canvas (✅)
    
    Notes (H5a): Added GraphView kind with spatial layout support. GraphLayoutType
    enum (ForceDirected, Hierarchical, Circular, Custom). NodePosition struct for
@@ -146,6 +146,13 @@ Phase 7 tasks — expansion beyond the core system:
    default scrolling during drag. Mobile and desktop drag experience optimized.
    Persistence deferred to future task (requires ViewRepo.update trait). All 122
    tests passing.
+   
+   Notes (H5d): Added edge visualization: lines with directional arrow heads
+   connecting node pairs. Proximity-based edges (all pairs shown). show_edges
+   parameter from GraphViewParams controls edge rendering. Gray color for edges.
+   Edge count displayed in canvas statistics. Edges rendered before nodes for
+   proper layering. Complete H5 feature set: model, rendering, interaction, and
+   link visualization. All 122 tests passing.
 
 Further: mobile native editor, public publishing, collaboration, plugin API.
 
