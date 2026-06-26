@@ -253,3 +253,40 @@ pub async fn search_notes(
         .map(|(id, title)| SearchResult { id, title })
         .collect())
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GraphNode {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GraphViewData {
+    pub title: String,
+    pub nodes: Vec<GraphNode>,
+}
+
+pub async fn get_graph_view_data(
+    view_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<Option<GraphViewData>, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let view = svc
+        .get_view(&view_id)?
+        .ok_or_else(|| format!("View not found: {}", view_id))?;
+
+    match svc.get_graph_view_data(&view_id)? {
+        Some(nodes) => Ok(Some(GraphViewData {
+            title: view.title,
+            nodes: nodes
+                .into_iter()
+                .map(|(id, x, y)| GraphNode { id, x, y })
+                .collect(),
+        })),
+        None => Ok(None),
+    }
+}

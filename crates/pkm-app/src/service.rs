@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+type GraphNode = (String, f64, f64);
+
 /// The application service: aggregates all repositories and provides
 /// high-level operations for the Tauri frontend. The service manages
 /// the database connection and creates repository instances on-demand.
@@ -328,5 +330,55 @@ impl AppService {
         }
 
         Ok(results)
+    }
+
+    /// Get graph data for visualization: view details with positions.
+    pub fn get_graph_view_data(&self, view_id: &str) -> Result<Option<Vec<GraphNode>>, String> {
+        let view = self.get_view(view_id)?;
+
+        match view {
+            Some(view) => {
+                if let ViewParams::GraphView(params) = &view.params {
+                    // If positions are stored in params, use them
+                    if !params.node_positions.is_empty() {
+                        let nodes: Vec<_> = params
+                            .node_positions
+                            .iter()
+                            .map(|pos| (pos.id.clone(), pos.x, pos.y))
+                            .collect();
+                        Ok(Some(nodes))
+                    } else {
+                        // Generate default positions for stored sources
+                        let conn = self
+                            .conn
+                            .lock()
+                            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+                        let source_repo = SqliteSourceRepo { conn: &conn };
+                        let sources = source_repo
+                            .list(params.limit)
+                            .map_err(|e| format!("Failed to list sources: {}", e))?;
+
+                        // Simple circular layout for default positions
+                        let count = sources.len() as f64;
+                        let nodes: Vec<_> = sources
+                            .iter()
+                            .enumerate()
+                            .map(|(i, source)| {
+                                let angle = (i as f64) * 2.0 * std::f64::consts::PI / count;
+                                let x = 200.0 + 150.0 * angle.cos();
+                                let y = 200.0 + 150.0 * angle.sin();
+                                (source.id.to_string(), x, y)
+                            })
+                            .collect();
+
+                        Ok(Some(nodes))
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
     }
 }

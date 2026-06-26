@@ -129,14 +129,11 @@ impl SourceRepo for SqliteSourceRepo<'_> {
     fn list(&self, limit: Option<usize>) -> Result<Vec<Source>> {
         let query = "SELECT id, origin, title, raw_content, created_at, created_by,
                         captured_at, content_hash, ingestion_state, version, updated_at FROM source ORDER BY captured_at DESC";
-        let mut stmt = self
-            .conn
-            .prepare(query)
-            .map_err(|e| {
-                let se = crate::StorageError::from(e);
-                let ce: CoreError = se.into();
-                ce
-            })?;
+        let mut stmt = self.conn.prepare(query).map_err(|e| {
+            let se = crate::StorageError::from(e);
+            let ce: CoreError = se.into();
+            ce
+        })?;
 
         let sources: Result<Vec<Source>> = stmt
             .query_map([], |row| {

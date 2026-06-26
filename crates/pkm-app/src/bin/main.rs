@@ -68,6 +68,15 @@ async fn search_notes(
     commands::search_notes(query, limit, service).await
 }
 
+#[tauri::command]
+async fn get_graph_view_data(
+    view_id: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<Option<commands::GraphViewData>, String> {
+    let service = state.inner();
+    commands::get_graph_view_data(view_id, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -99,7 +108,8 @@ fn main() {
             get_note,
             update_note,
             delete_note,
-            search_notes
+            search_notes,
+            get_graph_view_data
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

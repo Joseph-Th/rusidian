@@ -220,6 +220,51 @@
         margin-top: 4px;
         word-break: break-all;
       }
+      canvas {
+        border: 1px solid #ccc;
+        display: block;
+        margin: 12px 0;
+        cursor: move;
+        background-color: #fafafa;
+        max-width: 100%;
+        height: auto;
+        border-radius: 4px;
+      }
+      .canvas-container {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin: 12px 0;
+      }
+      .canvas-controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .canvas-controls button {
+        flex: 1;
+        min-width: 120px;
+      }
+      @media (max-width: 768px) {
+        canvas {
+          max-width: 100%;
+          height: 400px;
+        }
+        .canvas-controls {
+          flex-direction: column;
+          gap: 4px;
+        }
+        .canvas-controls button {
+          width: 100%;
+          margin: 0;
+        }
+      }
+      @media (max-width: 480px) {
+        canvas {
+          max-width: 100%;
+          height: 300px;
+        }
+      }
       @media (max-width: 768px) {
         body {
           padding: 8px;
@@ -377,6 +422,16 @@
         <button onclick="performSearch()">Search</button>
       </div>
       <div id="searchResults"></div>
+
+      <h2>Graph View</h2>
+      <div class="canvas-container">
+        <div class="canvas-controls">
+          <input type="text" id="graphViewId" placeholder="Enter view ID" />
+          <button onclick="loadGraphView()">Load Graph</button>
+        </div>
+        <canvas id="graphCanvas" width="800" height="600"></canvas>
+      </div>
+
       <div id="noteList"></div>
     </div>
 
@@ -598,6 +653,98 @@
           performSearch();
         }
       });
+
+      window.currentGraphData = null;
+
+      async function loadGraphView() {
+        const viewId = document.getElementById('graphViewId').value;
+        if (!viewId.trim()) {
+          alert('Please enter a view ID');
+          return;
+        }
+
+        try {
+          const data = await window.__TAURI__.invoke('get_graph_view_data', { view_id: viewId });
+          if (!data) {
+            alert('Graph view not found');
+            return;
+          }
+          window.currentGraphData = data;
+          renderGraph(data);
+        } catch (error) {
+          alert('Error loading graph: ' + error);
+        }
+      }
+
+      function renderGraph(data) {
+        const canvas = document.getElementById('graphCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Clear canvas
+        ctx.fillStyle = '#fafafa';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if (!data || !data.nodes || data.nodes.length === 0) {
+          ctx.fillStyle = '#999';
+          ctx.font = '14px sans-serif';
+          ctx.fillText('No nodes to display', 20, 30);
+          return;
+        }
+
+        // Draw background grid (optional)
+        ctx.strokeStyle = '#f0f0f0';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < canvas.width; i += 50) {
+          ctx.beginPath();
+          ctx.moveTo(i, 0);
+          ctx.lineTo(i, canvas.height);
+          ctx.stroke();
+        }
+        for (let i = 0; i < canvas.height; i += 50) {
+          ctx.beginPath();
+          ctx.moveTo(0, i);
+          ctx.lineTo(canvas.width, i);
+          ctx.stroke();
+        }
+
+        // Draw nodes
+        const nodeRadius = 20;
+        data.nodes.forEach(node => {
+          const x = node.x % canvas.width;
+          const y = node.y % canvas.height;
+
+          // Draw node circle
+          ctx.fillStyle = '#007acc';
+          ctx.beginPath();
+          ctx.arc(x, y, nodeRadius, 0, 2 * Math.PI);
+          ctx.fill();
+
+          // Draw node border
+          ctx.strokeStyle = '#005a9e';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Draw node label (shortened ID)
+          ctx.fillStyle = 'white';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const label = node.id.substring(0, 8) + '...';
+          ctx.fillText(label, x, y);
+        });
+
+        // Draw title
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText('Graph: ' + (data.title || 'Untitled'), 10, 10);
+
+        // Draw stats
+        ctx.fillStyle = '#666';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('Nodes: ' + data.nodes.length, 10, 30);
+      }
 
       window.onclick = function(event) {
         const modal = document.getElementById('noteModal');

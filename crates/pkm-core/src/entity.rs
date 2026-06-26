@@ -4,8 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::EntityId;
-use crate::{Actor, Timestamp};
 use crate::sync::SyncEligible;
+use crate::{Actor, Timestamp};
 
 /// Entity classification. Product invariant set — extend via ADR only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::SourceId;
 use crate::ingestion::IngestionState;
-use crate::{Actor, Timestamp};
 use crate::sync::SyncEligible;
+use crate::{Actor, Timestamp};
 
 /// Where a source came from. Extend this enum as new ingestion kinds land
 /// (AGENTS.md lists web article, pdf, email, screenshot, transcript, etc.).

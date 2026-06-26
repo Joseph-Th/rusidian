@@ -79,7 +79,10 @@ pub struct SyncRef {
 
 impl SyncRef {
     pub fn new(version: u32, updated_at: Timestamp) -> Self {
-        Self { version, updated_at }
+        Self {
+            version,
+            updated_at,
+        }
     }
 
     /// Check if this sync ref represents a conflict with another.

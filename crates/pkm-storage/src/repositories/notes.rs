@@ -72,7 +72,14 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         });
 
         match result {
-            Ok((title, created_at_str, created_by_json, version, updated_at_str, metadata_json)) => {
+            Ok((
+                title,
+                created_at_str,
+                created_by_json,
+                version,
+                updated_at_str,
+                metadata_json,
+            )) => {
                 let created_by = serde_json::from_str(&created_by_json)?;
                 let created_at = time::OffsetDateTime::parse(
                     &created_at_str,
@@ -161,8 +168,15 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .map_err(crate::StorageError::from)?
             .take(limit.unwrap_or(usize::MAX))
             .map(|result| {
-                let (id_str, title, created_at_str, created_by_json, version, updated_at_str, metadata_json) =
-                    result.map_err(crate::StorageError::from)?;
+                let (
+                    id_str,
+                    title,
+                    created_at_str,
+                    created_by_json,
+                    version,
+                    updated_at_str,
+                    metadata_json,
+                ) = result.map_err(crate::StorageError::from)?;
 
                 let uuid = uuid::Uuid::parse_str(&id_str)
                     .map_err(|_| pkm_core::CoreError::Invariant("invalid note uuid".into()))?;

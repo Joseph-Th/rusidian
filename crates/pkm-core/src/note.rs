@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::id::{BlockId, NoteId};
-use crate::{Actor, Timestamp};
 use crate::sync::SyncEligible;
+use crate::{Actor, Timestamp};
 
 /// A durable knowledge object. Notes consist of ordered blocks and carry
 /// metadata, provenance, and review state.

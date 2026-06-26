@@ -11,8 +11,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::{BlockId, NoteId, ObjectRef};
-use crate::{Actor, Timestamp};
 use crate::sync::SyncEligible;
+use crate::{Actor, Timestamp};
 
 /// What a block holds. Start markdown-compatible; richer block kinds (tables,
 /// embeds, generated sections) come later per STATUS.md task C2.
