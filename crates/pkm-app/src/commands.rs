@@ -129,6 +129,31 @@ pub struct RenderViewResponse {
     pub source_ids: Vec<String>,
 }
 
+/// A single event in a timeline, grouped by date.
+/// Used for chronological Gantt chart visualizations.
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineEventData {
+    /// Unique identifier of this event's source (source ID).
+    pub id: String,
+    /// Display title of the event.
+    pub title: String,
+    /// Date when this event was captured/created (RFC3339 format).
+    /// TODO: use semantic_date when available for historical events.
+    pub date: String,
+}
+
+/// Hierarchical timeline data grouped by year and month/week/day.
+/// Structure: {year: {period: [events]}}
+/// Used for rendering chronological Gantt charts and timeline views.
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineRenderData {
+    /// Title of the timeline view.
+    pub title: String,
+    /// Events grouped hierarchically: year → period → list of events.
+    /// Period key depends on TimelineGrouping (e.g., "2024-03" for month, "2024-03-15" for day).
+    pub events: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<TimelineEventData>>>,
+}
+
 pub async fn create_view(
     kind: String,
     title: String,
@@ -278,11 +303,24 @@ pub async fn get_preview_card(
     svc.get_preview_card(&entity_id)
 }
 
+/// A node in the graph view with spatial coordinates and metadata.
+/// Used for "X-Ray Vision" to show provenance, ingestion state, and node types.
 #[derive(Debug, Clone, Serialize)]
 pub struct GraphNode {
+    /// Unique identifier for this node (source ID or entity ID).
     pub id: String,
+    /// Display title of the node.
+    pub title: String,
+    /// X coordinate in the 2D layout (absolute pixels).
     pub x: f64,
+    /// Y coordinate in the 2D layout (absolute pixels).
     pub y: f64,
+    /// Provenance indicator (e.g., "user_authored", "ai_summary", "UserOrigin", etc.).
+    pub provenance: String,
+    /// Ingestion state (e.g., "Captured", "Promoted", "Ingested", etc.).
+    pub ingestion_state: String,
+    /// Type of node (e.g., "source", "entity", "note", "block").
+    pub node_type: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -308,7 +346,15 @@ pub async fn get_graph_view_data(
             title: view.title,
             nodes: nodes
                 .into_iter()
-                .map(|(id, x, y)| GraphNode { id, x, y })
+                .map(|(id, title, x, y, provenance, ingestion_state, node_type)| GraphNode {
+                    id,
+                    title,
+                    x,
+                    y,
+                    provenance,
+                    ingestion_state,
+                    node_type,
+                })
                 .collect(),
         })),
         None => Ok(None),
@@ -322,18 +368,140 @@ pub struct LinkNetworkNode {
     pub kind: String,
 }
 
+/// An edge (directed link) in the link network graph.
+/// Used for Argument Trees to show relationships between entities with confidence scores.
 #[derive(Debug, Clone, Serialize)]
 pub struct LinkNetworkEdge {
+    /// Unique identifier for this link.
     pub id: String,
+    /// Source entity/node ID.
     pub source: String,
+    /// Target entity/node ID.
     pub target: String,
+    /// Type of link (e.g., "supports", "contradicts", "derives_from", "mentions").
+    /// Frontend uses this to color-code edges (supports=green, contradicts=red).
     pub link_type: String,
+    /// Optional confidence score (0.0-1.0) for AI-inferred links.
+    /// Frontend can use this to vary line thickness or opacity.
+    pub confidence: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LinkNetworkData {
     pub nodes: Vec<LinkNetworkNode>,
     pub edges: Vec<LinkNetworkEdge>,
+}
+
+/// A single entry in the provenance chain showing how content was derived.
+/// Shows the full lineage: Original Source ← AI Processing ← Summary ← Final Note
+#[derive(Debug, Clone, Serialize)]
+pub struct ProvenanceEntry {
+    /// Unique ID of the source/object in the provenance chain.
+    pub id: String,
+    /// Display title of this entry.
+    pub title: String,
+    /// Type of content ("source", "note", "block", "entity").
+    pub object_type: String,
+    /// Current status of this content ("UserAuthored", "AiSummary", "Reviewed", etc.).
+    pub status: String,
+    /// Who created/generated this content (user email, agent name, system).
+    pub created_by: String,
+    /// When this entry was created (RFC3339 format).
+    pub created_at: String,
+    /// Optional byte range in source that was extracted (if applicable).
+    /// Format: "start:end" (inclusive:exclusive)
+    pub extraction_span: Option<String>,
+}
+
+/// Complete provenance chain for a block, showing its derivation history.
+/// Used to visualize "Supply Chain of Truth" - how content traces back to sources.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProvenanceChainData {
+    /// The block/entity being traced.
+    pub root_id: String,
+    /// Display title of the root.
+    pub root_title: String,
+    /// Full chain from root back to original sources, in chronological order.
+    /// First entry is the root, last entry is the original source.
+    pub chain: Vec<ProvenanceEntry>,
+}
+
+/// A single link relationship in an entity matrix cell.
+/// Shows how two entities are connected with their relationship type and confidence.
+#[derive(Debug, Clone, Serialize)]
+pub struct MatrixCellLink {
+    /// Type of link between row and column entity (e.g., "supports", "part_of").
+    pub link_type: String,
+    /// Confidence score for this link (0.0-1.0) for AI-inferred relationships.
+    pub confidence: f32,
+    /// Link ID for potential follow-up queries.
+    pub link_id: String,
+}
+
+/// Complete entity matrix data showing multi-dimensional relationships.
+/// Used for visualizing comparisons like "Organizations vs Products".
+#[derive(Debug, Clone, Serialize)]
+pub struct EntityMatrixData {
+    /// Entity names for rows (left axis).
+    pub row_entities: Vec<(String, String)>, // (id, name)
+    /// Entity names for columns (top axis).
+    pub col_entities: Vec<(String, String)>, // (id, name)
+    /// 2D matrix of optional links. matrix[row][col] is Some if link exists between row and col entities.
+    /// Indexed as: matrix[row_idx][col_idx]
+    pub matrix: Vec<Vec<Option<MatrixCellLink>>>,
+}
+
+/// A node placed on the canvas with resolved content data.
+/// Used for AI Canvas Views with AI-generated spatial layouts.
+#[derive(Debug, Clone, Serialize)]
+pub struct CanvasNodeData {
+    /// Unique identifier for this node's target object (source ID, entity ID, etc.).
+    pub id: String,
+    /// Display title of the target object.
+    pub title: String,
+    /// X coordinate (absolute pixels).
+    pub x: f64,
+    /// Y coordinate (absolute pixels).
+    pub y: f64,
+    /// Width when rendered (absolute pixels).
+    pub width: f64,
+    /// Height when rendered (absolute pixels).
+    pub height: f64,
+    /// Optional CSS color theme or class for styling.
+    pub color_theme: Option<String>,
+    /// Type of object ("source", "entity", "note", "block", etc.).
+    pub kind: String,
+}
+
+/// A visual frame/grouping on the canvas for organizing nodes.
+#[derive(Debug, Clone, Serialize)]
+pub struct CanvasFrameData {
+    /// Unique identifier for this frame.
+    pub id: String,
+    /// Label displayed for this frame.
+    pub label: String,
+    /// X coordinate of top-left corner.
+    pub x: f64,
+    /// Y coordinate of top-left corner.
+    pub y: f64,
+    /// Width of the frame.
+    pub width: f64,
+    /// Height of the frame.
+    pub height: f64,
+    /// Optional background color (CSS hex or named color).
+    pub background_color: Option<String>,
+}
+
+/// Complete canvas view data ready for frontend rendering.
+/// Includes AI-generated node placements and grouping frames.
+#[derive(Debug, Clone, Serialize)]
+pub struct CanvasViewRenderData {
+    /// Title of the canvas view.
+    pub title: String,
+    /// Nodes placed on the canvas, with resolved content.
+    pub nodes: Vec<CanvasNodeData>,
+    /// Grouping frames that organize nodes.
+    pub frames: Vec<CanvasFrameData>,
 }
 
 pub async fn get_link_network(
@@ -358,4 +526,50 @@ pub async fn get_neighbors(
         .map_err(|_| "Failed to acquire service lock".to_string())?;
 
     svc.get_neighbors(&target_id, depth.unwrap_or(1))
+}
+
+pub async fn get_canvas_view_data(
+    view_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<Option<CanvasViewRenderData>, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.get_canvas_view_data(&view_id)
+}
+
+pub async fn get_timeline_view_data(
+    view_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<Option<TimelineRenderData>, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.get_timeline_view_data(&view_id)
+}
+
+pub async fn get_provenance_chain(
+    block_id: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<ProvenanceChainData, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.get_provenance_chain(&block_id)
+}
+
+pub async fn get_entity_matrix(
+    row_kind: String,
+    col_kind: String,
+    min_confidence: Option<f32>,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<EntityMatrixData, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.get_entity_matrix(&row_kind, &col_kind, min_confidence)
 }

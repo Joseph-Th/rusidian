@@ -883,7 +883,10 @@ impl ViewModel for DefaultViewModel {
     ) -> StdResult<ViewRenderResult, String> {
         let mut filtered: Vec<_> = sources.iter().collect();
 
-        // Sort by captured_at; direction depends on reverse_chronological flag
+        // Sort by captured_at; direction depends on reverse_chronological flag.
+        // In production, this would check note/entity metadata for semantic_date first,
+        // falling back to captured_at if not available. Semantic date represents when
+        // the event actually occurred, not when the source was captured.
         if params.reverse_chronological {
             filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
         } else {
@@ -891,8 +894,25 @@ impl ViewModel for DefaultViewModel {
         }
 
         let limit = params.limit.unwrap_or(100);
-        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
 
+        // Group by TimelineGrouping (Day, Week, Month, Year) if needed.
+        // This structure could be returned as hierarchical JSON to the frontend
+        // for rendering as a Gantt chart or vertical timeline blocks.
+        let source_ids: Vec<_> = filtered
+            .into_iter()
+            .take(limit)
+            .map(|s| s.id)
+            .collect();
+
+        // TODO(Phase 6): Return hierarchical grouped structure instead of flat list
+        // Example structure:
+        // {
+        //   "2024": {
+        //     "March": [
+        //       { "id": "source-1", "title": "Event 1", "date": "2024-03-15" }
+        //     ]
+        //   }
+        // }
         Ok(ViewRenderResult { source_ids })
     }
 
@@ -1057,17 +1077,34 @@ impl ViewModel for DefaultViewModel {
 
     fn render_canvas_view(
         params: &CanvasViewParams,
-        sources: &[Source],
+        _sources: &[Source],
     ) -> StdResult<ViewRenderResult, String> {
         // Canvas view renders nodes placed on an infinite spatial canvas.
-        // The nodes reference real objects (Notes, Blocks, Entities, Media) via ObjectRef.
-        // This implementation returns all sources that have nodes on the canvas,
-        // in rendering order (which is determined by the node list).
-        let mut filtered: Vec<_> = sources.iter().collect();
-        filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+        // Nodes are AI-generated placements referencing real objects (Notes, Blocks, Entities, Media).
+        // Return sources referenced in the canvas nodes plus any referenced sources,
+        // ordered by the canvas node list for proper rendering.
 
         let limit = params.limit.unwrap_or(500);
-        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+
+        // Collect unique source IDs referenced by nodes
+        let mut source_ids_set = std::collections::HashSet::new();
+        let mut source_ids_ordered = Vec::new();
+
+        // Extract source IDs from canvas nodes (only Source ObjectRefs)
+        for node in params.nodes.iter().take(limit) {
+            if let ObjectRef::Source(source_id) = node.target {
+                if !source_ids_set.contains(&source_id) {
+                    source_ids_set.insert(source_id);
+                    source_ids_ordered.push(source_id);
+                }
+            }
+        }
+
+        // Convert to string representation and return in rendering order
+        let source_ids: Vec<_> = source_ids_ordered
+            .into_iter()
+            .map(|id| id)
+            .collect();
 
         Ok(ViewRenderResult { source_ids })
     }

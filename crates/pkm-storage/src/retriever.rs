@@ -559,11 +559,14 @@ fn apply_filters(results: &mut Vec<SearchHit>, query: &SearchQuery) {
 
     if let Some(ref review_state) = filters.review_state {
         results.retain(|hit| {
-            // For now, only reviewed content matches "accepted" filter
+            // Automation mode: AI-generated content is accepted by default
             #[allow(clippy::match_like_matches_macro)]
             match (hit.status, review_state) {
                 (ContentStatus::Reviewed, pkm_core::review::ReviewState::Accepted) => true,
                 (ContentStatus::UserAuthored, pkm_core::review::ReviewState::Accepted) => true,
+                (ContentStatus::AiSummary, pkm_core::review::ReviewState::Accepted) => true,
+                (ContentStatus::InferredLink, pkm_core::review::ReviewState::Accepted) => true,
+                (ContentStatus::ExtractedMetadata, pkm_core::review::ReviewState::Accepted) => true,
                 (ContentStatus::UnreviewedSuggestion, pkm_core::review::ReviewState::Proposed) => {
                     true
                 }

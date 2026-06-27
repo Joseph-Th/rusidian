@@ -11,3 +11,46 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Micro-visualizations: AI-generated content indicators */
+.ai-unverified {
+  text-decoration: underline wavy #a855f7;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.ai-unverified:hover {
+  opacity: 0.85;
+  cursor: help;
+}
+
+/* AI summary highlights */
+.ai-summary {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.15) 0%, rgba(217, 119, 6, 0.05) 70%, transparent 100%);
+  padding: 0 2px;
+  border-left: 3px solid #b45309;
+  padding-left: 8px;
+  margin-left: -8px;
+}
+
+/* Pulsing animation for missing knowledge (Fog of War) */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.pulse-soft {
+  animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Dashed edge styling for contradictions */
+.edge-dashed {
+  stroke-dasharray: 5, 5;
+  stroke-dashoffset: 0;
+}

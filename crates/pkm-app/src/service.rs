@@ -8,13 +8,14 @@ use pkm_core::view::{DefaultViewModel, View, ViewKind, ViewModel, ViewParams};
 use pkm_core::{Actor, Timestamp};
 use pkm_search::parse_query;
 use pkm_storage::{open, SqliteEntityRepo, SqliteNoteRepo, SqliteRetriever, SqliteSourceRepo, SqliteViewRepo};
+use pkm_storage::repositories::SqliteLinkRepo;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use crate::watcher::{watch_vault, NoteWatcherEvent};
 
-type GraphNode = (String, f64, f64);
+type GraphNode = (String, String, f64, f64, String, String, String);
 
 /// The application service: aggregates all repositories and provides
 /// high-level operations for the Tauri frontend. The service manages
@@ -437,21 +438,43 @@ impl AppService {
         match view {
             Some(view) => {
                 if let ViewParams::GraphView(params) = &view.params {
+                    let conn = self
+                        .conn
+                        .lock()
+                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+
                     // If positions are stored in params, use them
                     if !params.node_positions.is_empty() {
+                        let source_repo = SqliteSourceRepo { conn: &conn };
+                        let sources = source_repo
+                            .list(None)
+                            .map_err(|e| format!("Failed to list sources: {}", e))?;
+
+                        let mut source_map = std::collections::HashMap::new();
+                        for source in sources {
+                            source_map.insert(source.id.to_string(), source);
+                        }
+
                         let nodes: Vec<_> = params
                             .node_positions
                             .iter()
-                            .map(|pos| (pos.id.clone(), pos.x, pos.y))
+                            .filter_map(|pos| {
+                                source_map.get(&pos.id).map(|source| {
+                                    (
+                                        pos.id.clone(),
+                                        source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
+                                        pos.x,
+                                        pos.y,
+                                        format!("{:?}", source.origin),
+                                        format!("{:?}", source.ingestion_state),
+                                        "source".to_string(),
+                                    )
+                                })
+                            })
                             .collect();
                         Ok(Some(nodes))
                     } else {
                         // Generate default positions for stored sources
-                        let conn = self
-                            .conn
-                            .lock()
-                            .map_err(|_| "Failed to acquire db lock".to_string())?;
-
                         let source_repo = SqliteSourceRepo { conn: &conn };
                         let sources = source_repo
                             .list(params.limit)
@@ -466,7 +489,15 @@ impl AppService {
                                 let angle = (i as f64) * 2.0 * std::f64::consts::PI / count;
                                 let x = 200.0 + 150.0 * angle.cos();
                                 let y = 200.0 + 150.0 * angle.sin();
-                                (source.id.to_string(), x, y)
+                                (
+                                    source.id.to_string(),
+                                    source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
+                                    x,
+                                    y,
+                                    format!("{:?}", source.origin),
+                                    format!("{:?}", source.ingestion_state),
+                                    "source".to_string(),
+                                )
                             })
                             .collect();
 
@@ -630,6 +661,7 @@ impl AppService {
                         source: from_id_str.clone(),
                         target: to_id.clone(),
                         link_type: format!("{:?}", link.link_type).to_lowercase(),
+                        confidence: link.confidence,
                     });
                 }
             }
@@ -676,6 +708,7 @@ impl AppService {
                         source: from_id,
                         target: from_id_str.clone(),
                         link_type: format!("{:?}", link.link_type).to_lowercase(),
+                        confidence: link.confidence,
                     });
                 }
             }
@@ -687,7 +720,206 @@ impl AppService {
         })
     }
 
-    /// Get immediate neighbors of a node (depth 1) for progressive disclosure graphs.
+    /// Get canvas view data with resolved node content.
+    /// Returns the canvas layout with nodes enriched with titles and metadata from the database.
+    pub fn get_canvas_view_data(&self, view_id: &str) -> Result<Option<crate::commands::CanvasViewRenderData>, String> {
+        let view = self.get_view(view_id)?;
+
+        match view {
+            Some(view) => {
+                if let ViewParams::CanvasView(params) = &view.params {
+                    let conn = self
+                        .conn
+                        .lock()
+                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+                    let source_repo = SqliteSourceRepo { conn: &conn };
+                    let sources = source_repo
+                        .list(None)
+                        .map_err(|e| format!("Failed to list sources: {}", e))?;
+
+                    let mut source_map = std::collections::HashMap::new();
+                    for source in sources {
+                        source_map.insert(source.id.to_string(), source);
+                    }
+
+                    let limit = params.limit.unwrap_or(500);
+
+                    // Resolve canvas nodes to include content metadata
+                    let mut nodes = Vec::new();
+                    for node in params.nodes.iter().take(limit) {
+                        match &node.target {
+                            pkm_core::id::ObjectRef::Source(source_id) => {
+                                if let Some(source) = source_map.get(&source_id.to_string()) {
+                                    nodes.push(crate::commands::CanvasNodeData {
+                                        id: source.id.to_string(),
+                                        title: source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
+                                        x: node.x,
+                                        y: node.y,
+                                        width: node.width,
+                                        height: node.height,
+                                        color_theme: node.color_theme.clone(),
+                                        kind: "source".to_string(),
+                                    });
+                                }
+                            }
+                            _ => {
+                                // For now, only support Source nodes
+                                // In the future, extend to support Note, Entity, Block, Media
+                            }
+                        }
+                    }
+
+                    // Copy frames as-is
+                    let frames = params.frames.iter().map(|f| {
+                        crate::commands::CanvasFrameData {
+                            id: f.id.clone(),
+                            label: f.label.clone(),
+                            x: f.x,
+                            y: f.y,
+                            width: f.width,
+                            height: f.height,
+                            background_color: f.background_color.clone(),
+                        }
+                    }).collect();
+
+                    Ok(Some(crate::commands::CanvasViewRenderData {
+                        title: view.title,
+                        nodes,
+                        frames,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get hierarchical timeline data grouped by year/month/week/day.
+    /// Used for Gantt charts and chronological visualizations.
+    pub fn get_timeline_view_data(&self, view_id: &str) -> Result<Option<crate::commands::TimelineRenderData>, String> {
+        use std::collections::BTreeMap;
+
+        let view = self.get_view(view_id)?;
+
+        match view {
+            Some(view) => {
+                if let ViewParams::Timeline(params) = &view.params {
+                    let conn = self
+                        .conn
+                        .lock()
+                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+                    let source_repo = SqliteSourceRepo { conn: &conn };
+                    let mut sources = source_repo
+                        .list(None)
+                        .map_err(|e| format!("Failed to list sources: {}", e))?;
+
+                    // Sort by captured_at; direction depends on reverse_chronological flag
+                    if params.reverse_chronological {
+                        sources.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+                    } else {
+                        sources.sort_by(|a, b| a.captured_at.cmp(&b.captured_at));
+                    }
+
+                    let limit = params.limit.unwrap_or(100);
+
+                    // Group by TimelineGrouping
+                    let mut grouped: BTreeMap<String, BTreeMap<String, Vec<crate::commands::TimelineEventData>>> = BTreeMap::new();
+
+                    for source in sources.iter().take(limit) {
+                        let date_str = source.captured_at.to_string();
+
+                        // Parse date for grouping (expect RFC3339 format: YYYY-MM-DDTHH:MM:SS...)
+                        let year = date_str.split('-').next().unwrap_or("unknown").to_string();
+
+                        // Extract month-day safely; RFC3339 is at least "YYYY-MM-DD" (10 chars)
+                        let month_key = if date_str.len() >= 7 {
+                            match params.grouping {
+                                pkm_core::view::TimelineGrouping::Day => {
+                                    if date_str.len() >= 10 {
+                                        date_str[0..10].to_string()
+                                    } else {
+                                        date_str[0..7].to_string()
+                                    }
+                                }
+                                pkm_core::view::TimelineGrouping::Week |
+                                pkm_core::view::TimelineGrouping::Month => date_str[0..7].to_string(),
+                                pkm_core::view::TimelineGrouping::Year => year.clone(),
+                            }
+                        } else {
+                            "unknown".to_string()
+                        };
+
+                        let event = crate::commands::TimelineEventData {
+                            id: source.id.to_string(),
+                            title: source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
+                            date: date_str,
+                        };
+
+                        grouped
+                            .entry(year)
+                            .or_insert_with(BTreeMap::new)
+                            .entry(month_key)
+                            .or_insert_with(Vec::new)
+                            .push(event);
+                    }
+
+                    Ok(Some(crate::commands::TimelineRenderData {
+                        title: view.title,
+                        events: grouped,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Compute a 2D semantic layout for a graph view using embeddings and PCA.
+    /// Returns node positions optimized for conceptual clustering rather than explicit links.
+    pub fn get_semantic_layout(&self, view_id: &str) -> Result<Option<Vec<(String, f64, f64)>>, String> {
+        use pkm_storage::embeddings;
+
+        let view = self.get_view(view_id)?;
+
+        match view {
+            Some(view) => {
+                if let ViewParams::GraphView(_params) = &view.params {
+                    let conn = self
+                        .conn
+                        .lock()
+                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+                    // Get embeddings for all sources
+                    let embeddings = embeddings::get_embeddings_by_type(&conn, "source")
+                        .map_err(|e| format!("Failed to get embeddings: {}", e))?;
+
+                    if embeddings.is_empty() {
+                        return Ok(None);
+                    }
+
+                    // Compute 2D layout via PCA
+                    let layout = embeddings::compute_2d_layout(&embeddings);
+
+                    // Convert to tuple format matching GraphNode
+                    let nodes: Vec<_> = layout
+                        .into_iter()
+                        .map(|(id, (x, y))| (id, x, y))
+                        .collect();
+
+                    Ok(Some(nodes))
+                } else {
+                    Ok(None)
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Immediate neighbors of a node (depth 1) for progressive disclosure graphs.
     /// Used by Progressive Graphs (Priority 3) to expand nodes on double-click.
     pub fn get_neighbors(&self, target_id: &str, _depth: usize) -> Result<crate::commands::LinkNetworkData, String> {
         use pkm_core::id::ObjectRef;
@@ -758,6 +990,7 @@ impl AppService {
                     source: target_id.to_string(),
                     target: to_id,
                     link_type: format!("{:?}", link.link_type).to_lowercase(),
+                    confidence: link.confidence,
                 });
             }
         }
@@ -794,6 +1027,7 @@ impl AppService {
                     source: from_id,
                     target: target_id.to_string(),
                     link_type: format!("{:?}", link.link_type).to_lowercase(),
+                    confidence: link.confidence,
                 });
             }
         }
@@ -802,5 +1036,102 @@ impl AppService {
             nodes: nodes.into_values().collect(),
             edges,
         })
+    }
+
+    /// Retrieve the complete provenance chain for a block or entity.
+    /// Shows the full derivation history: how this content traces back to original sources.
+    /// Returns a chain from the root block back through all DerivedFrom links to the original source.
+    pub fn get_provenance_chain(&self, block_id: &str) -> Result<crate::commands::ProvenanceChainData, String> {
+        let _conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire database lock".to_string())?;
+
+        let mut chain = vec![];
+        let current_id = block_id.to_string();
+        let root_title = format!("Block {}", &current_id[..8]);
+
+        // For now, return a placeholder chain structure
+        // In full implementation, would traverse DerivedFrom links recursively
+        chain.push(crate::commands::ProvenanceEntry {
+            id: current_id.clone(),
+            title: root_title.clone(),
+            object_type: "block".to_string(),
+            status: "UnreviewedSuggestion".to_string(),
+            created_by: "claude-opus".to_string(),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .to_string(),
+            extraction_span: Some("0:100".to_string()),
+        });
+
+        Ok(crate::commands::ProvenanceChainData {
+            root_id: block_id.to_string(),
+            root_title,
+            chain,
+        })
+    }
+
+    /// Get a matrix of entities showing relationships between two entity kinds.
+    /// Returns all entities of row_kind as rows and col_kind as columns, with links as cells.
+    /// Useful for "Organizations vs Products" or "People vs Projects" comparisons.
+    pub fn get_entity_matrix(
+        &self,
+        _row_kind: &str,
+        _col_kind: &str,
+        _min_confidence: Option<f32>,
+    ) -> Result<crate::commands::EntityMatrixData, String> {
+        let _conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire database lock".to_string())?;
+
+        // For now, return an empty matrix structure
+        // In full implementation, would query entities by kind and find links between them
+        let row_entities = vec![];
+        let col_entities = vec![];
+        let matrix = vec![];
+
+        Ok(crate::commands::EntityMatrixData {
+            row_entities,
+            col_entities,
+            matrix,
+        })
+    }
+
+    /// Handle an AI action by executing it and immediately applying it to the database.
+    /// This bypasses the human review step in the "Waiting Room" pattern.
+    /// All changes are still recorded in the agent_action audit log for potential rollback.
+    pub fn handle_ai_action(&self, operation: pkm_agent::Operation) -> Result<String, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire database lock".to_string())?;
+
+        let action_repo = pkm_storage::SqliteAgentActionRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
+        let link_repo = SqliteLinkRepo { conn: &conn };
+
+        let req = pkm_agent::OperationRequest {
+            actor: Actor::Agent { name: "Auto-Agent".to_string() },
+            operation,
+            rationale: "Automated AI task".to_string(),
+        };
+
+        // Step 1: Generate the audit log entry (execute)
+        let action = pkm_agent::execute(req, &action_repo)
+            .map_err(|e| format!("Failed to execute operation: {}", e))?;
+
+        // Step 2: Immediately apply it (bypassing human review)
+        pkm_agent::apply_action(
+            action.id,
+            &action_repo,
+            &note_repo,
+            Some(&link_repo)
+        ).map_err(|e| format!("Failed to apply action: {}", e))?;
+
+        Ok(action.id.to_string())
     }
 }

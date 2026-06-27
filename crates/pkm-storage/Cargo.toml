@@ -21,6 +21,10 @@ time = { workspace = true }
 uuid = { workspace = true }
 sha2 = { workspace = true }
 
+# Semantic embeddings and dimensionality reduction for semantic clustering
+ndarray = "0.15"
+ndarray-stats = "0.5"
+
 [dev-dependencies]
 pkm-core = { workspace = true, features = ["fixtures"] }
 pkm-agent = { workspace = true }

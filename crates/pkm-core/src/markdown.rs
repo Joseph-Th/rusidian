@@ -12,7 +12,7 @@
 //! - Note metadata as YAML front matter
 
 use crate::block::{Block, BlockContent};
-use crate::id::{BlockId, NoteId};
+use crate::id::{BlockId, NoteId, ObjectRef};
 use crate::media::{EmbedProvider, MediaType};
 use crate::note::Note;
 use crate::{Actor, Timestamp};
@@ -314,6 +314,11 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
                 alt_text: alt,
                 media_type: MediaType::Image,
             }
+        } else if let Some((target, fallback)) = try_parse_internal_embed(&block_text) {
+            BlockContent::InternalEmbed {
+                target,
+                fallback_text: fallback,
+            }
         } else {
             BlockContent::Markdown {
                 text: block_text.trim().to_string(),
@@ -336,6 +341,47 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
     }
 
     Ok(blocks)
+}
+
+/// Try to parse internal embed (e.g., <!-- embed:internal:view:uuid -->).
+fn try_parse_internal_embed(text: &str) -> Option<(ObjectRef, String)> {
+    // Pattern: <!-- embed:internal:TYPE:ID -->
+    let trimmed = text.trim();
+    if !trimmed.starts_with("<!-- embed:internal:") || !trimmed.ends_with(" -->") {
+        return None;
+    }
+
+    let inner = trimmed
+        .trim_start_matches("<!-- embed:internal:")
+        .trim_end_matches(" -->");
+
+    // Parse TYPE:ID format
+    let parts: Vec<&str> = inner.split(':').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let obj_type = parts[0];
+    let obj_id = parts[1..].join(":");
+
+    // Try to parse as UUID and build ObjectRef
+    if let Ok(uuid) = uuid::Uuid::parse_str(&obj_id) {
+        let target = match obj_type {
+            "note" => ObjectRef::Note(crate::id::NoteId(uuid)),
+            "view" => ObjectRef::View(crate::id::ViewId(uuid)),
+            "entity" => ObjectRef::Entity(crate::id::EntityId(uuid)),
+            "source" => ObjectRef::Source(crate::id::SourceId(uuid)),
+            "block" => ObjectRef::Block(crate::id::BlockId(uuid)),
+            _ => return None,
+        };
+
+        // Create a fallback text representation
+        let fallback = format!("[Embedded {}]", obj_type);
+
+        return Some((target, fallback));
+    }
+
+    None
 }
 
 /// Try to parse inline math (e.g., $expression$).

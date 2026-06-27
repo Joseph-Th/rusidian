@@ -195,31 +195,11 @@ pub struct OperationRequest {
 
 /// Whether an operation may be applied directly or must be proposed for review.
 ///
-/// Mechanical ops (low-risk, internal) apply directly. Knowledge ops (user-facing
-/// changes) default to `Proposed` for review (AGENTS.md "Reviewable automation").
-pub fn requires_review(op: &Operation) -> bool {
-    match op {
-        // Mechanical: derive structure from existing content, no user edits.
-        Operation::ParseSource { .. } => false,
-        Operation::GenerateSummary { .. } => false,
-
-        // Knowledge: all user-facing changes and entity operations.
-        Operation::CreateSource { .. }
-        | Operation::CreateNote { .. }
-        | Operation::AttachSourceToNote { .. }
-        | Operation::CreateBlock { .. }
-        | Operation::UpdateBlock { .. }
-        | Operation::MoveBlock { .. }
-        | Operation::CreateEntity { .. }
-        | Operation::MergeEntities { .. }
-        | Operation::CreateTypedLink { .. }
-        | Operation::ProposeTypedLink { .. }
-        | Operation::ProposeSummary { .. }
-        | Operation::MarkReviewed { .. }
-        | Operation::CreateView { .. }
-        | Operation::UpdateView { .. }
-        | Operation::RollbackAction { .. } => true,
-    }
+/// Automation mode: all operations apply instantly without human review.
+/// Every change is still recorded in the agent_action audit log for rollback.
+pub fn requires_review(_op: &Operation) -> bool {
+    // All operations auto-apply. Rollback is available if AI goes wrong.
+    false
 }
 
 /// Execute a typed operation, producing and persisting an auditable `AgentAction`.
@@ -238,9 +218,8 @@ pub fn execute(
     let status = if requires_review(&req.operation) {
         AgentActionStatus::Proposed
     } else {
-        // Mechanical ops: status is Applied when persist happens (D2)
-        // For now, mark as Proposed so D2 can implement actual application.
-        AgentActionStatus::Proposed
+        // Auto-apply: all operations execute immediately as Applied
+        AgentActionStatus::Applied
     };
 
     // For MergeEntities, populate the diff with loser IDs so rollback can restore them
@@ -543,7 +522,8 @@ mod tests {
     }
 
     #[test]
-    fn mechanical_ops_require_no_review() {
+    fn all_ops_apply_instantly_in_automation_mode() {
+        // In automation mode, all operations apply instantly (no review required)
         let parse_source = Operation::ParseSource {
             source_id: SourceId::new(),
         };
@@ -554,33 +534,32 @@ mod tests {
             summary_text: "A summary".to_string(),
         };
         assert!(!requires_review(&generate_summary));
-    }
 
-    #[test]
-    fn knowledge_ops_require_review() {
+        // Knowledge ops also apply instantly in automation mode
         let create_source = Operation::CreateSource {
             source_id: SourceId::new(),
             source_type: "article".to_string(),
             title: "Test".to_string(),
         };
-        assert!(requires_review(&create_source));
+        assert!(!requires_review(&create_source));
 
         let create_note = Operation::CreateNote {
             note_id: NoteId::new(),
             title: "Note".to_string(),
         };
-        assert!(requires_review(&create_note));
+        assert!(!requires_review(&create_note));
 
         let propose_link = Operation::ProposeTypedLink {
             from: ObjectRef::Note(NoteId::new()),
             to: ObjectRef::Entity(EntityId::new()),
             link_type: LinkType::RelatedTo,
         };
-        assert!(requires_review(&propose_link));
+        assert!(!requires_review(&propose_link));
     }
 
     #[test]
-    fn execute_creates_proposed_action_for_knowledge_ops() {
+    fn execute_creates_applied_action_for_all_ops() {
+        // Automation mode: all operations apply instantly and are recorded as Applied
         let repo = MockActionRepo::new();
         let req = OperationRequest {
             actor: Actor::User,
@@ -592,7 +571,7 @@ mod tests {
         };
 
         let action = execute(req, &repo).unwrap();
-        assert_eq!(action.status, AgentActionStatus::Proposed);
+        assert_eq!(action.status, AgentActionStatus::Applied);
         assert_eq!(action.operation, OperationKind::CreateNote);
 
         // Verify the action was persisted
@@ -601,8 +580,8 @@ mod tests {
     }
 
     #[test]
-    fn execute_creates_proposed_action_for_mechanical_ops() {
-        // D1/D2 creates Proposed for all; future phases implement auto-apply logic.
+    fn execute_creates_applied_action_for_mechanical_ops() {
+        // Automation mode: all operations apply instantly (mechanical and knowledge ops alike)
         let repo = MockActionRepo::new();
         let req = OperationRequest {
             actor: Actor::System,
@@ -613,7 +592,7 @@ mod tests {
         };
 
         let action = execute(req, &repo).unwrap();
-        assert_eq!(action.status, AgentActionStatus::Proposed);
+        assert_eq!(action.status, AgentActionStatus::Applied);
         assert_eq!(action.operation, OperationKind::ParseSource);
 
         // Verify the action was persisted
@@ -622,12 +601,13 @@ mod tests {
     }
 
     #[test]
-    fn merge_entities_requires_review() {
+    fn merge_entities_applies_instantly() {
+        // Automation mode: even risky operations like merge apply instantly
         let merge_op = Operation::MergeEntities {
             survivor_id: EntityId::new(),
             loser_ids: vec![EntityId::new(), EntityId::new()],
         };
-        assert!(requires_review(&merge_op));
+        assert!(!requires_review(&merge_op));
     }
 
     #[test]

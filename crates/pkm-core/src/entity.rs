@@ -42,6 +42,9 @@ pub struct Entity {
     pub created_by: Actor,
     /// When this entity was created.
     pub created_at: Timestamp,
+    /// Semantic date (when the entity/event actually occurred), RFC3339 format.
+    /// Used for timeline visualizations.
+    pub semantic_date: Option<Timestamp>,
     /// Current version number (increments on each update).
     pub version: u32,
     /// When this version was created.
@@ -94,6 +97,7 @@ mod tests {
             merged_into: None,
             created_by: Actor::User,
             created_at: now,
+            semantic_date: None,
             version: 1,
             updated_at: now,
         };

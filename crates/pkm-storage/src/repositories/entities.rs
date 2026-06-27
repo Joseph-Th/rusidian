@@ -25,6 +25,10 @@ impl EntityRepo for SqliteEntityRepo<'_> {
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
+        let semantic_date_str = entity.semantic_date.as_ref().map(|d| {
+            d.format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| "unknown".to_string())
+        });
         let updated_at_str = entity
             .updated_at
             .format(&time::format_description::well_known::Rfc3339)
@@ -32,8 +36,8 @@ impl EntityRepo for SqliteEntityRepo<'_> {
 
         self.conn
             .execute(
-                "INSERT INTO entity (id, kind, name, aliases, created_at, created_by, merged_into, version, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO entity (id, kind, name, aliases, created_at, created_by, merged_into, semantic_date, version, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     entity.id.to_string(),
                     kind_str,
@@ -42,6 +46,7 @@ impl EntityRepo for SqliteEntityRepo<'_> {
                     created_at_str,
                     created_by_json,
                     entity.merged_into.map(|id| id.to_string()),
+                    semantic_date_str,
                     entity.version,
                     updated_at_str,
                 ],
@@ -58,7 +63,7 @@ impl EntityRepo for SqliteEntityRepo<'_> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, kind, name, aliases, created_at, created_by, merged_into, version, updated_at
+                "SELECT id, kind, name, aliases, created_at, created_by, merged_into, semantic_date, version, updated_at
                  FROM entity WHERE id = ?",
             )
             .map_err(|e| {
@@ -75,8 +80,9 @@ impl EntityRepo for SqliteEntityRepo<'_> {
             let created_at_str: String = row.get(4)?;
             let created_by_json: String = row.get(5)?;
             let merged_into_str: Option<String> = row.get(6)?;
-            let version: i64 = row.get(7)?;
-            let updated_at_str: String = row.get(8)?;
+            let semantic_date_str: Option<String> = row.get(7)?;
+            let version: i64 = row.get(8)?;
+            let updated_at_str: String = row.get(9)?;
 
             Ok((
                 id_str,
@@ -86,6 +92,7 @@ impl EntityRepo for SqliteEntityRepo<'_> {
                 created_at_str,
                 created_by_json,
                 merged_into_str,
+                semantic_date_str,
                 version,
                 updated_at_str,
             ))
@@ -147,6 +154,7 @@ fn build_entity_from_fields(
         String,
         String,
         Option<String>,
+        Option<String>,
         i64,
         String,
     ),
@@ -159,6 +167,7 @@ fn build_entity_from_fields(
         created_at_str,
         created_by_json,
         merged_into_str,
+        semantic_date_str,
         version,
         updated_at_str,
     ) = fields;
@@ -182,6 +191,10 @@ fn build_entity_from_fields(
         )))
     })?;
 
+    let semantic_date = semantic_date_str.as_ref().and_then(|s| {
+        time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+    });
+
     let updated_at = time::OffsetDateTime::parse(
         &updated_at_str,
         &time::format_description::well_known::Rfc3339,
@@ -202,6 +215,7 @@ fn build_entity_from_fields(
         aliases,
         created_by,
         created_at,
+        semantic_date,
         merged_into,
         version: version as u32,
         updated_at,
