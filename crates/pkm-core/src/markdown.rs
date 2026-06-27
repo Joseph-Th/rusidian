@@ -182,8 +182,10 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
         md.push_str(&content_md);
         md.push_str("\n\n");
 
-        // Add a block id reference as an HTML comment for round-tripping
-        md.push_str(&format!("<!-- block:{} -->\n\n", block.id));
+        // Add a block id reference and order as an HTML comment for round-tripping.
+        // Format: <!-- block:uuid order:1.5 -->
+        // The order is preserved for fractional ordering (e.g., inserting between existing blocks)
+        md.push_str(&format!("<!-- block:{} order:{} -->\n\n", block.id, block.order));
     }
 
     md.trim_end().to_string()
@@ -240,27 +242,40 @@ fn deserialize_table(text: &str) -> Option<(Vec<String>, Vec<Vec<String>>)> {
 
 /// Parse markdown into blocks. Recognizes rich block types (tables, math, media)
 /// and converts them back to their BlockContent variants. Falls back to Markdown
-/// blocks for unrecognized content. Block IDs (<!-- block:uuid -->) are associated
-/// with the block that follows them.
+/// blocks for unrecognized content. Block IDs and order are preserved from HTML comments:
+/// <!-- block:uuid order:1.5 -->
 pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, String> {
     let mut blocks = Vec::new();
-    let mut order = 1.0_f32;
+    let mut next_order = 1.0_f32;
     let now = Timestamp::now_utc();
 
     let lines = text.lines().collect::<Vec<_>>();
     let mut i = 0;
     let mut pending_block_id: Option<BlockId> = None;
+    let mut pending_block_order: Option<f32> = None;
 
     while i < lines.len() {
         let line = lines[i];
 
-        // Check for block ID comment — if found, store it for the next block
+        // Check for block ID comment with optional order — if found, store it for the next block.
+        // Format: <!-- block:uuid -->  (legacy, no order) or <!-- block:uuid order:1.5 -->
         if line.starts_with("<!-- block:") && line.ends_with(" -->") {
-            let id_str = line
+            let comment_content = line
                 .trim_start_matches("<!-- block:")
                 .trim_end_matches(" -->");
-            if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+
+            // Split on space to extract id and optional order
+            let parts: Vec<&str> = comment_content.split_whitespace().collect();
+
+            if let Ok(uuid) = uuid::Uuid::parse_str(parts[0]) {
                 pending_block_id = Some(BlockId(uuid));
+
+                // Parse order if present (format: order:1.5)
+                if parts.len() > 1 && parts[1].starts_with("order:") {
+                    if let Ok(order_val) = parts[1][6..].parse::<f32>() {
+                        pending_block_order = Some(order_val);
+                    }
+                }
             }
             i += 1;
             continue;
@@ -325,11 +340,18 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
             }
         };
 
+        // Use persisted order if available; otherwise use auto-incremented order
+        let block_order = pending_block_order.take().unwrap_or_else(|| {
+            let current = next_order;
+            next_order += 1.0;
+            current
+        });
+
         let block = Block {
             id: pending_block_id.take().unwrap_or_else(BlockId::new),
             note_id,
             content,
-            order,
+            order: block_order,
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -337,7 +359,6 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
             updated_at: now,
         };
         blocks.push(block);
-        order += 1.0;
     }
 
     Ok(blocks)

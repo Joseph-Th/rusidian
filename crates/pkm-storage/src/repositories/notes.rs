@@ -14,6 +14,7 @@ use pkm_core::markdown;
 use pkm_core::note::Note;
 use pkm_core::ports::NoteRepo;
 use pkm_core::Result;
+use crate::file_ops;
 
 /// Note persistence backed by SQLite + markdown files.
 /// The vault_path is the root directory where .md files are stored.
@@ -106,13 +107,15 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         // STEP 1: Fetch blocks to write the markdown file
         let blocks = self.fetch_blocks(note.id)?;
 
-        // STEP 2: Generate markdown and write to disk
+        // STEP 2: Generate markdown
         let markdown_text = markdown::note_to_markdown(note, &blocks);
         let file_path = self.vault_path.join(note.file_name());
-        std::fs::write(&file_path, &markdown_text)
-            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write note file: {}", e)))?;
 
-        // STEP 3: Insert the note into SQLite, recording the file path
+        // STEP 3: Write to temp file (transactional pattern)
+        let temp_path = file_ops::write_to_temp_file(&self.vault_path, &note.id.to_string(), &markdown_text)
+            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write temp file: {}", e)))?;
+
+        // STEP 4: Insert the note into SQLite
         let created_at_str = note
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
@@ -127,22 +130,28 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .to_str()
             .ok_or_else(|| pkm_core::CoreError::Invariant("invalid file path".into()))?;
 
-        self.conn
-            .execute(
-                "INSERT INTO note (id, title, created_at, created_by, version, updated_at, metadata, file_path)
+        // If SQLite fails, abort temp file
+        if let Err(e) = self.conn.execute(
+            "INSERT INTO note (id, title, created_at, created_by, version, updated_at, metadata, file_path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    note.id.to_string(),
-                    note.title,
-                    created_at_str,
-                    created_by_json,
-                    note.version,
-                    updated_at_str,
-                    metadata_json,
-                    file_path_str,
-                ],
-            )
-            .map_err(crate::StorageError::from)?;
+            params![
+                note.id.to_string(),
+                note.title,
+                created_at_str,
+                created_by_json,
+                note.version,
+                updated_at_str,
+                metadata_json,
+                file_path_str,
+            ],
+        ) {
+            let _ = file_ops::abort_temp_file(&temp_path);
+            return Err(crate::StorageError::from(e).into());
+        }
+
+        // STEP 5: Commit temp file (atomic rename)
+        file_ops::commit_temp_file(&temp_path, &file_path)
+            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to commit file: {}", e)))?;
 
         Ok(())
     }
@@ -311,13 +320,15 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         // STEP 1: Fetch blocks for this note
         let blocks = self.fetch_blocks(note.id)?;
 
-        // STEP 2: Generate markdown and write to disk
+        // STEP 2: Generate markdown
         let markdown_text = markdown::note_to_markdown(note, &blocks);
         let file_path = self.vault_path.join(note.file_name());
-        std::fs::write(&file_path, &markdown_text)
-            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write note file: {}", e)))?;
 
-        // STEP 3: Update the note in SQLite
+        // STEP 3: Write to temp file (transactional pattern)
+        let temp_path = file_ops::write_to_temp_file(&self.vault_path, &note.id.to_string(), &markdown_text)
+            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write temp file: {}", e)))?;
+
+        // STEP 4: Update the note in SQLite
         let updated_at_str = note
             .updated_at
             .format(&time::format_description::well_known::Rfc3339)
@@ -328,25 +339,34 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .to_str()
             .ok_or_else(|| pkm_core::CoreError::Invariant("invalid file path".into()))?;
 
-        let rows = self.conn
-            .execute(
-                "UPDATE note SET title = ?1, version = ?2, updated_at = ?3, metadata = ?4, file_path = ?5 WHERE id = ?6",
-                params![
-                    note.title,
-                    note.version as i64,
-                    updated_at_str,
-                    metadata_json,
-                    file_path_str,
-                    note.id.to_string(),
-                ],
-            )
-            .map_err(crate::StorageError::from)?;
+        let rows = match self.conn.execute(
+            "UPDATE note SET title = ?1, version = ?2, updated_at = ?3, metadata = ?4, file_path = ?5 WHERE id = ?6",
+            params![
+                note.title,
+                note.version as i64,
+                updated_at_str,
+                metadata_json,
+                file_path_str,
+                note.id.to_string(),
+            ],
+        ) {
+            Ok(rows) => rows,
+            Err(e) => {
+                let _ = file_ops::abort_temp_file(&temp_path);
+                return Err(crate::StorageError::from(e).into());
+            }
+        };
 
         if rows == 0 {
+            let _ = file_ops::abort_temp_file(&temp_path);
             return Err(pkm_core::CoreError::Invariant(
                 format!("note {} not found", note.id),
             ));
         }
+
+        // STEP 5: Commit temp file (atomic rename)
+        file_ops::commit_temp_file(&temp_path, &file_path)
+            .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to commit file: {}", e)))?;
 
         Ok(())
     }
@@ -467,11 +487,11 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             updated_at,
         };
 
-        // STEP 6: Re-serialize the whole note via note_to_markdown() and write back to disk
+        // STEP 6: Re-serialize the whole note and write to temp file
         let new_markdown = markdown::note_to_markdown(&note, &parsed_blocks);
-        std::fs::write(&file_path_str, new_markdown)
+        let temp_path = file_ops::write_to_temp_file(&self.vault_path, &note_id.to_string(), &new_markdown)
             .map_err(|e| pkm_core::CoreError::Invariant(
-                format!("failed to write note file: {}", e)
+                format!("failed to write temp file: {}", e)
             ))?;
 
         // STEP 7: Update the block in SQLite
@@ -481,18 +501,25 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
 
-        self.conn
-            .execute(
-                "UPDATE block SET content = ?1, version = ?2, updated_at = ?3 WHERE id = ?4 AND note_id = ?5",
-                params![
-                    content_json,
-                    updated_block.version as i64,
-                    updated_at_str,
-                    block_id.to_string(),
-                    note_id.to_string()
-                ],
-            )
-            .map_err(crate::StorageError::from)?;
+        if let Err(e) = self.conn.execute(
+            "UPDATE block SET content = ?1, version = ?2, updated_at = ?3 WHERE id = ?4 AND note_id = ?5",
+            params![
+                content_json,
+                updated_block.version as i64,
+                updated_at_str,
+                block_id.to_string(),
+                note_id.to_string()
+            ],
+        ) {
+            let _ = file_ops::abort_temp_file(&temp_path);
+            return Err(crate::StorageError::from(e).into());
+        }
+
+        // STEP 8: Commit temp file (atomic rename)
+        file_ops::commit_temp_file(&temp_path, std::path::Path::new(&file_path_str))
+            .map_err(|e| pkm_core::CoreError::Invariant(
+                format!("failed to commit file: {}", e)
+            ))?;
 
         Ok(updated_block)
     }

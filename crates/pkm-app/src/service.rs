@@ -12,10 +12,18 @@ use pkm_storage::repositories::SqliteLinkRepo;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use crate::watcher::{watch_vault, NoteWatcherEvent};
+use std::sync::{Arc, Mutex, OnceLock};
+use crate::watcher::{watch_vault, NoteWatcherEvent, IgnoreNextEvent};
 
 type GraphNode = (String, String, f64, f64, String, String, String);
+
+// Global ignore handle for file watcher (set when watcher starts)
+static WATCHER_IGNORE_HANDLE: OnceLock<IgnoreNextEvent> = OnceLock::new();
+
+/// Get the global watcher ignore handle (if watcher has started).
+pub fn get_watcher_ignore_handle() -> Option<IgnoreNextEvent> {
+    WATCHER_IGNORE_HANDLE.get().cloned()
+}
 
 /// The application service: aggregates all repositories and provides
 /// high-level operations for the Tauri frontend. The service manages
@@ -59,8 +67,11 @@ impl AppService {
         let vault_path = self.vault_path.clone();
 
         // Start the file watcher
-        let watcher_rx = watch_vault(&vault_path)
+        let (watcher_rx, ignore_handle) = watch_vault(&vault_path)
             .map_err(|e| format!("Failed to start vault watcher: {}", e))?;
+
+        // Store the ignore handle globally for use when writing files
+        let _ = WATCHER_IGNORE_HANDLE.set(ignore_handle);
 
         // Spawn a background task to process watcher events
         std::thread::spawn(move || {
@@ -1041,37 +1052,10 @@ impl AppService {
     /// Retrieve the complete provenance chain for a block or entity.
     /// Shows the full derivation history: how this content traces back to original sources.
     /// Returns a chain from the root block back through all DerivedFrom links to the original source.
-    pub fn get_provenance_chain(&self, block_id: &str) -> Result<crate::commands::ProvenanceChainData, String> {
-        let _conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire database lock".to_string())?;
-
-        let mut chain = vec![];
-        let current_id = block_id.to_string();
-        let root_title = format!("Block {}", &current_id[..8]);
-
-        // For now, return a placeholder chain structure
-        // In full implementation, would traverse DerivedFrom links recursively
-        chain.push(crate::commands::ProvenanceEntry {
-            id: current_id.clone(),
-            title: root_title.clone(),
-            object_type: "block".to_string(),
-            status: "UnreviewedSuggestion".to_string(),
-            created_by: "claude-opus".to_string(),
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                .to_string(),
-            extraction_span: Some("0:100".to_string()),
-        });
-
-        Ok(crate::commands::ProvenanceChainData {
-            root_id: block_id.to_string(),
-            root_title,
-            chain,
-        })
+    pub fn get_provenance_chain(&self, _block_id: &str) -> Result<crate::commands::ProvenanceChainData, String> {
+        Err("Provenance chain traversal (recursive DerivedFrom links) is not yet implemented. \
+             Full implementation requires recursive CTE queries to traverse the link graph. \
+             See task D2 in STATUS.md.".to_string())
     }
 
     /// Get a matrix of entities showing relationships between two entity kinds.
@@ -1083,22 +1067,9 @@ impl AppService {
         _col_kind: &str,
         _min_confidence: Option<f32>,
     ) -> Result<crate::commands::EntityMatrixData, String> {
-        let _conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire database lock".to_string())?;
-
-        // For now, return an empty matrix structure
-        // In full implementation, would query entities by kind and find links between them
-        let row_entities = vec![];
-        let col_entities = vec![];
-        let matrix = vec![];
-
-        Ok(crate::commands::EntityMatrixData {
-            row_entities,
-            col_entities,
-            matrix,
-        })
+        Err("Entity matrix queries are not yet implemented. \
+             Full implementation requires querying entities by kind and finding direct links between them. \
+             See task D2 in STATUS.md.".to_string())
     }
 
     /// Handle an AI action by executing it and immediately applying it to the database.

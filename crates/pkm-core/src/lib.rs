@@ -26,6 +26,7 @@ pub mod id;
 pub mod agent_action;
 pub mod block;
 pub mod entity;
+pub mod json_patch;
 pub mod link;
 pub mod media;
 pub mod note;

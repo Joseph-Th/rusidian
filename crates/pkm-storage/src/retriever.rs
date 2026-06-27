@@ -326,17 +326,55 @@ fn create_hit_for_object(
     }
 }
 
-/// Build a safe FTS5 MATCH expression. Double-quotes the token to prevent
-/// special characters (-, ", (, ), :, ^) from being interpreted as operators.
-/// Fuzzy mode appends '*' outside the quotes for prefix matching.
+/// Build a safe FTS5 MATCH expression. Sanitizes user input to prevent
+/// FTS5 operator injection. Strips reserved operators (AND, OR, NOT, NEAR, *, ^, etc.)
+/// and special characters that could break the query, then wraps the result in quotes
+/// to treat it as a literal phrase.
 fn fts_expr(text: &str, fuzzy: bool) -> String {
+    // Sanitize: strip out FTS5 reserved operators and special characters
+    let sanitized = sanitize_fts_input(text);
+
     // Escape inner double-quotes per FTS5 spec (double them).
-    let escaped = text.replace('"', "\"\"");
+    let escaped = sanitized.replace('"', "\"\"");
+
     if fuzzy {
         format!("\"{}\"*", escaped)
     } else {
         format!("\"{}\"", escaped)
     }
+}
+
+/// Sanitize user input for FTS5 queries by removing reserved operators and keywords.
+/// Preserves alphanumerics, spaces, and common punctuation that won't break FTS5.
+fn sanitize_fts_input(text: &str) -> String {
+    let text_lower = text.to_lowercase();
+
+    // List of FTS5 reserved operators/keywords that must not appear as operators
+    let reserved_keywords = [
+        "and", "or", "not", "near", "is", "in", "where", "for", "of", "to",
+    ];
+
+    // Check if input is entirely a reserved keyword (skip it)
+    if reserved_keywords.iter().any(|&kw| text_lower == kw) {
+        return String::new();
+    }
+
+    // Remove or replace problematic FTS5 operator characters
+    // * ^ ( ) : - are FTS5 operators
+    text.chars()
+        .filter(|c| match c {
+            // Remove FTS5 operator characters
+            '*' | '^' | '(' | ')' | ':' | '-' => false,
+            // Keep alphanumerics, spaces, and common punctuation
+            c if c.is_alphanumeric() || c.is_whitespace() || *c == '_' || *c == '.' || *c == ',' => true,
+            // Remove everything else
+            _ => false,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .filter(|word| !reserved_keywords.iter().any(|&kw| word.to_lowercase() == kw))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Search notes via FTS5. Returns hits with note-level metadata.

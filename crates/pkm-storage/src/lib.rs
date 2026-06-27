@@ -22,6 +22,7 @@ pub mod blob_store;
 pub mod db;
 pub mod embeddings;
 pub mod exporter;
+pub mod file_ops;
 pub mod migrations;
 pub mod repositories;
 pub mod retriever;

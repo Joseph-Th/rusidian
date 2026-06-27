@@ -3,11 +3,17 @@
 //! When markdown files are edited outside the app (e.g., in VS Code), this service
 //! detects the changes, parses them, and sends events to an MPSC channel for the
 //! app to process and update the database.
+//!
+//! Implements debouncing and ignore_next_events cache to prevent infinite loops when
+//! the app itself modifies files.
 
 use notify::{Watcher, RecursiveMode, Result as NotifyResult};
 use notify::recommended_watcher;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use std::time::{Instant, Duration};
 use pkm_core::note::Note;
 use pkm_core::markdown;
 use pkm_core::{Actor, Timestamp, id::NoteId};
@@ -19,26 +25,50 @@ pub struct NoteWatcherEvent {
     pub note: Note,
 }
 
+/// Handle to skip processing on the next file modification event.
+/// Used by the app to prevent infinite loops when it writes files.
+#[derive(Clone)]
+pub struct IgnoreNextEvent {
+    cache: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+impl IgnoreNextEvent {
+    /// Mark a file to be skipped in the next watch event.
+    pub fn skip_next(&self, path: PathBuf) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(path);
+        }
+    }
+}
+
 /// Start watching a vault directory for markdown file changes.
-/// Returns a receiver channel that emits `NoteWatcherEvent` when files change.
+/// Returns (receiver, ignore_handle) where:
+/// - receiver emits `NoteWatcherEvent` when files change externally
+/// - ignore_handle can be used to skip processing on app-initiated writes
 ///
 /// The watcher runs in a background thread and will continue until the returned
 /// receiver is dropped.
-pub fn watch_vault(vault_path: &Path) -> NotifyResult<mpsc::Receiver<NoteWatcherEvent>> {
+pub fn watch_vault(vault_path: &Path) -> NotifyResult<(mpsc::Receiver<NoteWatcherEvent>, IgnoreNextEvent)> {
     let (tx, rx) = mpsc::channel();
     let vault_path = vault_path.to_path_buf();
+    let ignore_cache = Arc::new(Mutex::new(HashSet::new()));
+    let ignore_handle = IgnoreNextEvent { cache: Arc::clone(&ignore_cache) };
 
     // Create a watcher in a background thread
     std::thread::spawn(move || {
-        if let Err(e) = watch_impl(&vault_path, tx) {
+        if let Err(e) = watch_impl(&vault_path, tx, ignore_cache) {
             eprintln!("File watcher error: {}", e);
         }
     });
 
-    Ok(rx)
+    Ok((rx, ignore_handle))
 }
 
-fn watch_impl(vault_path: &Path, tx: mpsc::Sender<NoteWatcherEvent>) -> NotifyResult<()> {
+fn watch_impl(
+    vault_path: &Path,
+    tx: mpsc::Sender<NoteWatcherEvent>,
+    ignore_cache: Arc<Mutex<HashSet<PathBuf>>>,
+) -> NotifyResult<()> {
     let vault_path = vault_path.to_path_buf();
     let (watch_tx, watch_rx) = mpsc::channel();
 
@@ -48,15 +78,39 @@ fn watch_impl(vault_path: &Path, tx: mpsc::Sender<NoteWatcherEvent>) -> NotifyRe
 
     watcher.watch(&vault_path, RecursiveMode::Recursive)?;
 
+    // Debouncing state
+    let mut last_event_time: Option<Instant> = None;
+    let debounce_duration = Duration::from_millis(200);
+
     // Process watcher events
     while let Ok(Ok(event)) = watch_rx.recv().map(|r| r) {
         use notify::EventKind;
 
         match event.kind {
             EventKind::Create(_) | EventKind::Modify(_) => {
+                // Debounce: ignore events that come too close together
+                let now = Instant::now();
+                if let Some(last_time) = last_event_time {
+                    if now.duration_since(last_time) < debounce_duration {
+                        continue;
+                    }
+                }
+                last_event_time = Some(now);
+
                 for path in event.paths {
                     // Only process .md files
                     if path.extension().and_then(|s| s.to_str()) == Some("md") {
+                        // Check if this file is in the ignore cache
+                        let should_skip = {
+                            let mut cache = ignore_cache.lock().unwrap_or_else(|e| e.into_inner());
+                            cache.remove(&path)
+                        };
+
+                        if should_skip {
+                            // App wrote this file; skip processing to prevent infinite loop
+                            continue;
+                        }
+
                         if let Ok(markdown_text) = std::fs::read_to_string(&path) {
                             // Parse the markdown file into a Note
                             // Use a dummy note_id since it will be extracted from frontmatter

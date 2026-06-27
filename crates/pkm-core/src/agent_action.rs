@@ -48,9 +48,12 @@ pub enum OperationKind {
     RollbackAction,
 }
 
-/// STUB. The before/after representation (full snapshot vs. structured patch)
-/// is an explicit architecture decision — see STATUS.md task D2 and write an
-/// ADR. Do not pick the easy "store whole blob" path without recording why.
+/// A recorded agent action with its audit trail and diff.
+///
+/// The diff field MUST use JSON Patch (RFC 6902) format to minimize storage bloat
+/// when agents make many edits to large documents. Agents must NOT store full
+/// before/after snapshots; instead, store only the operations that changed (add,
+/// remove, replace operations on specific paths). See [`crate::json_patch`] for utilities.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentAction {
     pub id: AgentActionId,
@@ -60,7 +63,9 @@ pub struct AgentAction {
     pub status: AgentActionStatus,
     pub rationale: String,
     pub created_at: Timestamp,
-    /// JSON-encoded before/after diff. Schema decided in task D2.
+    /// JSON Patch (RFC 6902) operations describing changes made. Array of objects
+    /// with { "op": "add|remove|replace", "path": "/...", "value": ... }
+    /// This avoids the database bloat that would result from storing full snapshots.
     pub diff: serde_json::Value,
     /// Action this one rolls back, if any.
     pub rollback_of: Option<AgentActionId>,
