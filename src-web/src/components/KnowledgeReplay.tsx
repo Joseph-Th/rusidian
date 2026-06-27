@@ -60,20 +60,22 @@ export default function KnowledgeReplay({ rootEntityId, rootEntityName }: Knowle
     setIsPlaying(false)
   }
 
+  const progressPercent = Math.round(timelineProgress * 100)
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Timeline controls */}
-      <div className="bg-white border-b border-gray-200 p-6 space-y-4">
-        <h3 className="text-lg font-semibold text-gray-900">Knowledge Timeline Replay</h3>
+    <div className="flex flex-col h-full bg-gray-50">
+      {/* Timeline controls header */}
+      <header className="bg-white border-b-2 border-gray-300 p-6 space-y-5 shadow-sm">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Knowledge Timeline Replay</h2>
+          <p className="text-sm text-gray-600 mt-1">Watch your knowledge base evolve through time</p>
+        </div>
 
         {/* Timeline slider */}
-        <div className="space-y-2">
-          <div className="flex justify-between items-center mb-2">
-            <label className="text-sm font-medium text-gray-700">Timeline Progress</label>
-            <div className="text-sm font-mono text-gray-700 bg-gray-100 px-3 py-1 rounded">
-              {displayDate} • {Math.round(timelineProgress * 100)}%
-            </div>
-          </div>
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-semibold text-gray-700">
+            Progress: <span className="font-mono text-blue-700 text-base">{displayDate}</span> ({progressPercent}%)
+          </legend>
 
           <input
             type="range"
@@ -82,63 +84,71 @@ export default function KnowledgeReplay({ rootEntityId, rootEntityName }: Knowle
             step="0.01"
             value={timelineProgress}
             onChange={handleSliderChange}
-            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            className="w-full h-3 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600 transition-shadow focus:shadow-lg focus:outline-none"
+            aria-label="Timeline progress slider"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+            aria-valuetext={displayDate}
           />
 
-          <div className="flex justify-between text-xs text-gray-500">
-            <span>{startDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}</span>
-            <span>{endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}</span>
+          <div className="flex justify-between text-xs font-medium text-gray-600">
+            <time>{startDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}</time>
+            <time>{endDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' })}</time>
           </div>
-        </div>
+        </fieldset>
 
         {/* Play controls */}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setIsPlaying(!isPlaying)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm transition-all duration-150 shadow-sm ${
               isPlaying
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
+                ? 'bg-red-600 text-white hover:bg-red-700 active:bg-red-800'
+                : 'bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800'
             }`}
+            aria-label={isPlaying ? 'Pause timeline' : 'Play timeline animation'}
+            aria-pressed={isPlaying}
           >
             {isPlaying ? (
               <>
-                <Pause className="w-4 h-4" /> Pause
+                <Pause className="w-4 h-4" aria-hidden="true" /> Pause
               </>
             ) : (
               <>
-                <Play className="w-4 h-4" /> Play
+                <Play className="w-4 h-4" aria-hidden="true" /> Play
               </>
             )}
           </button>
           <button
             onClick={handleReset}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-gray-200 text-gray-900 hover:bg-gray-300 transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm bg-gray-300 text-gray-900 hover:bg-gray-400 active:bg-gray-500 transition-all duration-150 shadow-sm"
+            aria-label="Reset timeline to beginning"
           >
-            <RotateCcw className="w-4 h-4" /> Reset
+            <RotateCcw className="w-4 h-4" aria-hidden="true" /> Reset
           </button>
         </div>
 
-        {/* Info */}
-        <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-          <p className="text-sm text-blue-900">
-            <strong>Timeline Replay:</strong> Watch how your knowledge base evolved over time. The graph shows
-            which entities and connections existed as of the selected date. Drag the slider or click Play to
-            watch the knowledge grow.
+        {/* Info box */}
+        <article className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border-2 border-blue-200">
+          <p className="text-sm text-blue-900 leading-relaxed">
+            <strong>⏱️ Timeline Replay:</strong> Drag the slider backward and forward through time to see how your knowledge base evolved. Watch entities and connections appear as they were discovered or added. Click <strong>Play</strong> for an automated replay.
           </p>
-        </div>
-      </div>
+        </article>
+      </header>
 
       {/* Graph visualization */}
-      <div className="flex-1 overflow-hidden border-t border-gray-200">
-        <div className="absolute top-4 right-4 bg-white rounded-lg shadow-md p-3 z-10 max-w-xs">
-          <p className="text-xs text-gray-700">
-            <strong>As of {displayDate}:</strong> The graph shows the state of your knowledge base on this date.
+      <div className="flex-1 overflow-hidden relative">
+        <ArgumentTree rootEntityId={rootEntityId} rootEntityName={rootEntityName} />
+
+        {/* Contextual timestamp display */}
+        <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg p-4 border-l-4 border-blue-500 z-10 max-w-xs" role="status" aria-live="polite" aria-label="Current timeline date">
+          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Current date</p>
+          <p className="text-lg font-bold text-blue-700 mt-1">{displayDate}</p>
+          <p className="text-xs text-gray-600 mt-2">
+            The graph shows the state of your knowledge base on this date. {progressPercent < 50 ? 'Earlier in the timeline' : 'Later in the timeline'}.
           </p>
         </div>
-
-        {/* Show the argument tree with the simulated temporal data */}
-        <ArgumentTree rootEntityId={rootEntityId} rootEntityName={rootEntityName} />
       </div>
     </div>
   )

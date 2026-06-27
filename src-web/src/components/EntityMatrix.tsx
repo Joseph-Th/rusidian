@@ -63,10 +63,11 @@ export default function EntityMatrix({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-50">
+      <div className="flex items-center justify-center h-full bg-gray-50" role="status" aria-live="polite" aria-label="Loading entity matrix">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading entity matrix...</p>
+          <p className="text-gray-700 font-medium">Loading entity matrix...</p>
+          <p className="text-xs text-gray-500 mt-2">Computing {rowKind} × {colKind} relationships</p>
         </div>
       </div>
     )
@@ -74,13 +75,14 @@ export default function EntityMatrix({
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-50 p-4">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-md">
+      <div className="flex items-center justify-center h-full bg-gray-50 p-4" role="alert">
+        <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 max-w-md shadow-sm">
           <div className="flex gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
             <div>
-              <p className="font-medium text-red-900">Failed to load matrix</p>
-              <p className="text-red-800 text-sm mt-1">{error}</p>
+              <p className="font-semibold text-red-900">Failed to Load Matrix</p>
+              <p className="text-red-800 text-sm mt-2">{error}</p>
+              <p className="text-red-700 text-xs mt-3">Try selecting different entity types.</p>
             </div>
           </div>
         </div>
@@ -90,12 +92,13 @@ export default function EntityMatrix({
 
   if (!data || data.row_entities.length === 0 || data.col_entities.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-50">
-        <div className="text-center text-gray-600">
-          <p className="font-medium mb-1">No entities found</p>
-          <p className="text-sm">
-            No {rowKind} or {colKind} entities in the knowledge base
+      <div className="flex items-center justify-center h-full bg-gray-50" role="status">
+        <div className="text-center text-gray-600 max-w-md">
+          <p className="font-medium text-lg">No entities found</p>
+          <p className="text-sm mt-2">
+            The knowledge base doesn't contain any <strong>{rowKind}</strong> {data.row_entities.length === 0 ? 'or' : 'and'} <strong>{colKind}</strong> entities yet.
           </p>
+          <p className="text-xs text-gray-500 mt-3">Create some entities first, then the matrix will populate automatically.</p>
         </div>
       </div>
     )
@@ -111,50 +114,70 @@ export default function EntityMatrix({
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header with stats */}
-      <div className="border-b border-gray-200 p-4 sticky top-0 bg-white z-10">
-        <div className="flex justify-between items-center">
+      <header className="border-b-2 border-gray-300 p-4 sticky top-0 bg-gradient-to-r from-white to-gray-50 z-30">
+        <div className="flex justify-between items-start gap-4">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
-              {rowKind} vs {colKind} Matrix
-            </h3>
-            <p className="text-sm text-gray-600 mt-1">
-              {stats.rows} rows × {stats.cols} columns, {stats.links} connections
-            </p>
+            <h1 className="text-xl font-bold text-gray-900">
+              {rowKind.charAt(0).toUpperCase() + rowKind.slice(1)} × {colKind.charAt(0).toUpperCase() + colKind.slice(1)}
+            </h1>
+            <div className="mt-2 flex flex-wrap gap-3 text-sm">
+              <div className="text-gray-700">
+                <span className="font-semibold text-blue-600">{stats.rows}</span> rows
+              </div>
+              <div className="text-gray-400">•</div>
+              <div className="text-gray-700">
+                <span className="font-semibold text-blue-600">{stats.cols}</span> columns
+              </div>
+              <div className="text-gray-400">•</div>
+              <div className="text-gray-700">
+                <span className="font-semibold text-green-600">{stats.links}</span> connections
+              </div>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <button className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-              Export CSV
-            </button>
-          </div>
+          <button
+            onClick={() => console.log('Export as CSV')}
+            className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors duration-150 shadow-sm flex-shrink-0"
+            aria-label="Export matrix as CSV file"
+          >
+            ⬇ Export CSV
+          </button>
         </div>
-      </div>
+      </header>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto relative">
-        <table className="border-collapse w-full">
-          <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-20">
+      <div className="flex-1 overflow-auto relative bg-gray-50">
+        <table className="border-collapse w-full bg-white" role="grid" aria-label={`${rowKind} vs ${colKind} relationships matrix`}>
+          <thead className="sticky top-0 bg-gray-100 border-b-2 border-gray-300 z-20">
             <tr>
-              <td className="sticky left-0 z-20 bg-gray-50 w-40 px-4 py-3 border-r border-gray-200"></td>
-              {data.col_entities.map((col, idx) => (
+              <th
+                scope="col"
+                className="sticky left-0 z-20 bg-gray-100 w-40 px-4 py-3 border-r-2 border-gray-300 text-left"
+                aria-label={rowKind}
+              >
+                <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">{rowKind}</span>
+              </th>
+              {data.col_entities.map((col) => (
                 <th
                   key={col[0]}
-                  className="px-3 py-2 text-xs font-medium text-gray-700 border-r border-gray-200 bg-gray-50 whitespace-nowrap"
+                  scope="col"
+                  className="px-3 py-3 text-xs font-bold text-gray-700 border-r border-gray-300 bg-gray-100 whitespace-nowrap"
                   title={col[1]}
                 >
-                  <div className="max-w-32 truncate">{col[1].slice(0, 20)}</div>
+                  <div className="max-w-32 truncate">{col[1]}</div>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {data.row_entities.map((row, rowIdx) => (
-              <tr key={row[0]} className="border-b border-gray-200 hover:bg-blue-50">
-                <td
-                  className="sticky left-0 z-10 bg-white px-4 py-2 text-sm font-medium text-gray-900 border-r border-gray-200 max-w-40 truncate"
+              <tr key={row[0]} className="border-b border-gray-200 hover:bg-blue-50 transition-colors duration-75">
+                <th
+                  scope="row"
+                  className="sticky left-0 z-10 bg-white px-4 py-3 text-sm font-medium text-gray-900 border-r-2 border-gray-300 max-w-40 truncate"
                   title={row[1]}
                 >
-                  {row[1].slice(0, 30)}
-                </td>
+                  {row[1]}
+                </th>
                 {data.col_entities.map((col, colIdx) => {
                   const link = cellLink(rowIdx, colIdx)
                   const isSelected = selectedCell?.[0] === rowIdx && selectedCell?.[1] === colIdx
@@ -163,27 +186,26 @@ export default function EntityMatrix({
                   return (
                     <td
                       key={`${row[0]}-${col[0]}`}
-                      className={`px-3 py-2 border-r border-gray-100 text-center ${getCellColor(link)} ${
-                        isSelected ? 'bg-blue-100 ring-2 ring-blue-400' : ''
-                      }`}
-                      onMouseEnter={() => setHoveredCell([rowIdx, colIdx])}
+                      className={`px-3 py-3 border-r border-gray-200 text-center transition-all duration-150 ${
+                        isSelected ? 'bg-blue-200 ring-2 ring-inset ring-blue-500' : isHovered ? 'bg-blue-100' : ''
+                      } ${link ? 'cursor-pointer' : ''}`}
+                      onMouseEnter={() => link && setHoveredCell([rowIdx, colIdx])}
                       onMouseLeave={() => setHoveredCell(null)}
-                      onClick={() =>
-                        setSelectedCell(isSelected ? null : [rowIdx, colIdx])
-                      }
+                      onClick={() => link && setSelectedCell(isSelected ? null : [rowIdx, colIdx])}
+                      role="button"
+                      tabIndex={link ? 0 : -1}
+                      aria-pressed={isSelected}
+                      aria-label={link ? `${row[1]} → ${col[1]}: ${link.link_type} (${(link.confidence * 100).toFixed(0)}% confidence)` : 'No connection'}
                     >
                       {link && (
                         <div className="relative inline-flex items-center justify-center">
                           <div
-                            className={`w-6 h-6 rounded-full border-2 transition-all ${
-                              EDGE_COLORS[link.link_type as keyof typeof EDGE_COLORS] ||
-                              'border-gray-300 bg-gray-100'
-                            } ${isHovered ? 'scale-125' : 'scale-100'}`}
+                            className={`w-7 h-7 rounded-full border-2 font-bold text-xs text-white flex items-center justify-center transition-all duration-150 ${
+                              EDGE_COLORS[link.link_type as keyof typeof EDGE_COLORS] || 'border-gray-400 bg-gray-300'
+                            } ${isHovered ? 'scale-125 shadow-lg' : 'scale-100'}`}
                             title={`${link.link_type} (${(link.confidence * 100).toFixed(0)}%)`}
                           >
-                            <span className="text-xs font-bold text-center w-full">
-                              {(link.confidence * 100).toFixed(0)}%
-                            </span>
+                            {(link.confidence * 100).toFixed(0) === '100' ? '✓' : (link.confidence * 100).toFixed(0)}
                           </div>
                         </div>
                       )}
@@ -198,44 +220,51 @@ export default function EntityMatrix({
 
       {/* Details pane for selected cell */}
       {selectedCell && cellLink(selectedCell[0], selectedCell[1]) && (
-        <div className="border-t border-gray-200 bg-gray-50 p-4">
-          <div className="flex justify-between items-start mb-3">
+        <footer className="border-t-2 border-gray-300 bg-gradient-to-r from-blue-50 to-blue-100 p-4 shadow-lg">
+          <div className="flex justify-between items-start gap-4">
             <div>
-              <h4 className="font-semibold text-gray-900">
-                {data.row_entities[selectedCell[0]][1]} ←→{' '}
-                {data.col_entities[selectedCell[1]][1]}
-              </h4>
-              <p className="text-sm text-gray-600 mt-1">
-                Link type: <span className="font-mono font-medium">{cellLink(selectedCell[0], selectedCell[1])?.link_type}</span>
+              <h2 className="text-lg font-bold text-gray-900">
+                {data.row_entities[selectedCell[0]][1]} <span className="text-gray-500">↔</span> {data.col_entities[selectedCell[1]][1]}
+              </h2>
+              <p className="text-sm text-gray-700 mt-1">
+                <strong>Link type:</strong>{' '}
+                <code className="bg-white px-2 py-0.5 rounded text-xs font-semibold text-blue-700 border border-blue-300">
+                  {cellLink(selectedCell[0], selectedCell[1])?.link_type}
+                </code>
               </p>
             </div>
             <button
               onClick={() => setSelectedCell(null)}
-              className="text-gray-500 hover:text-gray-700 text-xl"
+              className="text-gray-500 hover:text-gray-700 transition-colors text-2xl leading-none"
+              aria-label="Close details panel"
             >
               ✕
             </button>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <p className="text-xs font-medium text-gray-600 uppercase">Confidence</p>
-              <p className="text-lg font-bold text-gray-900">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+            <div className="bg-white rounded p-3 border border-gray-300">
+              <p className="text-xs font-bold text-gray-600 uppercase tracking-wide">Confidence</p>
+              <p className="text-2xl font-bold text-blue-700 mt-1">
                 {((cellLink(selectedCell[0], selectedCell[1])?.confidence || 0) * 100).toFixed(0)}%
               </p>
             </div>
-            <div>
-              <p className="text-xs font-medium text-gray-600 uppercase">Link ID</p>
-              <p className="text-sm font-mono text-gray-700 truncate">
-                {cellLink(selectedCell[0], selectedCell[1])?.link_id.slice(0, 12)}...
-              </p>
+            <div className="bg-white rounded p-3 border border-gray-300">
+              <p className="text-xs font-bold text-gray-600 uppercase tracking-wide">Link ID</p>
+              <code className="text-sm text-gray-700 font-mono mt-1 break-all">
+                {cellLink(selectedCell[0], selectedCell[1])?.link_id.slice(0, 16)}...
+              </code>
             </div>
-            <div className="text-right">
-              <button className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors">
-                View Link
+            <div className="flex items-end">
+              <button
+                onClick={() => console.log('View link details')}
+                className="w-full px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 active:bg-blue-800 transition-colors duration-150"
+                aria-label="View full link details"
+              >
+                View Link Details
               </button>
             </div>
           </div>
-        </div>
+        </footer>
       )}
     </div>
   )

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertCircle, CheckCircle, Clock } from 'lucide-react'
+import { AlertCircle, CheckCircle, HelpCircle } from 'lucide-react'
 
 export interface Block {
   id: string
@@ -14,30 +14,38 @@ interface MarkdownWithStatusProps {
 }
 
 const statusConfig = {
-  UserAuthored: { label: 'User', color: 'bg-blue-50', icon: '✍️', style: 'text-blue-700' },
-  RawSource: { label: 'Raw Source', color: 'bg-gray-50', icon: '📄', style: 'text-gray-700' },
-  AiSummary: { label: 'AI Summary', color: 'bg-amber-50', icon: '🤖', style: 'text-amber-700' },
-  ExtractedMetadata: { label: 'Extracted', color: 'bg-purple-50', icon: '🏷️', style: 'text-purple-700' },
-  InferredLink: { label: 'Inferred', color: 'bg-green-50', icon: '🔗', style: 'text-green-700' },
-  Reviewed: { label: 'Reviewed', color: 'bg-green-50', icon: '✓', style: 'text-green-700' },
-  UnreviewedSuggestion: { label: 'Unreviewed', color: 'bg-yellow-50', icon: '⚠️', style: 'text-yellow-700' },
+  UserAuthored: { label: 'User', color: 'bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-900' },
+  RawSource: { label: 'Raw Source', color: 'bg-gray-50', borderColor: 'border-gray-200', textColor: 'text-gray-900' },
+  AiSummary: { label: 'AI Summary', color: 'bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-900' },
+  ExtractedMetadata: { label: 'Extracted', color: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-900' },
+  InferredLink: { label: 'Inferred', color: 'bg-green-50', borderColor: 'border-green-200', textColor: 'text-green-900' },
+  Reviewed: { label: 'Reviewed', color: 'bg-green-50', borderColor: 'border-green-200', textColor: 'text-green-900' },
+  UnreviewedSuggestion: { label: 'Unreviewed', color: 'bg-yellow-50', borderColor: 'border-yellow-200', textColor: 'text-yellow-900' },
+}
+
+function getStatusIcon(status: Block['status']) {
+  const iconProps = 'w-4 h-4 flex-shrink-0'
+  switch (status) {
+    case 'UserAuthored': return <span className={`${iconProps} text-blue-600`}>✍️</span>
+    case 'RawSource': return <span className={`${iconProps} text-gray-600`}>📄</span>
+    case 'AiSummary': return <span className={`${iconProps} text-amber-600`}>🤖</span>
+    case 'ExtractedMetadata': return <span className={`${iconProps} text-purple-600`}>🏷️</span>
+    case 'InferredLink': return <span className={`${iconProps} text-green-600`}>🔗</span>
+    case 'Reviewed': return <CheckCircle className={`${iconProps} text-green-600`} aria-label="Reviewed" />
+    case 'UnreviewedSuggestion': return <AlertCircle className={`${iconProps} text-yellow-600`} aria-label="Needs review" />
+  }
 }
 
 export default function MarkdownWithStatus({ blocks, onReviewBlock }: MarkdownWithStatusProps) {
   const [expandedBlockId, setExpandedBlockId] = useState<string | null>(null)
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null)
 
-  const getStatusIcon = (status: Block['status']) => {
-    const icons = {
-      UserAuthored: <span className="text-blue-600">✍️</span>,
-      RawSource: <span className="text-gray-600">📄</span>,
-      AiSummary: <span className="text-amber-600">🤖</span>,
-      ExtractedMetadata: <span className="text-purple-600">🏷️</span>,
-      InferredLink: <span className="text-green-600">🔗</span>,
-      Reviewed: <CheckCircle className="w-4 h-4 text-green-600" />,
-      UnreviewedSuggestion: <AlertCircle className="w-4 h-4 text-yellow-600" />,
-    }
-    return icons[status]
+  if (blocks.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-500">
+        <p>No blocks to display</p>
+      </div>
+    )
   }
 
   return (
@@ -46,31 +54,37 @@ export default function MarkdownWithStatus({ blocks, onReviewBlock }: MarkdownWi
         const config = statusConfig[block.status]
         const isUnreviewed = block.status === 'UnreviewedSuggestion'
         const isAiSummary = block.status === 'AiSummary'
+        const isExpanded = expandedBlockId === block.id
 
         return (
-          <div
+          <article
             key={block.id}
-            className={`relative rounded-lg transition-all ${
-              expandedBlockId === block.id
-                ? `${config.color} border-2 border-gray-300 p-4`
-                : `${config.color} border border-gray-200 p-4`
+            className={`rounded-lg border transition-all duration-200 ${
+              isExpanded
+                ? `${config.color} ${config.borderColor} border-2 shadow-md p-4`
+                : `${config.color} ${config.borderColor} border p-4 hover:shadow-sm cursor-pointer`
             }`}
-            onMouseEnter={() => setHoveredBlockId(block.id)}
-            onMouseLeave={() => setHoveredBlockId(block.id === expandedBlockId ? block.id : null)}
-            onClick={() =>
-              setExpandedBlockId(expandedBlockId === block.id ? null : block.id)
-            }
+            onMouseEnter={() => !isExpanded && setHoveredBlockId(block.id)}
+            onMouseLeave={() => setHoveredBlockId(null)}
+            role="region"
+            aria-expanded={isExpanded}
+            aria-labelledby={`block-${block.id}-title`}
           >
-            {/* Content with conditional styling */}
-            <div className="flex gap-3">
-              <div className="flex-shrink-0 flex items-start pt-1">
+            {/* Header with icon and content */}
+            <button
+              onClick={() => setExpandedBlockId(isExpanded ? null : block.id)}
+              className="w-full text-left flex gap-3 items-start group"
+              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} block: ${block.content.slice(0, 50)}...`}
+            >
+              <div className="flex-shrink-0 flex items-start pt-1 group-hover:scale-110 transition-transform duration-150">
                 {getStatusIcon(block.status)}
               </div>
 
               <div className="flex-1 min-w-0">
-                {/* Unreviewed content gets wavy underline */}
+                {/* Content with conditional styling */}
                 <p
-                  className={`text-gray-800 leading-relaxed ${
+                  id={`block-${block.id}-title`}
+                  className={`text-gray-900 leading-relaxed font-medium ${
                     isUnreviewed
                       ? 'ai-unverified'
                       : isAiSummary
@@ -81,92 +95,86 @@ export default function MarkdownWithStatus({ blocks, onReviewBlock }: MarkdownWi
                   {block.content}
                 </p>
 
-                {/* Status badge and info */}
-                <div className="flex items-center gap-2 mt-2">
+                {/* Status badge and metadata */}
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <span
-                    className={`inline-block px-2 py-1 rounded text-xs font-medium ${config.style} ${config.color}`}
+                    className={`inline-block px-2 py-1 rounded text-xs font-semibold ${config.color} ${config.borderColor} border`}
+                    role="status"
+                    aria-label={`Status: ${config.label}`}
                   >
                     {config.label}
                   </span>
                   {block.created_by && (
-                    <span className="text-xs text-gray-500">by {block.created_by}</span>
+                    <span className="text-xs text-gray-600" title={`Created by ${block.created_by}`}>
+                      by {block.created_by.split('@')[0]}
+                    </span>
+                  )}
+                  {isUnreviewed && hoveredBlockId === block.id && (
+                    <HelpCircle className="w-3 h-3 text-yellow-600 flex-shrink-0" title="This block needs review" />
                   )}
                 </div>
               </div>
+            </button>
 
-              {/* Hover indicator */}
-              {hoveredBlockId === block.id && isUnreviewed && (
-                <div className="flex-shrink-0 text-xs text-yellow-600 cursor-help">
-                  ?
-                </div>
-              )}
-            </div>
+            {/* Expanded details section */}
+            {isExpanded && (
+              <div className="mt-4 pt-4 border-t border-current border-opacity-20 space-y-4" role="region" aria-label="Block details">
+                {isUnreviewed && (
+                  <>
+                    <div className="bg-white bg-opacity-50 rounded p-3 space-y-2 border-l-4 border-yellow-400">
+                      <p className="font-semibold text-sm text-gray-900">⚠️ AI-generated Content</p>
+                      <p className="text-sm text-gray-700">
+                        This block was generated by an AI and hasn't been reviewed yet. Review it below to accept or dismiss.
+                      </p>
+                      <p className="text-xs text-gray-600 mt-2">
+                        <strong>Created by:</strong> {block.created_by || 'Unknown'}
+                      </p>
+                    </div>
 
-            {/* Expanded details */}
-            {expandedBlockId === block.id && isUnreviewed && (
-              <div className="mt-4 pt-4 border-t border-gray-300 space-y-3">
-                <div className="text-sm text-gray-700">
-                  <p className="font-medium mb-2">AI-generated Content</p>
-                  <p className="text-gray-600">
-                    This block was generated by an AI agent and hasn't been reviewed yet.
-                    Click accept to confirm or dismiss to ignore.
-                  </p>
-                </div>
+                    <div className="flex gap-2 justify-end pt-2">
+                      <button
+                        onClick={() => {
+                          onReviewBlock?.(block.id, false)
+                          setExpandedBlockId(null)
+                        }}
+                        className="px-4 py-2 text-sm font-medium bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors duration-150"
+                        aria-label="Dismiss this block"
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={() => {
+                          onReviewBlock?.(block.id, true)
+                          setExpandedBlockId(null)
+                        }}
+                        className="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors duration-150 shadow-sm"
+                        aria-label="Accept and mark as reviewed"
+                      >
+                        ✓ Accept
+                      </button>
+                    </div>
+                  </>
+                )}
 
-                <div className="bg-white rounded p-3 space-y-2">
-                  <p className="text-xs font-medium text-gray-700">Block ID: {block.id}</p>
-                  <p className="text-xs text-gray-600">Status: {block.status}</p>
-                </div>
+                {isAiSummary && (
+                  <div className="bg-white bg-opacity-50 rounded p-3 border-l-4 border-amber-400">
+                    <p className="font-semibold text-sm text-gray-900">🤖 AI Summary</p>
+                    <p className="text-sm text-gray-700 mt-2">
+                      This content was automatically summarized from source material by an AI system.
+                    </p>
+                  </div>
+                )}
 
-                <div className="flex gap-2 justify-end">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onReviewBlock?.(block.id, false)
-                      setExpandedBlockId(null)
-                    }}
-                    className="px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors"
-                  >
-                    Dismiss
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onReviewBlock?.(block.id, true)
-                      setExpandedBlockId(null)
-                    }}
-                    className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                  >
-                    Accept
-                  </button>
-                </div>
+                {!isUnreviewed && !isAiSummary && (
+                  <div className="bg-white bg-opacity-50 rounded p-3 space-y-1 text-xs text-gray-700">
+                    <p><strong>Block ID:</strong> <code className="bg-gray-100 px-1 rounded">{block.id.slice(0, 12)}...</code></p>
+                    <p><strong>Status:</strong> {config.label}</p>
+                    {block.created_by && <p><strong>Created by:</strong> {block.created_by}</p>}
+                  </div>
+                )}
               </div>
             )}
-
-            {expandedBlockId === block.id && isAiSummary && (
-              <div className="mt-4 pt-4 border-t border-gray-300">
-                <div className="text-sm text-gray-700">
-                  <p className="font-medium mb-2">AI Summary</p>
-                  <p className="text-gray-600">
-                    This content was automatically summarized by an AI system based on source material.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {expandedBlockId === block.id && !isUnreviewed && !isAiSummary && (
-              <div className="mt-4 pt-4 border-t border-gray-300">
-                <div className="text-sm text-gray-700">
-                  <p className="font-medium mb-2">Block Details</p>
-                  <p className="text-xs text-gray-600">ID: {block.id}</p>
-                  <p className="text-xs text-gray-600">Status: {block.status}</p>
-                  {block.created_by && (
-                    <p className="text-xs text-gray-600">Created by: {block.created_by}</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          </article>
         )
       })}
     </div>
