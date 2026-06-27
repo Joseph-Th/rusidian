@@ -314,3 +314,48 @@ pub async fn get_graph_view_data(
         None => Ok(None),
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkNetworkNode {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkNetworkEdge {
+    pub id: String,
+    pub source: String,
+    pub target: String,
+    pub link_type: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkNetworkData {
+    pub nodes: Vec<LinkNetworkNode>,
+    pub edges: Vec<LinkNetworkEdge>,
+}
+
+pub async fn get_link_network(
+    root_id: String,
+    depth: Option<usize>,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<LinkNetworkData, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.get_link_network(&root_id, depth.unwrap_or(2))
+}
+
+pub async fn get_neighbors(
+    target_id: String,
+    depth: Option<usize>,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<LinkNetworkData, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    svc.get_neighbors(&target_id, depth.unwrap_or(1))
+}

@@ -134,6 +134,26 @@ async fn get_preview_card(
     commands::get_preview_card(entity_id, service).await
 }
 
+#[tauri::command]
+async fn get_link_network(
+    root_id: String,
+    depth: Option<usize>,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::LinkNetworkData, String> {
+    let service = state.inner();
+    commands::get_link_network(root_id, depth, service).await
+}
+
+#[tauri::command]
+async fn get_neighbors(
+    target_id: String,
+    depth: Option<usize>,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::LinkNetworkData, String> {
+    let service = state.inner();
+    commands::get_neighbors(target_id, depth, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -180,7 +200,9 @@ fn main() {
             get_view,
             render_view,
             create_graph_view,
-            get_preview_card
+            get_preview_card,
+            get_link_network,
+            get_neighbors
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

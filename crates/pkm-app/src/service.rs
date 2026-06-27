@@ -3,7 +3,7 @@
 //! should happen. NO business logic in the UI layer.
 
 use pkm_core::note::Note;
-use pkm_core::ports::{EntityRepo, NoteRepo, Retriever, SearchMode, SourceRepo, ViewRepo};
+use pkm_core::ports::{EntityRepo, LinkRepo, NoteRepo, Retriever, SearchMode, SourceRepo, ViewRepo};
 use pkm_core::view::{DefaultViewModel, View, ViewKind, ViewModel, ViewParams};
 use pkm_core::{Actor, Timestamp};
 use pkm_search::parse_query;
@@ -525,6 +525,282 @@ impl AppService {
                 "Created {} by {:?}. Version {}.{}",
                 entity.created_at, entity.created_by, entity.version, aliases_str
             ),
+        })
+    }
+
+    /// Get a hierarchical network of links starting from a root entity.
+    /// Used by Argument Trees (Priority 2) to visualize link relationships.
+    pub fn get_link_network(&self, root_entity_id: &str, depth: usize) -> Result<crate::commands::LinkNetworkData, String> {
+        use pkm_core::id::ObjectRef;
+        use pkm_storage::repositories::SqliteLinkRepo;
+        use std::collections::{HashMap, VecDeque};
+
+        let uuid = uuid::Uuid::parse_str(root_entity_id)
+            .map_err(|_| format!("Invalid entity ID: {}", root_entity_id))?;
+        let root_id = pkm_core::id::EntityId(uuid);
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let entity_repo = SqliteEntityRepo { conn: &conn };
+        let link_repo = SqliteLinkRepo { conn: &conn };
+
+        // Verify the root entity exists
+        let root = entity_repo
+            .get(root_id)
+            .map_err(|e| format!("Failed to get root entity: {}", e))?
+            .ok_or_else(|| format!("Entity not found: {}", root_entity_id))?;
+
+        let mut nodes = HashMap::new();
+        let mut edges = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = VecDeque::new();
+        let mut node_depth = HashMap::new();
+
+        let root_ref = ObjectRef::Entity(root_id);
+        queue.push_back((root_ref, 0));
+        visited.insert(format!("entity:{}", root_id));
+        node_depth.insert(format!("entity:{}", root_id), 0);
+
+        // Add root node
+        nodes.insert(
+            root_entity_id.to_string(),
+            crate::commands::LinkNetworkNode {
+                id: root_entity_id.to_string(),
+                title: root.name.clone(),
+                kind: format!("{:?}", root.kind).to_lowercase(),
+            },
+        );
+
+        // BFS traversal
+        while let Some((current_ref, current_depth)) = queue.pop_front() {
+            if current_depth >= depth {
+                continue;
+            }
+
+            let (_from_type, from_id_str) = match &current_ref {
+                ObjectRef::Entity(id) => ("entity", id.to_string()),
+                ObjectRef::Note(id) => ("note", id.to_string()),
+                ObjectRef::Source(id) => ("source", id.to_string()),
+                ObjectRef::Block(id) => ("block", id.to_string()),
+                _ => continue,
+            };
+
+            // Get outgoing links
+            if let Ok(outgoing) = link_repo.get_by_from(current_ref) {
+                for link in outgoing {
+                    let (to_type, to_id) = match link.to {
+                        ObjectRef::Entity(id) => ("entity", id.to_string()),
+                        ObjectRef::Note(id) => ("note", id.to_string()),
+                        ObjectRef::Source(id) => ("source", id.to_string()),
+                        ObjectRef::Block(id) => ("block", id.to_string()),
+                        _ => continue,
+                    };
+
+                    let node_key = format!("{}:{}", to_type, to_id);
+
+                    // Add node if not already visited
+                    if !visited.contains(&node_key) {
+                        visited.insert(node_key.clone());
+                        node_depth.insert(node_key.clone(), current_depth + 1);
+                        queue.push_back((link.to, current_depth + 1));
+
+                        // Fetch entity info if it's an entity
+                        if to_type == "entity" {
+                            if let Ok(entity_uuid) = uuid::Uuid::parse_str(&to_id) {
+                                if let Ok(Some(entity)) = entity_repo.get(pkm_core::id::EntityId(entity_uuid)) {
+                                    nodes.insert(
+                                        to_id.clone(),
+                                        crate::commands::LinkNetworkNode {
+                                            id: to_id.clone(),
+                                            title: entity.name,
+                                            kind: format!("{:?}", entity.kind).to_lowercase(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // Add edge
+                    edges.push(crate::commands::LinkNetworkEdge {
+                        id: link.id.to_string(),
+                        source: from_id_str.clone(),
+                        target: to_id.clone(),
+                        link_type: format!("{:?}", link.link_type).to_lowercase(),
+                    });
+                }
+            }
+
+            // Get incoming links
+            if let Ok(incoming) = link_repo.get_by_to(current_ref) {
+                for link in incoming {
+                    let (from_type, from_id) = match link.from {
+                        ObjectRef::Entity(id) => ("entity", id.to_string()),
+                        ObjectRef::Note(id) => ("note", id.to_string()),
+                        ObjectRef::Source(id) => ("source", id.to_string()),
+                        ObjectRef::Block(id) => ("block", id.to_string()),
+                        _ => continue,
+                    };
+
+                    let node_key = format!("{}:{}", from_type, from_id);
+
+                    // Add node if not already visited
+                    if !visited.contains(&node_key) {
+                        visited.insert(node_key.clone());
+                        node_depth.insert(node_key.clone(), current_depth + 1);
+                        queue.push_back((link.from, current_depth + 1));
+
+                        // Fetch entity info if it's an entity
+                        if from_type == "entity" {
+                            if let Ok(entity_uuid) = uuid::Uuid::parse_str(&from_id) {
+                                if let Ok(Some(entity)) = entity_repo.get(pkm_core::id::EntityId(entity_uuid)) {
+                                    nodes.insert(
+                                        from_id.clone(),
+                                        crate::commands::LinkNetworkNode {
+                                            id: from_id.clone(),
+                                            title: entity.name,
+                                            kind: format!("{:?}", entity.kind).to_lowercase(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // Add edge
+                    edges.push(crate::commands::LinkNetworkEdge {
+                        id: link.id.to_string(),
+                        source: from_id,
+                        target: from_id_str.clone(),
+                        link_type: format!("{:?}", link.link_type).to_lowercase(),
+                    });
+                }
+            }
+        }
+
+        Ok(crate::commands::LinkNetworkData {
+            nodes: nodes.into_values().collect(),
+            edges,
+        })
+    }
+
+    /// Get immediate neighbors of a node (depth 1) for progressive disclosure graphs.
+    /// Used by Progressive Graphs (Priority 3) to expand nodes on double-click.
+    pub fn get_neighbors(&self, target_id: &str, _depth: usize) -> Result<crate::commands::LinkNetworkData, String> {
+        use pkm_core::id::ObjectRef;
+        use pkm_storage::repositories::SqliteLinkRepo;
+
+        let uuid = uuid::Uuid::parse_str(target_id)
+            .map_err(|_| format!("Invalid ID: {}", target_id))?;
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Failed to acquire db lock".to_string())?;
+
+        let entity_repo = SqliteEntityRepo { conn: &conn };
+        let link_repo = SqliteLinkRepo { conn: &conn };
+
+        let mut nodes = std::collections::HashMap::new();
+        let mut edges = Vec::new();
+
+        // Try to parse as entity first
+        let target_ref = if let Ok(entity) = entity_repo.get(pkm_core::id::EntityId(uuid)) {
+            if let Some(ent) = entity {
+                nodes.insert(
+                    target_id.to_string(),
+                    crate::commands::LinkNetworkNode {
+                        id: target_id.to_string(),
+                        title: ent.name,
+                        kind: format!("{:?}", ent.kind).to_lowercase(),
+                    },
+                );
+                ObjectRef::Entity(pkm_core::id::EntityId(uuid))
+            } else {
+                return Err(format!("Entity not found: {}", target_id));
+            }
+        } else {
+            return Err(format!("Invalid entity ID: {}", target_id));
+        };
+
+        // Get outgoing neighbors (up to depth levels)
+        if let Ok(outgoing) = link_repo.get_by_from(target_ref) {
+            for link in outgoing.iter().take(20) {
+                let (to_type, to_id) = match link.to {
+                    ObjectRef::Entity(id) => ("entity", id.to_string()),
+                    ObjectRef::Note(id) => ("note", id.to_string()),
+                    ObjectRef::Source(id) => ("source", id.to_string()),
+                    ObjectRef::Block(id) => ("block", id.to_string()),
+                    _ => continue,
+                };
+
+                // Fetch entity info if it's an entity
+                if to_type == "entity" {
+                    if let Ok(entity_uuid) = uuid::Uuid::parse_str(&to_id) {
+                        if let Ok(Some(entity)) = entity_repo.get(pkm_core::id::EntityId(entity_uuid)) {
+                            nodes.insert(
+                                to_id.clone(),
+                                crate::commands::LinkNetworkNode {
+                                    id: to_id.clone(),
+                                    title: entity.name,
+                                    kind: format!("{:?}", entity.kind).to_lowercase(),
+                                },
+                            );
+                        }
+                    }
+                }
+
+                edges.push(crate::commands::LinkNetworkEdge {
+                    id: link.id.to_string(),
+                    source: target_id.to_string(),
+                    target: to_id,
+                    link_type: format!("{:?}", link.link_type).to_lowercase(),
+                });
+            }
+        }
+
+        // Get incoming neighbors (up to depth levels)
+        if let Ok(incoming) = link_repo.get_by_to(target_ref) {
+            for link in incoming.iter().take(20) {
+                let (from_type, from_id) = match link.from {
+                    ObjectRef::Entity(id) => ("entity", id.to_string()),
+                    ObjectRef::Note(id) => ("note", id.to_string()),
+                    ObjectRef::Source(id) => ("source", id.to_string()),
+                    ObjectRef::Block(id) => ("block", id.to_string()),
+                    _ => continue,
+                };
+
+                // Fetch entity info if it's an entity
+                if from_type == "entity" {
+                    if let Ok(entity_uuid) = uuid::Uuid::parse_str(&from_id) {
+                        if let Ok(Some(entity)) = entity_repo.get(pkm_core::id::EntityId(entity_uuid)) {
+                            nodes.insert(
+                                from_id.clone(),
+                                crate::commands::LinkNetworkNode {
+                                    id: from_id.clone(),
+                                    title: entity.name,
+                                    kind: format!("{:?}", entity.kind).to_lowercase(),
+                                },
+                            );
+                        }
+                    }
+                }
+
+                edges.push(crate::commands::LinkNetworkEdge {
+                    id: link.id.to_string(),
+                    source: from_id,
+                    target: target_id.to_string(),
+                    link_type: format!("{:?}", link.link_type).to_lowercase(),
+                });
+            }
+        }
+
+        Ok(crate::commands::LinkNetworkData {
+            nodes: nodes.into_values().collect(),
+            edges,
         })
     }
 }
