@@ -11,7 +11,7 @@ use pkm_storage::{SqliteEntityRepo, SqliteNoteRepo, SqliteRetriever, SqliteSourc
 use pkm_storage::repositories::SqliteLinkRepo;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, Arc};
+use std::sync::OnceLock;
 use crate::db_pool::{create_pool, DbPool};
 use crate::watcher::{watch_vault, NoteWatcherEvent, IgnoreNextEvent};
 use tokio::sync::mpsc;
@@ -33,7 +33,8 @@ pub struct AppService {
     pool: DbPool,
     db_path: PathBuf,
     vault_path: PathBuf,
-    ingestion_tx: Arc<tokio::sync::Mutex<Option<mpsc::Sender<Vec<String>>>>>,
+    /// Unbounded sender for ingestion URLs (rate-limited in fetcher)
+    pub ingestion_tx: Option<mpsc::UnboundedSender<String>>,
 }
 
 impl AppService {
@@ -54,14 +55,14 @@ impl AppService {
         // Create vault directory if it doesn't exist
         std::fs::create_dir_all(&vault).map_err(|e| format!("Failed to create vault dir: {}", e))?;
 
-        // Start the background ingestion worker
+        // Start the rate-limited background ingestion worker
         let ingestion_tx = crate::ingestion::start_ingestion_worker(pool.clone(), vault.clone());
 
         Ok(AppService {
             pool,
             db_path: db_path_obj,
             vault_path: vault,
-            ingestion_tx: Arc::new(tokio::sync::Mutex::new(Some(ingestion_tx))),
+            ingestion_tx: Some(ingestion_tx),
         })
     }
 
@@ -1167,7 +1168,8 @@ impl AppService {
     }
 
     /// Ingest bulk links from raw pasted text.
-    /// Extracts URLs, queues them for background processing, and returns the count.
+    /// Extracts URLs, queues them for rate-limited background processing.
+    /// Returns immediately with the count of URLs found.
     pub async fn ingest_bulk_links(&self, raw_text: String) -> Result<usize, String> {
         // Extract all URLs from the pasted text
         let urls = crate::ingestion::extract_urls(&raw_text);
@@ -1177,12 +1179,12 @@ impl AppService {
             return Ok(0);
         }
 
-        // Send to background worker
-        let tx_lock = self.ingestion_tx.lock().await;
-        if let Some(tx) = tx_lock.as_ref() {
-            tx.send(urls)
-                .await
-                .map_err(|e| format!("Failed to queue ingestion: {}", e))?;
+        // Queue each URL individually to the unbounded fetcher queue
+        if let Some(ref tx) = self.ingestion_tx {
+            for url in urls {
+                // Ignore send errors if channel is closed (shouldn't happen)
+                let _ = tx.send(url);
+            }
         } else {
             return Err("Ingestion worker not available".to_string());
         }

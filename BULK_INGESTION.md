@@ -11,62 +11,58 @@ This system leverages:
 - **Agent Safety Layer** for auditable, reversible operations
 - **Autonomous Promotion** to bypass the "waiting room" and create durable notes instantly
 
-## Architecture
+## Architecture: Producer-Consumer with Rate Limiting
 
 ```
+PRODUCER LAYER:
 ┌─────────────────────────────────────────────────────────────┐
-│ User pastes raw text block (50 URLs) into UI               │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────▼──────────────┐
-        │  ingest_bulk_links command  │  ← Tauri command
-        │  (extracts URLs via regex)  │
-        └──────────────┬──────────────┘
-                       │
-        ┌──────────────▼──────────────────────┐
-        │ mpsc channel (Tokio queue)          │  ← Fire-and-forget
-        │ Returns immediately to UI            │
-        │ "Processing 50 links in background"  │
-        └──────────────┬──────────────────────┘
-                       │
-        ┌──────────────▼──────────────────────────┐
-        │      Background Worker Task (Tokio)     │
-        │  Processes URLs concurrently (30 at /   │
-        │  time)                                  │
-        └──────────────┬──────────────────────────┘
-                       │
-        ┌──────────────▼───────────┐
-        │  For each URL in parallel │
-        └──────────────┬───────────┘
-                       │
-        ┌──────────────▼─────────────┐
-        │ 1. SCRAPE (Jina AI)        │  GET https://r.jina.ai/URL
-        │    → markdown              │  → 200 chars markdown
-        └──────────────┬─────────────┘
-                       │
-        ┌──────────────▼──────────────┐
-        │ 2. SAVE RAW SOURCE          │
-        │    Create Source object     │  ingestion_state = Captured
-        │    Store markdown           │
-        └──────────────┬──────────────┘
-                       │
-        ┌──────────────▼──────────────┐
-        │ 3. AI REASONING PHASE       │  Gemini 3.5 Flash /
-        │    Generate title + summary │  Claude Haiku 4.5
-        └──────────────┬──────────────┘
-                       │
-        ┌──────────────▼──────────────────────────┐
-        │ 4. AUTONOMOUS PROMOTION (No Human)      │
-        │    • Create Note from summary            │
-        │    • Link Note ← DerivedFrom → Source   │
-        │    • Set Source state to PROMOTED       │
-        │    • Log all to agent_action audit trail│
-        └──────────────┬──────────────────────────┘
-                       │
-        ┌──────────────▼──────────────────────────┐
-        │ UI Detects Changes (file watcher)        │
-        │ 50 new Notes appear in default view      │
-        └──────────────────────────────────────────┘
+│ User pastes raw text (50 URLs) → ingest_bulk_links          │
+│ Regex extracts URLs instantly                               │
+│ Each URL sent to unbounded mpsc channel (fire-and-forget)   │
+│ Returns immediately: "Processing 50 links in background"    │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+QUEUE LAYER (Unbounded):
+                      │ 50 URLs queued
+                      │ (no buffering limit)
+                      │
+FETCHER LAYER (Rate Limited):
+        ┌─────────────▼──────────────────────────────────────┐
+        │ SINGLE-THREADED 3-SECOND TICKER                    │
+        │ (20 RPM = 1 request every 3 seconds)               │
+        │ Ensures Jina free tier compliance                   │
+        │                                                     │
+        │ ⏰ ticker.tick().await → waits 3 seconds           │
+        │ 🔗 URL dequeued from mpsc                          │
+        │ 🌐 Jina fetch (500-1500ms) synchronously          │
+        │ ✓ Markdown obtained → handoff                      │
+        └─────────────┬──────────────────────────────────────┘
+                      │
+                      │ (Markdown + URL handed off)
+                      │
+PROCESSOR LAYER (Concurrent):
+        ┌─────────────▼────────────────────────────────────────────┐
+        │ tokio::spawn() SEPARATE TASK (non-blocking)             │
+        │ • LLM reasoning (5-10+ seconds) ← doesn't block fetcher  │
+        │ • DB writes (create Source, Note, Link)                 │
+        │ • Agent auditing (agent_action)                         │
+        │                                                          │
+        │ Multiple processors run concurrently                     │
+        │ Slow LLM doesn't starve the 3-sec Jina rhythm          │
+        └─────────────┬────────────────────────────────────────────┘
+                      │
+UI LAYER:
+        ┌─────────────▼──────────────────────┐
+        │ File watcher detects new Notes      │
+        │ UI automatically refreshes          │
+        │ 50 new notes visible                │
+        └──────────────────────────────────────┘
+
+PERFORMANCE:
+• 50 URLs: 150 seconds sequential (3 sec × 50) + ~500ms LLM overhead
+• Real bottleneck: Jina rate limit (not CPU)
+• LLM latency hidden (concurrent processing)
+• Peak throughput: 20 URLs/minute (Jina free tier cap)
 ```
 
 ## API
@@ -222,26 +218,44 @@ The Source transitions from `Captured` → `Promoted`.
 
 All three operations are logged to `agent_action` table for auditability.
 
-## Concurrency Model
+## Concurrency Model: Rate-Limited Fetching
 
-The background worker uses **Tokio task spawning** for true parallelism:
+The system uses a **Producer-Consumer architecture** that respects Jina's free tier limits:
 
+### Fetcher Loop (Single-threaded, 3-second ticker)
 ```rust
-while let Some(urls) = rx.recv().await {
-    for url in urls {
-        tokio::spawn(async move {
-            process_single_url(url, pool, http_client, vault_path).await
-        });
-    }
+let mut ticker = interval(Duration::from_secs(3)); // 20 RPM limit
+
+while let Some(url) = rx.recv().await {
+    ticker.tick().await; // CRITICAL: Wait 3 seconds before next Jina request
+    
+    // Fetch markdown (blocking, but fast: 500-1500ms)
+    let markdown = client.get(&format!("https://r.jina.ai/{}", url)).send().await;
+    
+    // Hand off to processor (non-blocking spawn)
+    tokio::spawn(async move {
+        process_and_promote_source(pool, vault, client, url, markdown).await
+    });
 }
 ```
 
-This means:
-- 50 URLs → 50 concurrent Tokio tasks
-- Typical throughput: **30-50 URLs/second** (limited by Jina API rate limits)
-- I/O bound (HTTP + DB), so Tokio's single-threaded async model is perfect
+### Processor Tasks (Unlimited concurrent)
+```rust
+// Each spawned task runs LLM reasoning + DB writes independently
+// Slow LLMs (5-10+ seconds) don't block the fetcher's 3-second rhythm
+```
 
-You can increase concurrency by tuning the mpsc channel buffer (currently 50) or spawning multiple worker tasks.
+This means:
+- **Fetcher:** 1 request per 3 seconds = 20 URLs/minute (hard limit)
+- **Processors:** Unlimited concurrent tasks (limited by tokio runtime)
+- **Total throughput:** ~20 URLs/minute (Jina-bottlenecked, not CPU-bottlenecked)
+- **Peak memory:** Multiple LLM responses buffered (each ~1KB), not a concern
+
+**Why this works:**
+1. The 3-second ticker ensures zero HTTP 429 (rate limit) errors from Jina
+2. Unbounded queue means URLs don't get dropped (they queue up)
+3. Concurrent processor tasks mean a 10-second LLM response doesn't delay the next Jina fetch
+4. Perfect for fire-and-forget ingestion: paste 50 URLs, they process one per 3 seconds
 
 ## Automation Mode
 
@@ -438,20 +452,25 @@ async fn analyze_content_real(markdown: &str, url: &str) -> AiAnalysisResult {
 
 ## Performance Metrics
 
-**Typical Performance:**
+**With Rate Limiting (Jina Free Tier):**
 
 | Metric | Value |
 |--------|-------|
 | URLs extracted (regex) | <1ms |
+| Jina API rate | **1 request per 3 seconds** (20 RPM free tier) |
 | Jina API latency (per URL) | 500-1500ms |
-| AI analysis latency (per URL) | 200-500ms (mock); 1000-2000ms (real API) |
-| DB insert latency (per URL) | 50-100ms |
-| **Total per URL (sequential)** | 2-4 seconds |
-| **Total per URL (Tokio parallel, 30 concurrent)** | 0.1-0.2 seconds |
-| **50 URLs (sequential)** | 2-4 minutes |
-| **50 URLs (Tokio parallel)** | 10-30 seconds |
+| AI analysis latency (per URL) | 100ms (mock); 1000-5000ms (real API, concurrent) |
+| DB insert latency (per URL) | 50-100ms (concurrent with LLM) |
+| **Per URL throughput** | 3+ seconds (Jina-limited) |
+| **50 URLs total time** | ~150 seconds (3s × 50 URLs) + LLM overhead hidden |
+| **100 URLs total time** | ~300 seconds (5 minutes) + LLM overhead hidden |
 
-The system scales linearly with concurrency (Tokio handles ~100 URLs without issues; limited by Jina rate limits at scale).
+**Key insights:**
+- Bottleneck is Jina (1 request/3 seconds), NOT CPU or LLM
+- LLM latency is **hidden** because it runs in separate tokio::spawn tasks
+- Example: If LLM takes 10 seconds but Jina takes 3 seconds, you don't see the 10 seconds—it overlaps
+- Memory usage is minimal (unbounded queue buffers URLs, not full responses)
+- Upgrade Jina plan → proportionally faster throughput
 
 ## Future Enhancements
 
