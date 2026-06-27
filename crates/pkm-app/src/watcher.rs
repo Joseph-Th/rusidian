@@ -11,7 +11,7 @@ use notify::{Watcher, RecursiveMode, Result as NotifyResult};
 use notify::recommended_watcher;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
 use pkm_core::note::Note;
@@ -23,20 +23,22 @@ use pkm_core::{Actor, Timestamp, id::NoteId};
 pub struct NoteWatcherEvent {
     pub file_path: PathBuf,
     pub note: Note,
+    pub blocks: Vec<pkm_core::block::Block>,
 }
 
-/// Handle to skip processing on the next file modification event.
-/// Used by the app to prevent infinite loops when it writes files.
+/// Handle to skip processing on file modification events.
+/// Uses a TTL (time-to-live) based cache to handle multiple OS events for a single write.
+/// When OS sends multiple events (e.g., Metadata + Data modify), they're all ignored within the TTL window.
 #[derive(Clone)]
 pub struct IgnoreNextEvent {
-    cache: Arc<Mutex<HashSet<PathBuf>>>,
+    cache: Arc<Mutex<HashMap<PathBuf, Instant>>>,
 }
 
 impl IgnoreNextEvent {
-    /// Mark a file to be skipped in the next watch event.
+    /// Mark a file to be skipped until the TTL expires (default 1 second).
     pub fn skip_next(&self, path: PathBuf) {
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(path);
+            cache.insert(path, Instant::now() + Duration::from_secs(1));
         }
     }
 }
@@ -51,7 +53,7 @@ impl IgnoreNextEvent {
 pub fn watch_vault(vault_path: &Path) -> NotifyResult<(mpsc::Receiver<NoteWatcherEvent>, IgnoreNextEvent)> {
     let (tx, rx) = mpsc::channel();
     let vault_path = vault_path.to_path_buf();
-    let ignore_cache = Arc::new(Mutex::new(HashSet::new()));
+    let ignore_cache = Arc::new(Mutex::new(HashMap::new()));
     let ignore_handle = IgnoreNextEvent { cache: Arc::clone(&ignore_cache) };
 
     // Create a watcher in a background thread
@@ -67,7 +69,7 @@ pub fn watch_vault(vault_path: &Path) -> NotifyResult<(mpsc::Receiver<NoteWatche
 fn watch_impl(
     vault_path: &Path,
     tx: mpsc::Sender<NoteWatcherEvent>,
-    ignore_cache: Arc<Mutex<HashSet<PathBuf>>>,
+    ignore_cache: Arc<Mutex<HashMap<PathBuf, Instant>>>,
 ) -> NotifyResult<()> {
     let vault_path = vault_path.to_path_buf();
     let (watch_tx, watch_rx) = mpsc::channel();
@@ -100,14 +102,24 @@ fn watch_impl(
                 for path in event.paths {
                     // Only process .md files
                     if path.extension().and_then(|s| s.to_str()) == Some("md") {
-                        // Check if this file is in the ignore cache
+                        // Check if this file is in the ignore cache and if TTL has not expired
                         let should_skip = {
                             let mut cache = ignore_cache.lock().unwrap_or_else(|e| e.into_inner());
-                            cache.remove(&path)
+                            // Check if the path is in cache and TTL hasn't expired
+                            if let Some(&expiry) = cache.get(&path) {
+                                if Instant::now() < expiry {
+                                    true // Still in TTL, skip this event
+                                } else {
+                                    cache.remove(&path); // TTL expired, remove from cache
+                                    false
+                                }
+                            } else {
+                                false
+                            }
                         };
 
                         if should_skip {
-                            // App wrote this file; skip processing to prevent infinite loop
+                            // App wrote this file within the TTL window; skip processing to prevent infinite loop
                             continue;
                         }
 
@@ -123,10 +135,11 @@ fn watch_impl(
                                 Actor::User,
                                 now,
                             ) {
-                                Ok((note, _blocks)) => {
+                                Ok((note, blocks)) => {
                                     let event = NoteWatcherEvent {
                                         file_path: path.clone(),
                                         note,
+                                        blocks,
                                     };
                                     // Send the event (ignore if receiver is dropped)
                                     let _ = tx.send(event);

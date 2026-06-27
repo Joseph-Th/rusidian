@@ -372,13 +372,36 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     }
 
     fn delete(&self, id: NoteId) -> Result<()> {
-        // Delete child blocks first (no ON DELETE CASCADE in schema).
+        // Step 1: Get the file path before deleting from database
+        let file_path = {
+            let result: std::result::Result<String, rusqlite::Error> = self.conn.query_row(
+                "SELECT file_path FROM note WHERE id = ?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            );
+            match result {
+                Ok(path) => Some(path),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(crate::StorageError::from(e).into()),
+            }
+        };
+
+        // Step 2: Delete child blocks first (no ON DELETE CASCADE in schema).
         self.conn
             .execute("DELETE FROM block WHERE note_id = ?1", params![id.to_string()])
             .map_err(crate::StorageError::from)?;
+
+        // Step 3: Delete the note from the database
         self.conn
             .execute("DELETE FROM note WHERE id = ?1", params![id.to_string()])
             .map_err(crate::StorageError::from)?;
+
+        // Step 4: Delete the markdown file from disk (if it exists)
+        if let Some(path) = file_path {
+            // Ignore errors if file doesn't exist - it may have been manually deleted
+            let _ = std::fs::remove_file(&path);
+        }
+
         Ok(())
     }
 

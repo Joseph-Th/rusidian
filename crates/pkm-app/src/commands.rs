@@ -573,3 +573,65 @@ pub async fn get_entity_matrix(
 
     svc.get_entity_matrix(&row_kind, &col_kind, min_confidence)
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BulkIngestionResponse {
+    /// Number of URLs extracted and queued for processing.
+    pub count: usize,
+    /// Human-friendly status message.
+    pub message: String,
+}
+
+/// Ingest bulk links from pasted text.
+/// Extracts all URLs, queues them for concurrent processing in the background.
+/// Returns immediately with a count of URLs found.
+pub async fn ingest_bulk_links(
+    raw_text: String,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<BulkIngestionResponse, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let count = svc.ingest_bulk_links(raw_text).await?;
+
+    let message = if count == 0 {
+        "No URLs found in text".to_string()
+    } else {
+        format!("Processing {} links in background...", count)
+    };
+
+    Ok(BulkIngestionResponse { count, message })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RollbackResponse {
+    /// Number of actions rolled back.
+    pub rolled_back: usize,
+    /// Human-friendly status message.
+    pub message: String,
+}
+
+/// Rollback recent autonomous ingestion actions.
+/// Undoes all agent actions from the past N minutes.
+pub async fn rollback_autonomous_ingestion(
+    minutes: i64,
+    service: &Arc<Mutex<AppService>>,
+) -> Result<RollbackResponse, String> {
+    let svc = service
+        .lock()
+        .map_err(|_| "Failed to acquire service lock".to_string())?;
+
+    let rolled_back = svc.rollback_recent_autonomous_ingestion(minutes)?;
+
+    let message = if rolled_back == 0 {
+        format!("No actions found in the past {} minutes", minutes)
+    } else {
+        format!("Rolled back {} autonomous ingestion actions", rolled_back)
+    };
+
+    Ok(RollbackResponse {
+        rolled_back,
+        message,
+    })
+}

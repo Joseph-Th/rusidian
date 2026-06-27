@@ -154,6 +154,24 @@ async fn get_neighbors(
     commands::get_neighbors(target_id, depth, service).await
 }
 
+#[tauri::command]
+async fn ingest_bulk_links(
+    raw_text: String,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::BulkIngestionResponse, String> {
+    let service = state.inner();
+    commands::ingest_bulk_links(raw_text, service).await
+}
+
+#[tauri::command]
+async fn rollback_autonomous_ingestion(
+    minutes: i64,
+    state: tauri::State<'_, Arc<Mutex<AppService>>>,
+) -> Result<commands::RollbackResponse, String> {
+    let service = state.inner();
+    commands::rollback_autonomous_ingestion(minutes, service).await
+}
+
 fn main() {
     let db_path = {
         let home = std::env::var("USERPROFILE")
@@ -202,7 +220,9 @@ fn main() {
             create_graph_view,
             get_preview_card,
             get_link_network,
-            get_neighbors
+            get_neighbors,
+            ingest_bulk_links,
+            rollback_autonomous_ingestion
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

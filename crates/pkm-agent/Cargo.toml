@@ -16,6 +16,7 @@ pkm-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 pkm-core = { workspace = true, features = ["fixtures"] }

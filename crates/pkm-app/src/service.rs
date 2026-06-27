@@ -7,13 +7,14 @@ use pkm_core::ports::{EntityRepo, LinkRepo, NoteRepo, Retriever, SearchMode, Sou
 use pkm_core::view::{DefaultViewModel, View, ViewKind, ViewModel, ViewParams};
 use pkm_core::{Actor, Timestamp};
 use pkm_search::parse_query;
-use pkm_storage::{open, SqliteEntityRepo, SqliteNoteRepo, SqliteRetriever, SqliteSourceRepo, SqliteViewRepo};
+use pkm_storage::{SqliteEntityRepo, SqliteNoteRepo, SqliteRetriever, SqliteSourceRepo, SqliteViewRepo};
 use pkm_storage::repositories::SqliteLinkRepo;
-use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{OnceLock, Arc};
+use crate::db_pool::{create_pool, DbPool};
 use crate::watcher::{watch_vault, NoteWatcherEvent, IgnoreNextEvent};
+use tokio::sync::mpsc;
 
 type GraphNode = (String, String, f64, f64, String, String, String);
 
@@ -27,33 +28,40 @@ pub fn get_watcher_ignore_handle() -> Option<IgnoreNextEvent> {
 
 /// The application service: aggregates all repositories and provides
 /// high-level operations for the Tauri frontend. The service manages
-/// the database connection, vault directory, and creates repository instances on-demand.
+/// the database connection pool, vault directory, and creates repository instances on-demand.
 pub struct AppService {
-    conn: Arc<Mutex<Connection>>,
+    pool: DbPool,
+    db_path: PathBuf,
     vault_path: PathBuf,
+    ingestion_tx: Arc<tokio::sync::Mutex<Option<mpsc::Sender<Vec<String>>>>>,
 }
 
 impl AppService {
     /// Create a new AppService with the given database file and vault directory.
     /// If vault_path is not provided, it defaults to ./vault relative to the database.
     pub fn new(db_path: &str, vault_path: Option<&str>) -> Result<Self, String> {
-        let conn = open(Path::new(db_path)).map_err(|e| format!("Failed to open db: {}", e))?;
+        let db_path_obj = PathBuf::from(db_path);
+        let pool = create_pool(&db_path_obj)?;
 
         // Determine vault path
         let vault = if let Some(path) = vault_path {
             PathBuf::from(path)
         } else {
-            let db = Path::new(db_path);
-            let db_dir = db.parent().unwrap_or_else(|| Path::new("."));
+            let db_dir = db_path_obj.parent().unwrap_or_else(|| Path::new("."));
             db_dir.join("vault")
         };
 
         // Create vault directory if it doesn't exist
         std::fs::create_dir_all(&vault).map_err(|e| format!("Failed to create vault dir: {}", e))?;
 
+        // Start the background ingestion worker
+        let ingestion_tx = crate::ingestion::start_ingestion_worker(pool.clone(), vault.clone());
+
         Ok(AppService {
-            conn: Arc::new(Mutex::new(conn)),
+            pool,
+            db_path: db_path_obj,
             vault_path: vault,
+            ingestion_tx: Arc::new(tokio::sync::Mutex::new(Some(ingestion_tx))),
         })
     }
 
@@ -63,7 +71,7 @@ impl AppService {
     ///
     /// The watcher runs in a background thread and continues until the receiver is dropped.
     pub fn start_vault_watcher(&self) -> Result<(), String> {
-        let conn_clone = Arc::clone(&self.conn);
+        let pool = self.pool.clone();
         let vault_path = self.vault_path.clone();
 
         // Start the file watcher
@@ -77,7 +85,7 @@ impl AppService {
         std::thread::spawn(move || {
             while let Ok(event) = watcher_rx.recv() {
                 // Process the watcher event: sync to database
-                if let Err(e) = Self::sync_external_note(&conn_clone, event) {
+                if let Err(e) = Self::sync_external_note(&pool, event) {
                     eprintln!("Failed to sync external note change: {}", e);
                 }
             }
@@ -89,12 +97,12 @@ impl AppService {
     /// Sync a note from an external file change into the database.
     /// This is called when the file watcher detects a change to a markdown file.
     fn sync_external_note(
-        conn: &Arc<Mutex<Connection>>,
+        pool: &DbPool,
         event: NoteWatcherEvent,
     ) -> Result<(), String> {
-        let conn = conn
-            .lock()
-            .map_err(|_| "Failed to acquire database lock".to_string())?;
+        let conn = pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         // Insert or replace the note in the database
         let note = &event.note;
@@ -133,9 +141,49 @@ impl AppService {
         )
         .map_err(|e| format!("Failed to insert note: {}", e))?;
 
+        // Process external block changes: delete old blocks and insert new ones
+        conn.execute(
+            "DELETE FROM block WHERE note_id = ?1",
+            rusqlite::params![note.id.to_string()],
+        )
+        .map_err(|e| format!("Failed to delete old blocks: {}", e))?;
+
+        // Insert the new blocks from the parsed markdown
+        for block in &event.blocks {
+            let created_at_str = block
+                .created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| "unknown".to_string());
+            let updated_at_str = block
+                .updated_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| "unknown".to_string());
+            let created_by_json = serde_json::to_string(&block.created_by)
+                .map_err(|e| format!("Failed to serialize block actor: {}", e))?;
+            let content_json = serde_json::to_string(&block.content)
+                .map_err(|e| format!("Failed to serialize block content: {}", e))?;
+
+            conn.execute(
+                "INSERT INTO block (id, note_id, block_type, content, \"order\", created_at, created_by, version, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    block.id.to_string(),
+                    note.id.to_string(),
+                    "markdown",
+                    content_json,
+                    block.order,
+                    created_at_str,
+                    created_by_json,
+                    block.version as i64,
+                    updated_at_str,
+                ],
+            )
+            .map_err(|e| format!("Failed to insert block: {}", e))?;
+        }
+
         println!(
-            "✓ Synced external note: {} ({})",
-            note.title, event.file_path.display()
+            "✓ Synced external note: {} ({} blocks from {})",
+            note.title, event.blocks.len(), event.file_path.display()
         );
 
         Ok(())
@@ -158,9 +206,9 @@ impl AppService {
         let note_id = note.id.to_string();
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         note_repo
@@ -177,9 +225,9 @@ impl AppService {
         let parsed_id = pkm_core::id::NoteId(uuid);
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let note = note_repo
@@ -192,9 +240,9 @@ impl AppService {
     /// List all notes with optional limit.
     pub fn list_notes(&self, limit: Option<usize>) -> Result<Vec<(String, String)>, String> {
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let notes = note_repo
@@ -214,9 +262,9 @@ impl AppService {
         let parsed_id = pkm_core::id::NoteId(uuid);
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let note = note_repo
@@ -238,9 +286,9 @@ impl AppService {
         let parsed_id = pkm_core::id::NoteId(uuid);
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let mut note = note_repo
@@ -267,9 +315,9 @@ impl AppService {
         let parsed_id = pkm_core::id::NoteId(uuid);
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         note_repo
@@ -301,9 +349,9 @@ impl AppService {
         let view_id = view.id.to_string();
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let view_repo = SqliteViewRepo { conn: &conn };
         view_repo
@@ -316,9 +364,9 @@ impl AppService {
     /// List all views with optional limit.
     pub fn list_views(&self, limit: Option<usize>) -> Result<Vec<View>, String> {
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let view_repo = SqliteViewRepo { conn: &conn };
         view_repo
@@ -333,9 +381,9 @@ impl AppService {
         let parsed_id = pkm_core::id::ViewId(uuid);
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let view_repo = SqliteViewRepo { conn: &conn };
         view_repo
@@ -350,9 +398,9 @@ impl AppService {
             .ok_or_else(|| format!("View not found: {}", view_id))?;
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let source_repo = SqliteSourceRepo { conn: &conn };
         let sources = source_repo
@@ -406,18 +454,30 @@ impl AppService {
         limit: Option<usize>,
     ) -> Result<Vec<(String, String)>, String> {
         use pkm_core::id::ObjectRef;
+        use std::sync::{Arc, Mutex};
+        use pkm_storage::open;
 
         let search_query = parse_query(SearchMode::FuzzyText, query);
-        let retriever = SqliteRetriever::new(self.conn.clone());
+
+        // For search, we need a stable connection that lives across the search operation.
+        // Since SqliteRetriever requires Arc<Mutex<Connection>>, we open a dedicated connection
+        // for the search operation. This is acceptable because:
+        // 1. Reads in WAL mode don't block writes
+        // 2. Multiple read connections are efficient in SQLite
+        let search_conn = open(&self.db_path)
+            .map_err(|e| format!("Failed to open search connection: {}", e))?;
+        let conn_arc = Arc::new(Mutex::new(search_conn));
+        let retriever = SqliteRetriever::new(conn_arc);
 
         let hits = retriever
             .search(&search_query)
             .map_err(|e| format!("Search failed: {}", e))?;
 
+        // Get a fresh connection for note lookups
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         let mut results = Vec::new();
@@ -450,9 +510,9 @@ impl AppService {
             Some(view) => {
                 if let ViewParams::GraphView(params) = &view.params {
                     let conn = self
-                        .conn
-                        .lock()
-                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+                        .pool
+                        .get()
+                        .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
                     // If positions are stored in params, use them
                     if !params.node_positions.is_empty() {
@@ -542,9 +602,9 @@ impl AppService {
         let parsed_id = pkm_core::id::EntityId(uuid);
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let entity_repo = SqliteEntityRepo { conn: &conn };
         let entity = entity_repo
@@ -582,9 +642,9 @@ impl AppService {
         let root_id = pkm_core::id::EntityId(uuid);
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let entity_repo = SqliteEntityRepo { conn: &conn };
         let link_repo = SqliteLinkRepo { conn: &conn };
@@ -740,9 +800,9 @@ impl AppService {
             Some(view) => {
                 if let ViewParams::CanvasView(params) = &view.params {
                     let conn = self
-                        .conn
-                        .lock()
-                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+                        .pool
+                        .get()
+                        .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
                     let source_repo = SqliteSourceRepo { conn: &conn };
                     let sources = source_repo
@@ -818,9 +878,9 @@ impl AppService {
             Some(view) => {
                 if let ViewParams::Timeline(params) = &view.params {
                     let conn = self
-                        .conn
-                        .lock()
-                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+                        .pool
+                        .get()
+                        .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
                     let source_repo = SqliteSourceRepo { conn: &conn };
                     let mut sources = source_repo
@@ -900,9 +960,9 @@ impl AppService {
             Some(view) => {
                 if let ViewParams::GraphView(_params) = &view.params {
                     let conn = self
-                        .conn
-                        .lock()
-                        .map_err(|_| "Failed to acquire db lock".to_string())?;
+                        .pool
+                        .get()
+                        .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
                     // Get embeddings for all sources
                     let embeddings = embeddings::get_embeddings_by_type(&conn, "source")
@@ -940,9 +1000,9 @@ impl AppService {
             .map_err(|_| format!("Invalid ID: {}", target_id))?;
 
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire db lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let entity_repo = SqliteEntityRepo { conn: &conn };
         let link_repo = SqliteLinkRepo { conn: &conn };
@@ -1077,9 +1137,9 @@ impl AppService {
     /// All changes are still recorded in the agent_action audit log for potential rollback.
     pub fn handle_ai_action(&self, operation: pkm_agent::Operation) -> Result<String, String> {
         let conn = self
-            .conn
-            .lock()
-            .map_err(|_| "Failed to acquire database lock".to_string())?;
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         let action_repo = pkm_storage::SqliteAgentActionRepo { conn: &conn };
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
@@ -1104,5 +1164,82 @@ impl AppService {
         ).map_err(|e| format!("Failed to apply action: {}", e))?;
 
         Ok(action.id.to_string())
+    }
+
+    /// Ingest bulk links from raw pasted text.
+    /// Extracts URLs, queues them for background processing, and returns the count.
+    pub async fn ingest_bulk_links(&self, raw_text: String) -> Result<usize, String> {
+        // Extract all URLs from the pasted text
+        let urls = crate::ingestion::extract_urls(&raw_text);
+        let count = urls.len();
+
+        if count == 0 {
+            return Ok(0);
+        }
+
+        // Send to background worker
+        let tx_lock = self.ingestion_tx.lock().await;
+        if let Some(tx) = tx_lock.as_ref() {
+            tx.send(urls)
+                .await
+                .map_err(|e| format!("Failed to queue ingestion: {}", e))?;
+        } else {
+            return Err("Ingestion worker not available".to_string());
+        }
+
+        Ok(count)
+    }
+
+    /// Rollback all autonomous ingestion actions from the past N minutes.
+    /// This is the "nuclear undo" for when bulk ingestion produces bad data.
+    pub fn rollback_recent_autonomous_ingestion(
+        &self,
+        minutes: i64,
+    ) -> Result<usize, String> {
+        let conn = self
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
+
+        // Find all actions by Autonomous-Ingestor in the last X minutes
+        let query = "
+            SELECT id FROM agent_action
+            WHERE actor LIKE ?1
+              AND created_at > datetime('now', ?2 || ' minutes')
+            ORDER BY created_at DESC
+        ";
+
+        let mut stmt = conn
+            .prepare(query)
+            .map_err(|e| format!("Failed to prepare query: {}", e))?;
+
+        let action_ids: Vec<String> = stmt
+            .query_map(rusqlite::params!["%Autonomous-Ingestor%", format!("-{}", minutes)], |row| {
+                row.get(0)
+            })
+            .map_err(|e| format!("Failed to query actions: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to collect action IDs: {}", e))?;
+
+        let count = action_ids.len();
+
+        // Rollback each action
+        let action_repo = pkm_storage::SqliteAgentActionRepo { conn: &conn };
+        let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
+
+        for id_str in action_ids {
+            if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
+                let action_id = pkm_core::id::AgentActionId(uuid);
+                let _ = pkm_agent::rollback_action(
+                    action_id,
+                    &action_repo,
+                    &note_repo,
+                    None,
+                    None,
+                );
+            }
+        }
+
+        Ok(count)
     }
 }

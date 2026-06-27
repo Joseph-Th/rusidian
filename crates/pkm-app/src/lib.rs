@@ -10,8 +10,10 @@
 //! - UI-shell wiring only (Tauri setup, window management, command routing)
 
 pub mod commands;
+pub mod db_pool;
 pub mod service;
 pub mod watcher;
+pub mod ingestion;
 
 pub use service::AppService;
 pub use watcher::{watch_vault, NoteWatcherEvent};

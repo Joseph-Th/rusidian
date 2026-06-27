@@ -16,6 +16,7 @@
 //! delete_without_recovery, ...) must NEVER be added here.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use pkm_core::agent_action::{AgentAction, AgentActionStatus, OperationKind};
 use pkm_core::block::BlockContent;
@@ -68,6 +69,7 @@ pub enum Operation {
     },
     /// Update the content of an existing block.
     UpdateBlock {
+        note_id: NoteId,
         block_id: BlockId,
         new_content: BlockContent,
     },
@@ -222,8 +224,19 @@ pub fn execute(
         AgentActionStatus::Applied
     };
 
-    // For MergeEntities, populate the diff with loser IDs so rollback can restore them
+    // Store operation payload in diff for later execution
     let diff = match &req.operation {
+        Operation::UpdateBlock {
+            note_id,
+            block_id,
+            new_content,
+        } => {
+            serde_json::json!({
+                "note_id": note_id.to_string(),
+                "block_id": block_id.to_string(),
+                "new_content": new_content,
+            })
+        }
         Operation::MergeEntities { loser_ids, .. } => {
             serde_json::json!({
                 "loser_ids": loser_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
@@ -255,7 +268,7 @@ pub fn execute(
 pub fn apply_action(
     action_id: AgentActionId,
     action_repo: &dyn AgentActionRepo,
-    _note_repo: &dyn NoteRepo,
+    note_repo: &dyn NoteRepo,
     link_repo: Option<&dyn LinkRepo>,
 ) -> Result<AgentAction> {
     // Fetch the action
@@ -273,10 +286,29 @@ pub fn apply_action(
     // Handle the operation based on its kind
     match action.operation {
         OperationKind::UpdateBlock => {
-            // The operation data is in the persisted action but not directly accessible.
-            // For S2 testing, we need to have the operation data available.
-            // For now, we'll create a test helper that provides this.
-            // In production, we'd reconstruct the operation from stored metadata.
+            // Extract the block update data from the persisted diff
+            if let (Some(note_id_str), Some(block_id_str), Some(new_content)) = (
+                action.diff.get("note_id").and_then(|v| v.as_str()),
+                action.diff.get("block_id").and_then(|v| v.as_str()),
+                action.diff.get("new_content"),
+            ) {
+                // Parse IDs from strings
+                let note_uuid = Uuid::parse_str(note_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid note_id in action diff".into()))?;
+                let block_uuid = Uuid::parse_str(block_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid block_id in action diff".into()))?;
+
+                let note_id = NoteId(note_uuid);
+                let block_id = BlockId(block_uuid);
+
+                // Deserialize new_content
+                let content: BlockContent = serde_json::from_value(new_content.clone())
+                    .map_err(|_| AgentError::Rejected("Invalid new_content in action diff".into()))?;
+
+                // Actually execute the block update
+                note_repo.update_block(note_id, block_id, content)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to update block: {}", e)))?;
+            }
 
             // Mark as Applied
             action_repo.set_status(action_id, AgentActionStatus::Applied)?;
@@ -343,10 +375,9 @@ fn extract_loser_ids_from_diff(diff: &serde_json::Value) -> Result<Option<Vec<En
         let mut loser_ids = Vec::new();
         for id_val in loser_ids_arr {
             if let Some(id_str) = id_val.as_str() {
-                // Try to deserialize the string as a JSON string (which will be an EntityId)
-                if let Ok(entity_id) = serde_json::from_str::<EntityId>(&format!("\"{}\"", id_str))
-                {
-                    loser_ids.push(entity_id);
+                // Parse the UUID string directly and wrap it in EntityId
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    loser_ids.push(EntityId(uuid));
                 }
             }
         }

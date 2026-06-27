@@ -102,13 +102,21 @@ fn search_link_traversal(
     let mut results_limit = 100;
 
     while let Some(current) = queue.pop_front() {
+        // Early exit if we've reached the result limit
+        if results_limit <= 0 {
+            break;
+        }
+
         let current_depth = *depth.get(&object_ref_to_string(&current)).unwrap_or(&0);
 
-        if current_depth < MAX_DEPTH && results_limit > 0 {
+        if current_depth < MAX_DEPTH {
             // Get links from current object
             let linked_objects = get_linked_objects(conn, &current)?;
 
             for obj in linked_objects {
+                if results_limit <= 0 {
+                    break;
+                }
                 let obj_str = object_ref_to_string(&obj);
                 if !visited.contains(&obj_str) {
                     visited.insert(obj_str.clone());
@@ -330,18 +338,23 @@ fn create_hit_for_object(
 /// FTS5 operator injection. Strips reserved operators (AND, OR, NOT, NEAR, *, ^, etc.)
 /// and special characters that could break the query, then wraps the result in quotes
 /// to treat it as a literal phrase.
-fn fts_expr(text: &str, fuzzy: bool) -> String {
+fn fts_expr(text: &str, fuzzy: bool) -> Option<String> {
     // Sanitize: strip out FTS5 reserved operators and special characters
     let sanitized = sanitize_fts_input(text);
+
+    // Return None if sanitization results in an empty string (prevents FTS5 syntax errors)
+    if sanitized.trim().is_empty() {
+        return None;
+    }
 
     // Escape inner double-quotes per FTS5 spec (double them).
     let escaped = sanitized.replace('"', "\"\"");
 
-    if fuzzy {
+    Some(if fuzzy {
         format!("\"{}\"*", escaped)
     } else {
         format!("\"{}\"", escaped)
-    }
+    })
 }
 
 /// Sanitize user input for FTS5 queries by removing reserved operators and keywords.
@@ -383,7 +396,11 @@ fn search_notes_fts(
     text: &str,
     fuzzy: bool,
 ) -> pkm_core::Result<Vec<SearchHit>> {
-    let expr = fts_expr(text, fuzzy);
+    let expr = match fts_expr(text, fuzzy) {
+        Some(e) => e,
+        None => return Ok(Vec::new()),  // Empty query results in no hits
+    };
+
     let mut stmt = conn
         .prepare("SELECT id FROM note_fts WHERE note_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
@@ -429,7 +446,10 @@ fn search_blocks_fts(
     text: &str,
     fuzzy: bool,
 ) -> pkm_core::Result<Vec<SearchHit>> {
-    let expr = fts_expr(text, fuzzy);
+    let expr = match fts_expr(text, fuzzy) {
+        Some(e) => e,
+        None => return Ok(Vec::new()),
+    };
     let mut stmt = conn
         .prepare("SELECT id FROM block_fts WHERE block_fts MATCH ? LIMIT 100")
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
