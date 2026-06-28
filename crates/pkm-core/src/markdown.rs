@@ -1,7 +1,7 @@
 //! Markdown import/export for notes and blocks.
 //!
 //! Pure, testable functions to convert between Note/Block structures and markdown.
-//! These are stateless and keep all IO at the boundary (pkm-storage).
+//! These are stateless and keep all IO at the boundary.
 //!
 //! The markdown format includes:
 //! - Title as a level-1 heading (# Title)

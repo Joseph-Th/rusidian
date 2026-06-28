@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 use pkm_core::id::{NoteId, BlockId, EntityId, LinkId, SourceId, ViewId};
 use pkm_core::{note::Note, block::Block, entity::Entity, link::Link, source::Source, view::View};
@@ -48,7 +48,7 @@ impl VaultState {
         }
     }
 
-    /// Rebuilds fast-lookup indexes (called on boot or after a link changes)
+    /// Rebuilds fast-lookup indexes (called on boot)
     pub fn rebuild_indexes(&mut self) {
         self.links_by_source.clear();
         self.links_by_target.clear();
@@ -59,6 +59,26 @@ impl VaultState {
             
             self.links_by_source.entry(from_key).or_default().push(link.id);
             self.links_by_target.entry(to_key).or_default().push(link.id);
+        }
+    }
+
+    /// Incrementally add a link to the lookup indexes
+    pub fn index_link_add(&mut self, link: &pkm_core::link::Link) {
+        let from_key = format!("{:?}", link.from);
+        let to_key = format!("{:?}", link.to);
+        self.links_by_source.entry(from_key).or_default().push(link.id);
+        self.links_by_target.entry(to_key).or_default().push(link.id);
+    }
+
+    /// Incrementally remove a link from the lookup indexes
+    pub fn index_link_remove(&mut self, link: &pkm_core::link::Link) {
+        let from_key = format!("{:?}", link.from);
+        if let Some(vec) = self.links_by_source.get_mut(&from_key) {
+            vec.retain(|&id| id != link.id);
+        }
+        let to_key = format!("{:?}", link.to);
+        if let Some(vec) = self.links_by_target.get_mut(&to_key) {
+            vec.retain(|&id| id != link.id);
         }
     }
 }
@@ -132,14 +152,10 @@ pub fn load_vault(vault_path: &Path) -> SharedVault {
         }
     }
 
-    // 4. Load agent actions from .pkm/actions.jsonl
-    if let Ok(actions_file) = fs::read_to_string(pkm_dir.join("actions.jsonl")) {
-        for line in actions_file.lines() {
-            if !line.trim().is_empty() {
-                if let Ok(action) = serde_json::from_str::<AgentAction>(line) {
-                    state.actions.push(action);
-                }
-            }
+    // 4. Load agent actions from .pkm/actions.json
+    if let Ok(actions_data) = fs::read_to_string(pkm_dir.join("actions.json")) {
+        if let Ok(actions) = serde_json::from_str::<Vec<AgentAction>>(&actions_data) {
+            state.actions = actions;
         }
     }
 

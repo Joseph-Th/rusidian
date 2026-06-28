@@ -23,8 +23,11 @@ impl FsViewRepo {
 
 impl ViewRepo for FsViewRepo {
     fn create(&self, view: &View) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        state.views.insert(view.id, view.clone());
+        {
+            let mut state = self.state.write().unwrap();
+            state.views.insert(view.id, view.clone());
+        }
+        let state = self.state.read().unwrap();
         self.save_views(&state)?;
         Ok(())
     }

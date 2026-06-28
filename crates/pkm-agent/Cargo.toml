@@ -8,8 +8,7 @@ rust-version.workspace = true
 # The agent-safety layer. Turns typed operations into audited, reversible
 # mutations. It is the ONLY sanctioned path for agent-originated changes to
 # user-facing knowledge. Depends ONLY on pkm-core and operates against the core
-# repository PORTS (&dyn SourceRepo, etc.) — it must not depend on pkm-storage
-# or touch SQLite directly.
+# repository PORTS (&dyn SourceRepo, etc.).
 
 [dependencies]
 pkm-core = { workspace = true }

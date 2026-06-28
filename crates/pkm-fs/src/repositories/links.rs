@@ -23,9 +23,12 @@ impl FsLinkRepo {
 
 impl LinkRepo for FsLinkRepo {
     fn create(&self, link: &Link) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        state.links.insert(link.id, link.clone());
-        state.rebuild_indexes();
+        {
+            let mut state = self.state.write().unwrap();
+            state.links.insert(link.id, link.clone());
+            state.index_link_add(link);
+        }
+        let state = self.state.read().unwrap();
         self.save_links(&state)?;
         Ok(())
     }
@@ -62,33 +65,49 @@ impl LinkRepo for FsLinkRepo {
     }
 
     fn set_to(&self, link_id: LinkId, new_to: ObjectRef) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        if let Some(link) = state.links.get_mut(&link_id) {
+        {
+            let mut state = self.state.write().unwrap();
+            let mut link = state.links.remove(&link_id).ok_or_else(|| {
+                pkm_core::CoreError::Invariant(format!("Link not found: {}", link_id))
+            })?;
+            state.index_link_remove(&link);
             link.to = new_to;
             link.updated_at = pkm_core::Timestamp::now_utc();
             link.version += 1;
+            state.index_link_add(&link);
+            state.links.insert(link_id, link);
         }
-        state.rebuild_indexes();
+        let state = self.state.read().unwrap();
         self.save_links(&state)?;
         Ok(())
     }
 
     fn set_from(&self, link_id: LinkId, new_from: ObjectRef) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        if let Some(link) = state.links.get_mut(&link_id) {
+        {
+            let mut state = self.state.write().unwrap();
+            let mut link = state.links.remove(&link_id).ok_or_else(|| {
+                pkm_core::CoreError::Invariant(format!("Link not found: {}", link_id))
+            })?;
+            state.index_link_remove(&link);
             link.from = new_from;
             link.updated_at = pkm_core::Timestamp::now_utc();
             link.version += 1;
+            state.index_link_add(&link);
+            state.links.insert(link_id, link);
         }
-        state.rebuild_indexes();
+        let state = self.state.read().unwrap();
         self.save_links(&state)?;
         Ok(())
     }
 
     fn delete(&self, link_id: LinkId) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        state.links.remove(&link_id);
-        state.rebuild_indexes();
+        {
+            let mut state = self.state.write().unwrap();
+            if let Some(link) = state.links.remove(&link_id) {
+                state.index_link_remove(&link);
+            }
+        }
+        let state = self.state.read().unwrap();
         self.save_links(&state)?;
         Ok(())
     }

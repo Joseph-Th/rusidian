@@ -23,8 +23,11 @@ impl FsEntityRepo {
 
 impl EntityRepo for FsEntityRepo {
     fn create(&self, entity: &Entity) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        state.entities.insert(entity.id, entity.clone());
+        {
+            let mut state = self.state.write().unwrap();
+            state.entities.insert(entity.id, entity.clone());
+        }
+        let state = self.state.read().unwrap();
         self.save_entities(&state)?;
         Ok(())
     }
@@ -35,23 +38,29 @@ impl EntityRepo for FsEntityRepo {
     }
 
     fn set_merged_into(&self, loser_id: EntityId, survivor_id: EntityId) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        if let Some(loser) = state.entities.get_mut(&loser_id) {
-            loser.merged_into = Some(survivor_id);
-            loser.updated_at = pkm_core::Timestamp::now_utc();
-            loser.version += 1;
+        {
+            let mut state = self.state.write().unwrap();
+            if let Some(loser) = state.entities.get_mut(&loser_id) {
+                loser.merged_into = Some(survivor_id);
+                loser.updated_at = pkm_core::Timestamp::now_utc();
+                loser.version += 1;
+            }
         }
+        let state = self.state.read().unwrap();
         self.save_entities(&state)?;
         Ok(())
     }
 
     fn clear_merged_into(&self, entity_id: EntityId) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        if let Some(entity) = state.entities.get_mut(&entity_id) {
-            entity.merged_into = None;
-            entity.updated_at = pkm_core::Timestamp::now_utc();
-            entity.version += 1;
+        {
+            let mut state = self.state.write().unwrap();
+            if let Some(entity) = state.entities.get_mut(&entity_id) {
+                entity.merged_into = None;
+                entity.updated_at = pkm_core::Timestamp::now_utc();
+                entity.version += 1;
+            }
         }
+        let state = self.state.read().unwrap();
         self.save_entities(&state)?;
         Ok(())
     }

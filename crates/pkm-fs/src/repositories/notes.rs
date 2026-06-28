@@ -28,9 +28,16 @@ impl FsNoteRepo {
 
 impl NoteRepo for FsNoteRepo {
     fn create(&self, note: &Note) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        state.notes.insert(note.id, note.clone());
-        self.save_note_to_disk(note, &state)?;
+        let note_clone = {
+            let mut state = self.state.write().unwrap();
+            state.notes.insert(note.id, note.clone());
+            note.clone()
+        };
+        let file_path = self.vault_path.join("notes").join(note_clone.file_name());
+        std::fs::write(&file_path, "")
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+        let state = self.state.read().unwrap();
+        self.save_note_to_disk(&note_clone, &state)?;
         Ok(())
     }
 
@@ -50,13 +57,19 @@ impl NoteRepo for FsNoteRepo {
     }
 
     fn update(&self, note: &Note) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        let old_note = state.notes.get(&note.id).cloned();
-        state.notes.insert(note.id, note.clone());
+        let (old_file_name, needs_cleanup) = {
+            let mut state = self.state.write().unwrap();
+            let old_note = state.notes.get(&note.id).cloned();
+            state.notes.insert(note.id, note.clone());
+            let old_fn = old_note.as_ref().map(|n| n.file_name());
+            let cleanup = old_fn.is_some() && old_fn.as_deref() != Some(&note.file_name());
+            (old_fn, cleanup)
+        };
+        let state = self.state.read().unwrap();
         self.save_note_to_disk(note, &state)?;
-        if let Some(old) = old_note {
-            if old.file_name() != note.file_name() {
-                let old_path = self.vault_path.join("notes").join(old.file_name());
+        if needs_cleanup {
+            if let Some(old_name) = old_file_name {
+                let old_path = self.vault_path.join("notes").join(old_name);
                 let _ = std::fs::remove_file(old_path);
             }
         }
@@ -64,36 +77,35 @@ impl NoteRepo for FsNoteRepo {
     }
 
     fn delete(&self, id: NoteId) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        if let Some(note) = state.notes.remove(&id) {
-            let file_path = self.vault_path.join("notes").join(note.file_name());
-            let _ = std::fs::remove_file(file_path);
-            
-            // Delete blocks associated with note
-            state.blocks.retain(|_, b| b.note_id != id);
-            
-            // Also clean up links originating from/to this note or its blocks
-            state.links.retain(|_, link| {
-                let from_match = match link.from {
-                    pkm_core::id::ObjectRef::Note(nid) => nid == id,
-                    pkm_core::id::ObjectRef::Block(bid) => note.blocks.contains(&bid),
-                    _ => false,
-                };
-                let to_match = match link.to {
-                    pkm_core::id::ObjectRef::Note(nid) => nid == id,
-                    pkm_core::id::ObjectRef::Block(bid) => note.blocks.contains(&bid),
-                    _ => false,
-                };
-                !from_match && !to_match
-            });
-            state.rebuild_indexes();
-            
-            // Save links metadata
-            let links_path = self.vault_path.join(".pkm").join("links.json");
-            if let Ok(links_json) = serde_json::to_string_pretty(&state.links) {
-                let _ = std::fs::write(links_path, links_json);
+        let file_path = {
+            let mut state = self.state.write().unwrap();
+            if let Some(note) = state.notes.remove(&id) {
+                let fp = self.vault_path.join("notes").join(note.file_name());
+                state.blocks.retain(|_, b| b.note_id != id);
+                state.links.retain(|_, link| {
+                    let from_match = match link.from {
+                        pkm_core::id::ObjectRef::Note(nid) => nid == id,
+                        pkm_core::id::ObjectRef::Block(bid) => note.blocks.contains(&bid),
+                        _ => false,
+                    };
+                    let to_match = match link.to {
+                        pkm_core::id::ObjectRef::Note(nid) => nid == id,
+                        pkm_core::id::ObjectRef::Block(bid) => note.blocks.contains(&bid),
+                        _ => false,
+                    };
+                    !from_match && !to_match
+                });
+                state.rebuild_indexes();
+                let links_path = self.vault_path.join(".pkm").join("links.json");
+                if let Ok(links_json) = serde_json::to_string_pretty(&state.links) {
+                    let _ = std::fs::write(links_path, links_json);
+                }
+                fp
+            } else {
+                return Ok(());
             }
-        }
+        };
+        let _ = std::fs::remove_file(file_path);
         Ok(())
     }
 
@@ -103,15 +115,17 @@ impl NoteRepo for FsNoteRepo {
         block_id: BlockId,
         new_content: BlockContent,
     ) -> Result<Block> {
-        let mut state = self.state.write().unwrap();
-        let block = state.blocks.get_mut(&block_id).ok_or_else(|| {
-            pkm_core::CoreError::Invariant(format!("Block not found: {}", block_id))
-        })?;
-        block.content = new_content;
-        block.version += 1;
-        block.updated_at = pkm_core::Timestamp::now_utc();
-        let updated_block = block.clone();
-        
+        let updated_block = {
+            let mut state = self.state.write().unwrap();
+            let block = state.blocks.get_mut(&block_id).ok_or_else(|| {
+                pkm_core::CoreError::Invariant(format!("Block not found: {}", block_id))
+            })?;
+            block.content = new_content;
+            block.version += 1;
+            block.updated_at = pkm_core::Timestamp::now_utc();
+            block.clone()
+        };
+        let state = self.state.read().unwrap();
         if let Some(note) = state.notes.get(&note_id) {
             self.save_note_to_disk(note, &state)?;
         }
@@ -136,27 +150,34 @@ impl NoteRepo for FsNoteRepo {
     }
 
     fn create_block(&self, block: &Block) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        state.blocks.insert(block.id, block.clone());
         let note_id = block.note_id;
-
-        if let Some(note) = state.notes.get_mut(&note_id) {
-            if !note.blocks.contains(&block.id) {
-                note.blocks.push(block.id);
+        {
+            let mut state = self.state.write().unwrap();
+            state.blocks.insert(block.id, block.clone());
+            if let Some(note) = state.notes.get_mut(&note_id) {
+                if !note.blocks.contains(&block.id) {
+                    note.blocks.push(block.id);
+                }
             }
-            let note_clone = note.clone();
-            self.save_note_to_disk(&note_clone, &state)?;
+        }
+        let state = self.state.read().unwrap();
+        if let Some(note) = state.notes.get(&note_id) {
+            self.save_note_to_disk(note, &state)?;
         }
         Ok(())
     }
 
     fn delete_block(&self, note_id: NoteId, block_id: BlockId) -> Result<()> {
-        let mut state = self.state.write().unwrap();
-        state.blocks.remove(&block_id);
-        if let Some(note) = state.notes.get_mut(&note_id) {
-            note.blocks.retain(|id| *id != block_id);
-            let note_clone = note.clone();
-            self.save_note_to_disk(&note_clone, &state)?;
+        {
+            let mut state = self.state.write().unwrap();
+            state.blocks.remove(&block_id);
+            if let Some(note) = state.notes.get_mut(&note_id) {
+                note.blocks.retain(|id| *id != block_id);
+            }
+        }
+        let state = self.state.read().unwrap();
+        if let Some(note) = state.notes.get(&note_id) {
+            self.save_note_to_disk(note, &state)?;
         }
         Ok(())
     }

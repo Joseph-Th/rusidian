@@ -5,9 +5,7 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-# Pure query-parsing + ranking logic. Depends ONLY on pkm-core. The concrete
-# SQLite/FTS Retriever implementation lives in pkm-storage (it owns SQL); this
-# crate must not depend on storage or touch SQLite.
+# Pure query-parsing + ranking logic. Depends ONLY on pkm-core.
 
 [dependencies]
 pkm-core = { workspace = true }

@@ -1,12 +1,9 @@
 //! Ports: the trait boundaries the rest of the system programs against.
 //!
-//! This is the hexagonal seam. `pkm-storage` and `pkm-search` provide concrete
+//! This is the hexagonal seam. `pkm-fs` and `pkm-search` provide concrete
 //! IMPLEMENTATIONS of these traits; `pkm-agent`/`pkm-ingestion` and the app
-//! depend only on the TRAITS. Consequences:
-//! - No crate except `pkm-storage` ever touches SQLite. Persistence details do
-//!   not leak (AGENTS.md "Forbidden Shortcuts": agents must not scrape / reach
-//!   around the typed API).
-//! - The db engine or search backend can be swapped without changing callers.
+//! depend only on the TRAITS. The db engine or search backend can be swapped
+//! without changing callers.
 //!
 //! All methods return [`crate::Result`]; implementations map their internal
 //! errors (sqlite, io) into [`crate::CoreError`]. No method panics.

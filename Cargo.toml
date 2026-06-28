@@ -24,9 +24,6 @@ serde_yaml = "0.9"
 thiserror = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.25"
 sha2 = "0.10"
 tauri = "2"
 tauri-build = "2"
@@ -38,13 +35,7 @@ url = "2"
 chrono = { version = "0.4", features = ["serde"] }
 
 # Internal crates referenced by path. Dependency direction is strict and
-# acyclic (see README "Dependency graph"):
-#   pkm-core       <- no internal deps
-#   pkm-storage    <- pkm-core            (implements core ports; owns SQL)
-#   pkm-search     <- pkm-core            (pure query/ranking logic)
-#   pkm-agent      <- pkm-core            (operates via core ports)
-#   pkm-ingestion  <- pkm-core
-#   pkm-app        <- all (wires concrete impls to ports)  [later]
+# acyclic.
 pkm-core = { path = "crates/pkm-core" }
 pkm-fs = { path = "crates/pkm-fs" }
 pkm-search = { path = "crates/pkm-search" }

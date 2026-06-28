@@ -1,8 +1,7 @@
-use pkm_core::ports::{Retriever, SearchQuery, SearchHit, SearchMode};
+use pkm_core::ports::{Retriever, SearchQuery, SearchHit};
 use pkm_core::provenance::ContentStatus;
 use pkm_core::id::ObjectRef;
 use crate::state::SharedVault;
-use rayon::prelude::*;
 use pkm_search::rank;
 
 pub struct FsRetriever {
@@ -11,109 +10,110 @@ pub struct FsRetriever {
 
 impl Retriever for FsRetriever {
     fn search(&self, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
-        let state = self.state.read().unwrap();
         let search_term = query.text.to_lowercase();
-        
+
         if search_term.is_empty() {
             return Ok(vec![]);
         }
 
-        let mut results = Vec::new();
+        // Extract search data under lock, then drop to avoid blocking writes
+        let (block_data, note_data, source_data, entity_data) = {
+            let state = self.state.read().unwrap();
 
-        // 1. Search blocks
-        let block_hits: Vec<SearchHit> = state.blocks.par_iter()
-            .filter_map(|(id, block)| {
-                let text = match &block.content {
+            let blocks: Vec<_> = state.blocks.values().map(|b| {
+                let text = match &b.content {
                     pkm_core::block::BlockContent::Markdown { text } => text.clone(),
                     pkm_core::block::BlockContent::Table { headers, rows } => {
                         format!("{} {}", headers.join(" "), rows.iter().map(|r| r.join(" ")).collect::<Vec<_>>().join(" "))
                     }
                     pkm_core::block::BlockContent::Math { expression, .. } => expression.clone(),
                     pkm_core::block::BlockContent::Media { alt_text, .. } => alt_text.clone(),
-                    _ => return None,
+                    _ => String::new(),
                 };
-                let text_lower = text.to_lowercase();
-                if text_lower.contains(&search_term) {
-                    Some(SearchHit {
-                        object: ObjectRef::Block(*id),
-                        status: ContentStatus::UserAuthored,
-                        score: None,
-                        snippet: extract_snippet(&text, &search_term, 150),
-                        created_at: Some(block.created_at.to_string()),
-                        project: None,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-        results.extend(block_hits);
+                (b.id, text, b.created_at.to_string())
+            }).collect();
+
+            let notes: Vec<_> = state.notes.values().map(|n| {
+                let project = n.metadata.get("project")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()));
+                (n.id, n.title.clone(), n.created_at.to_string(), project)
+            }).collect();
+
+            let sources: Vec<_> = state.sources.values().map(|s| {
+                (s.id, s.title.clone(), s.raw_content.clone(), s.created_at.to_string())
+            }).collect();
+
+            let entities: Vec<_> = state.entities.values().map(|e| {
+                (e.id, e.name.clone(), e.aliases.clone(), e.created_at.to_string())
+            }).collect();
+
+            (blocks, notes, sources, entities)
+        };
+
+        let mut results = Vec::new();
+
+        // 1. Search blocks
+        for (id, text, created_at) in &block_data {
+            let text_lower = text.to_lowercase();
+            if text_lower.contains(&search_term) {
+                results.push(SearchHit {
+                    object: ObjectRef::Block(*id),
+                    status: ContentStatus::UserAuthored,
+                    score: None,
+                    snippet: extract_snippet(text, &search_term, 150),
+                    created_at: Some(created_at.clone()),
+                    project: None,
+                });
+            }
+        }
 
         // 2. Search notes
-        let note_hits: Vec<SearchHit> = state.notes.par_iter()
-            .filter_map(|(id, note)| {
-                let text_lower = note.title.to_lowercase();
-                if text_lower.contains(&search_term) {
-                    let project = note.metadata.get("project")
-                        .and_then(|v| v.as_str().map(|s| s.to_string()));
-                    Some(SearchHit {
-                        object: ObjectRef::Note(*id),
-                        status: ContentStatus::UserAuthored,
-                        score: None,
-                        snippet: Some(format!("Note: {}", note.title)),
-                        created_at: Some(note.created_at.to_string()),
-                        project,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-        results.extend(note_hits);
+        for (id, title, created_at, project) in &note_data {
+            if title.to_lowercase().contains(&search_term) {
+                results.push(SearchHit {
+                    object: ObjectRef::Note(*id),
+                    status: ContentStatus::UserAuthored,
+                    score: None,
+                    snippet: Some(format!("Note: {}", title)),
+                    created_at: Some(created_at.clone()),
+                    project: project.clone(),
+                });
+            }
+        }
 
         // 3. Search sources
-        let source_hits: Vec<SearchHit> = state.sources.par_iter()
-            .filter_map(|(id, source)| {
-                let title_match = source.title.as_ref().map(|t| t.to_lowercase().contains(&search_term)).unwrap_or(false);
-                let content_match = source.raw_content.to_lowercase().contains(&search_term);
-                if title_match || content_match {
-                    Some(SearchHit {
-                        object: ObjectRef::Source(*id),
-                        status: ContentStatus::RawSource,
-                        score: None,
-                        snippet: extract_snippet(&source.raw_content, &search_term, 150),
-                        created_at: Some(source.created_at.to_string()),
-                        project: None,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-        results.extend(source_hits);
+        for (id, title, raw_content, created_at) in &source_data {
+            let title_match = title.as_ref().map(|t| t.to_lowercase().contains(&search_term)).unwrap_or(false);
+            let content_match = raw_content.to_lowercase().contains(&search_term);
+            if title_match || content_match {
+                results.push(SearchHit {
+                    object: ObjectRef::Source(*id),
+                    status: ContentStatus::RawSource,
+                    score: None,
+                    snippet: extract_snippet(raw_content, &search_term, 150),
+                    created_at: Some(created_at.clone()),
+                    project: None,
+                });
+            }
+        }
 
         // 4. Search entities
-        let entity_hits: Vec<SearchHit> = state.entities.par_iter()
-            .filter_map(|(id, entity)| {
-                let name_match = entity.name.to_lowercase().contains(&search_term);
-                let alias_match = entity.aliases.iter().any(|a| a.to_lowercase().contains(&search_term));
-                if name_match || alias_match {
-                    Some(SearchHit {
-                        object: ObjectRef::Entity(*id),
-                        status: ContentStatus::ExtractedMetadata,
-                        score: None,
-                        snippet: Some(format!("Entity: {}", entity.name)),
-                        created_at: Some(entity.created_at.to_string()),
-                        project: None,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
-        results.extend(entity_hits);
+        for (id, name, aliases, created_at) in &entity_data {
+            let name_match = name.to_lowercase().contains(&search_term);
+            let alias_match = aliases.iter().any(|a| a.to_lowercase().contains(&search_term));
+            if name_match || alias_match {
+                results.push(SearchHit {
+                    object: ObjectRef::Entity(*id),
+                    status: ContentStatus::ExtractedMetadata,
+                    score: None,
+                    snippet: Some(format!("Entity: {}", name)),
+                    created_at: Some(created_at.clone()),
+                    project: None,
+                });
+            }
+        }
 
-        // Apply filters (matching the behavior of SqliteRetriever)
+        // Apply filters
         apply_filters(&mut results, query);
 
         // Rank results using search query
@@ -141,7 +141,7 @@ fn extract_snippet(text: &str, search_term: &str, max_len: usize) -> Option<Stri
                 .take_while(|&end| end <= max_len)
                 .last()
                 .unwrap_or(0);
-            Some(format!("...{}...", snippet[..safe_end].trim()))
+            Some(format!("...{}...", &snippet[..safe_end].trim()))
         }
     } else {
         None

@@ -392,9 +392,6 @@ pub fn apply_action(
             };
             
             note_repo.create_block(&block)?;
-            if let Ok(Some(note)) = note_repo.get(note_id) {
-                note_repo.update(&note)?; // Triggers file save
-            }
         }
         _ => return Err(AgentError::Rejected("Operation not supported for apply".into())),
     }
@@ -470,10 +467,6 @@ pub fn rollback_action(
             let note_id = NoteId(uuid::Uuid::parse_str(after["note_id"].as_str().unwrap()).unwrap());
             let block_id = BlockId(uuid::Uuid::parse_str(after["block_id"].as_str().unwrap()).unwrap());
             note_repo.delete_block(note_id, block_id)?;
-            
-            if let Ok(Some(note)) = note_repo.get(note_id) {
-                note_repo.update(&note)?; // Triggers file save
-            }
         }
         _ => return Err(AgentError::Rejected("Rollback not supported for this operation".into())),
     }

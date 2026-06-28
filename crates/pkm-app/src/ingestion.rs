@@ -197,8 +197,11 @@ async fn process_and_promote(
         state.blocks.insert(block_id, block.clone());
         state.links.insert(link.id, link.clone());
         state.rebuild_indexes();
+    }
 
-        // Save JSON metadata so they match memory state
+    // Save JSON metadata outside the lock
+    {
+        let state = vault_state.read().unwrap();
         let sources_path = vault_path.join(".pkm").join("sources.json");
         if let Ok(sources_json) = serde_json::to_string_pretty(&state.sources) {
             let _ = std::fs::write(sources_path, sources_json);
@@ -209,25 +212,25 @@ async fn process_and_promote(
         }
     }
 
-    // 6. Persist to Disk
+    // 6. Persist to Disk using tokio::fs
     let sources_dir = vault_path.join("sources");
     let notes_dir = vault_path.join("notes");
     
-    std::fs::create_dir_all(&sources_dir).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&notes_dir).map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&sources_dir).await.map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&notes_dir).await.map_err(|e| e.to_string())?;
 
     // Save Source as raw markdown
-    std::fs::write(
+    tokio::fs::write(
         sources_dir.join(format!("{}.md", source_id)),
         &source.raw_content,
-    ).map_err(|e| e.to_string())?;
+    ).await.map_err(|e| e.to_string())?;
 
     // Save Note as styled markdown
     let note_md = pkm_core::markdown::note_to_markdown(&note, &[block]);
-    std::fs::write(
+    tokio::fs::write(
         notes_dir.join(note.file_name()),
         note_md,
-    ).map_err(|e| e.to_string())?;
+    ).await.map_err(|e| e.to_string())?;
 
     println!("[Processor] ✓ Successfully ingested & promoted: {}", url);
     Ok(())

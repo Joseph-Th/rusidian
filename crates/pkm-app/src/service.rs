@@ -5,7 +5,7 @@ use pkm_core::{Actor, Timestamp};
 use pkm_search::parse_query;
 use pkm_fs::{
     SharedVault, FsNoteRepo, FsSourceRepo, FsEntityRepo, FsLinkRepo, FsViewRepo,
-    FsAgentActionRepo, FsRetriever, load_vault, IngestionItem
+    FsAgentActionRepo, FsRetriever, load_vault
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -81,19 +81,37 @@ impl AppService {
 
     fn sync_external_note(
         vault: &SharedVault,
-        vault_path: &Path,
+        _vault_path: &Path,
         event: NoteWatcherEvent,
     ) -> Result<(), String> {
-        let (file_path, note, blocks) = match event {
+        let (_file_path, note, blocks) = match event {
             NoteWatcherEvent::Modified { file_path, note, blocks } => (file_path, note, blocks),
             _ => return Err("Expected Modified event".to_string()),
         };
 
-        let file_path_canonical = std::fs::canonicalize(file_path.clone())
-            .unwrap_or_else(|_| file_path.clone());
+        let new_block_ids: std::collections::HashSet<_> = blocks.iter().map(|b| b.id).collect();
 
         let mut state = vault.write().unwrap();
         state.notes.insert(note.id, note.clone());
+
+        // Determine blocks that existed before but are no longer present
+        let removed_block_ids: Vec<_> = state.blocks.values()
+            .filter(|b| b.note_id == note.id && !new_block_ids.contains(&b.id))
+            .map(|b| b.id)
+            .collect();
+
+        // Remove links pointing to deleted blocks for this note
+        state.links.retain(|_, link| {
+            let from_deleted = if let pkm_core::id::ObjectRef::Block(bid) = link.from {
+                removed_block_ids.contains(&bid)
+            } else { false };
+
+            let to_deleted = if let pkm_core::id::ObjectRef::Block(bid) = link.to {
+                removed_block_ids.contains(&bid)
+            } else { false };
+
+            !from_deleted && !to_deleted
+        });
 
         // Update blocks for note
         state.blocks.retain(|_, b| b.note_id != note.id);
