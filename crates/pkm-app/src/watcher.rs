@@ -1,7 +1,7 @@
 //! File watcher service: monitors vault directory for external markdown file changes.
 //!
 //! When markdown files are edited outside the app (e.g., in VS Code), this service
-//! detects the changes, parses them, and sends events to an MPSC channel for the
+//! detects the changes, parses them, and sends events to a tokio MPSC channel for the
 //! app to process and update the database.
 //!
 //! Implements debouncing and ignore_next_events cache to prevent infinite loops when
@@ -10,20 +10,34 @@
 use notify::{Watcher, RecursiveMode, Result as NotifyResult};
 use notify::recommended_watcher;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, Duration};
+use std::time::Instant;
+use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
 use pkm_core::note::Note;
 use pkm_core::markdown;
 use pkm_core::{Actor, Timestamp, id::NoteId};
 
-/// An event from the file watcher indicating a note was modified externally.
+/// An event from the file watcher indicating a note was modified or deleted externally.
 #[derive(Debug, Clone)]
-pub struct NoteWatcherEvent {
-    pub file_path: PathBuf,
-    pub note: Note,
-    pub blocks: Vec<pkm_core::block::Block>,
+pub enum NoteWatcherEvent {
+    Modified {
+        file_path: PathBuf,
+        note: Note,
+        blocks: Vec<pkm_core::block::Block>,
+        needs_rewrite: bool,
+    },
+    Deleted {
+        file_path: PathBuf,
+    },
+}
+
+fn safe_canonicalize(path: &Path) -> PathBuf {
+    match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 /// Handle to skip processing on file modification events.
@@ -37,6 +51,7 @@ pub struct IgnoreNextEvent {
 impl IgnoreNextEvent {
     /// Mark a file to be skipped until the TTL expires (default 1 second).
     pub fn skip_next(&self, path: PathBuf) {
+        let path = safe_canonicalize(&path);
         if let Ok(mut cache) = self.cache.lock() {
             cache.insert(path, Instant::now() + Duration::from_secs(1));
         }
@@ -48,17 +63,17 @@ impl IgnoreNextEvent {
 /// - receiver emits `NoteWatcherEvent` when files change externally
 /// - ignore_handle can be used to skip processing on app-initiated writes
 ///
-/// The watcher runs in a background thread and will continue until the returned
+/// The watcher runs in a background tokio task and will continue until the returned
 /// receiver is dropped.
-pub fn watch_vault(vault_path: &Path) -> NotifyResult<(mpsc::Receiver<NoteWatcherEvent>, IgnoreNextEvent)> {
-    let (tx, rx) = mpsc::channel();
+pub fn watch_vault(vault_path: &Path) -> NotifyResult<(mpsc::UnboundedReceiver<NoteWatcherEvent>, IgnoreNextEvent)> {
+    let (tx, rx) = mpsc::unbounded_channel();
     let vault_path = vault_path.to_path_buf();
     let ignore_cache = Arc::new(Mutex::new(HashMap::new()));
     let ignore_handle = IgnoreNextEvent { cache: Arc::clone(&ignore_cache) };
 
-    // Create a watcher in a background thread
-    std::thread::spawn(move || {
-        if let Err(e) = watch_impl(&vault_path, tx, ignore_cache) {
+    // Create a watcher in a background tokio task
+    tokio::spawn(async move {
+        if let Err(e) = watch_impl(&vault_path, tx, ignore_cache).await {
             eprintln!("File watcher error: {}", e);
         }
     });
@@ -66,13 +81,13 @@ pub fn watch_vault(vault_path: &Path) -> NotifyResult<(mpsc::Receiver<NoteWatche
     Ok((rx, ignore_handle))
 }
 
-fn watch_impl(
+async fn watch_impl(
     vault_path: &Path,
-    tx: mpsc::Sender<NoteWatcherEvent>,
+    tx: mpsc::UnboundedSender<NoteWatcherEvent>,
     ignore_cache: Arc<Mutex<HashMap<PathBuf, Instant>>>,
 ) -> NotifyResult<()> {
     let vault_path = vault_path.to_path_buf();
-    let (watch_tx, watch_rx) = mpsc::channel();
+    let (watch_tx, mut watch_rx) = mpsc::unbounded_channel();
 
     let mut watcher = recommended_watcher(move |res: NotifyResult<notify::Event>| {
         let _ = watch_tx.send(res);
@@ -80,52 +95,50 @@ fn watch_impl(
 
     watcher.watch(&vault_path, RecursiveMode::Recursive)?;
 
-    // Debouncing state
-    let mut last_event_time: Option<Instant> = None;
+    // Debouncing state: map of paths to their debounce deadlines
+    let mut pending_files: HashMap<PathBuf, tokio::task::JoinHandle<()>> = HashMap::new();
     let debounce_duration = Duration::from_millis(200);
 
     // Process watcher events
-    while let Ok(Ok(event)) = watch_rx.recv().map(|r| r) {
+    while let Some(Ok(event)) = watch_rx.recv().await {
         use notify::EventKind;
 
         match event.kind {
             EventKind::Create(_) | EventKind::Modify(_) => {
-                // Debounce: ignore events that come too close together
-                let now = Instant::now();
-                if let Some(last_time) = last_event_time {
-                    if now.duration_since(last_time) < debounce_duration {
-                        continue;
-                    }
-                }
-                last_event_time = Some(now);
-
                 for path in event.paths {
                     // Only process .md files
-                    if path.extension().and_then(|s| s.to_str()) == Some("md") {
-                        // Check if this file is in the ignore cache and if TTL has not expired
-                        let should_skip = {
-                            let mut cache = ignore_cache.lock().unwrap_or_else(|e| e.into_inner());
-                            // Check if the path is in cache and TTL hasn't expired
-                            if let Some(&expiry) = cache.get(&path) {
-                                if Instant::now() < expiry {
-                                    true // Still in TTL, skip this event
-                                } else {
-                                    cache.remove(&path); // TTL expired, remove from cache
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        };
+                    if path.extension().and_then(|s| s.to_str()) != Some("md") {
+                        continue;
+                    }
 
-                        if should_skip {
-                            // App wrote this file within the TTL window; skip processing to prevent infinite loop
-                            continue;
-                        }
+                    // Check if this file is in the ignore cache and if TTL has not expired
+                    let canonical_path = safe_canonicalize(&path);
+                    let should_skip = {
+                        let mut cache = ignore_cache.lock().unwrap_or_else(|e| e.into_inner());
+                        let now = Instant::now();
+                        cache.retain(|_, &mut expiry| now < expiry);
+                        cache.contains_key(&canonical_path)
+                    };
 
-                        if let Ok(markdown_text) = std::fs::read_to_string(&path) {
-                            // Parse the markdown file into a Note
-                            // Use a dummy note_id since it will be extracted from frontmatter
+                    if should_skip {
+                        continue;
+                    }
+
+                    // Cancel any existing pending task for this file
+                    if let Some(handle) = pending_files.remove(&canonical_path) {
+                        handle.abort();
+                    }
+
+                    // Spawn a new debounced task for this file
+                    let path_clone = path.clone();
+                    let tx_clone = tx.clone();
+
+                    let task = tokio::spawn(async move {
+                        // Wait for debounce duration
+                        sleep(debounce_duration).await;
+
+                        // Process the file
+                        if let Ok(markdown_text) = tokio::fs::read_to_string(&path_clone).await {
                             let dummy_id = NoteId::new();
                             let now = Timestamp::now_utc();
 
@@ -136,20 +149,43 @@ fn watch_impl(
                                 now,
                             ) {
                                 Ok((note, blocks)) => {
-                                    let event = NoteWatcherEvent {
-                                        file_path: path.clone(),
+                                    // BUG FIX: If there is no frontmatter, rewrite the file immediately so block/note IDs stabilize
+                                    let needs_rewrite = !markdown_text.starts_with("---\n") || blocks.iter().any(|b| !markdown_text.contains(&b.id.to_string()));
+                                    let event = NoteWatcherEvent::Modified {
+                                        file_path: path_clone.clone(),
                                         note,
                                         blocks,
+                                        needs_rewrite,
                                     };
-                                    // Send the event (ignore if receiver is dropped)
-                                    let _ = tx.send(event);
+                                    let _ = tx_clone.send(event);
                                 }
                                 Err(e) => {
-                                    eprintln!("Failed to parse markdown {}: {}", path.display(), e);
+                                    eprintln!("Failed to parse markdown {}: {}", path_clone.display(), e);
                                 }
                             }
                         }
+                    });
+
+                    pending_files.retain(|_, handle| !handle.is_finished());
+                    pending_files.insert(canonical_path, task);
+                }
+            }
+            EventKind::Remove(_) => {
+                for path in event.paths {
+                    if path.extension().and_then(|s| s.to_str()) != Some("md") {
+                        continue;
                     }
+                    let canonical_path = safe_canonicalize(&path);
+                    let should_skip = {
+                        let mut cache = ignore_cache.lock().unwrap_or_else(|e| e.into_inner());
+                        let now = Instant::now();
+                        cache.retain(|_, &mut expiry| now < expiry);
+                        cache.contains_key(&canonical_path)
+                    };
+                    if should_skip {
+                        continue;
+                    }
+                    let _ = tx.send(NoteWatcherEvent::Deleted { file_path: path });
                 }
             }
             _ => {}
@@ -163,33 +199,31 @@ fn watch_impl(
 mod tests {
     use super::*;
     use std::fs;
-    use std::thread;
-    use std::time::Duration;
+    use tokio::time::timeout;
     use tempfile::TempDir;
 
-    #[test]
-    fn file_watcher_detects_new_markdown_file() {
+    #[tokio::test]
+    async fn file_watcher_detects_new_markdown_file() {
         let temp_dir = TempDir::new().unwrap();
         let vault_path = temp_dir.path();
 
         // Start watcher
-        let rx = watch_vault(vault_path).expect("failed to start watcher");
+        let (mut rx, _ignore) = watch_vault(vault_path).expect("failed to start watcher");
 
         // Give watcher time to start
-        thread::sleep(Duration::from_millis(100));
+        sleep(Duration::from_millis(100)).await;
 
         // Create a markdown file
         let note_path = vault_path.join("test-note.md");
         let markdown_content = "---\nid: 123e4567-e89b-12d3-a456-426614174000\ncreated_by: User\ncreated_at: 2026-06-26T00:00:00Z\nmetadata: {}\n---\n\n# Test Note\n\nSome content";
         fs::write(&note_path, markdown_content).expect("failed to write test file");
 
-        // Wait for watcher to detect and process the file
-        thread::sleep(Duration::from_millis(500));
-
-        // Check if we received an event
-        if let Ok(event) = rx.try_recv() {
-            assert_eq!(event.note.title, "Test Note");
-            assert_eq!(event.file_path, note_path);
+        // Wait for watcher to detect and process the file (with timeout)
+        if let Ok(Some(NoteWatcherEvent::Modified { note, file_path, .. })) = timeout(Duration::from_secs(2), rx.recv()).await {
+            assert_eq!(note.title, "Test Note");
+            assert_eq!(file_path, note_path);
+        } else {
+            panic!("Expected NoteWatcherEvent::Modified");
         }
     }
 }

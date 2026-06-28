@@ -51,6 +51,14 @@ pub trait NoteRepo {
         block_id: BlockId,
         new_content: crate::block::BlockContent,
     ) -> Result<Block>;
+    /// Fetch all blocks for a note.
+    fn get_blocks(&self, note_id: NoteId) -> Result<Vec<Block>>;
+    /// Get the note ID that contains the given block ID.
+    fn get_note_id_for_block(&self, block_id: BlockId) -> Result<Option<NoteId>>;
+    /// Create a block in the note repo.
+    fn create_block(&self, block: &Block) -> Result<()>;
+    /// Delete a block from the note repo.
+    fn delete_block(&self, note_id: NoteId, block_id: BlockId) -> Result<()>;
     // TODO(B2): block CRUD, ordered block fetch, metadata, version history.
 }
 
@@ -79,6 +87,8 @@ pub trait LinkRepo {
     fn set_to(&self, link_id: crate::id::LinkId, new_to: ObjectRef) -> Result<()>;
     /// Update a link's from target (used for entity merge re-pointing).
     fn set_from(&self, link_id: crate::id::LinkId, new_from: ObjectRef) -> Result<()>;
+    /// Delete a link by ID.
+    fn delete(&self, link_id: crate::id::LinkId) -> Result<()>;
 }
 
 /// Append-only persistence for agent action audit trail (AGENTS.md "Agent Action").

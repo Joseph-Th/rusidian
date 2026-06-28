@@ -39,6 +39,7 @@ impl<'c> AgentActionRepo for SqliteAgentActionRepo<'c> {
             pkm_core::id::ObjectRef::Entity(id) => ("entity", id.to_string()),
             pkm_core::id::ObjectRef::Link(id) => ("link", id.to_string()),
             pkm_core::id::ObjectRef::View(id) => ("view", id.to_string()),
+            pkm_core::id::ObjectRef::AgentAction(id) => ("agent_action", id.to_string()),
         };
 
         // Store created_at as RFC3339 string.

@@ -39,7 +39,7 @@ impl SqliteNoteRepo<'_> {
                 let id_str: String = row.get(0)?;
                 let _block_type: String = row.get(1)?;
                 let content_json: String = row.get(2)?;
-                let order: f32 = row.get(3)?;
+                let order_val: rusqlite::types::Value = row.get(3)?;
                 let created_at_str: String = row.get(4)?;
                 let created_by_json: String = row.get(5)?;
                 let version: i64 = row.get(6)?;
@@ -48,7 +48,7 @@ impl SqliteNoteRepo<'_> {
                 Ok((
                     id_str,
                     content_json,
-                    order,
+                    order_val,
                     created_at_str,
                     created_by_json,
                     version,
@@ -60,7 +60,7 @@ impl SqliteNoteRepo<'_> {
                 let (
                     id_str,
                     content_json,
-                    order,
+                    order_value,
                     created_at_str,
                     created_by_json,
                     version,
@@ -83,6 +83,14 @@ impl SqliteNoteRepo<'_> {
                     &time::format_description::well_known::Rfc3339,
                 )
                 .map_err(|_| pkm_core::CoreError::Invariant("invalid timestamp".into()))?;
+
+                // Convert order from database to string format dynamically
+                let order = match order_value {
+                    rusqlite::types::Value::Real(r) => format!("{:08}", (r * 1000.0) as i32),
+                    rusqlite::types::Value::Integer(i) => format!("{:08}", (i as f32 * 1000.0) as i32),
+                    rusqlite::types::Value::Text(s) => s,
+                    _ => "00000000".to_string(),
+                };
 
                 Ok(Block {
                     id,
@@ -115,7 +123,6 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         let temp_path = file_ops::write_to_temp_file(&self.vault_path, &note.id.to_string(), &markdown_text)
             .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write temp file: {}", e)))?;
 
-        // STEP 4: Insert the note into SQLite
         let created_at_str = note
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
@@ -130,7 +137,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .to_str()
             .ok_or_else(|| pkm_core::CoreError::Invariant("invalid file path".into()))?;
 
-        // If SQLite fails, abort temp file
+        // STEP 4: Insert the note into SQLite
         if let Err(e) = self.conn.execute(
             "INSERT INTO note (id, title, created_at, created_by, version, updated_at, metadata, file_path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -317,6 +324,13 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     }
 
     fn update(&self, note: &Note) -> Result<()> {
+        // Fetch old file path to check if title/filename changed
+        let old_file_path_str: Option<String> = self.conn.query_row(
+            "SELECT file_path FROM note WHERE id = ?1",
+            params![note.id.to_string()],
+            |row| row.get(0),
+        ).ok();
+
         // STEP 1: Fetch blocks for this note
         let blocks = self.fetch_blocks(note.id)?;
 
@@ -328,7 +342,6 @@ impl NoteRepo for SqliteNoteRepo<'_> {
         let temp_path = file_ops::write_to_temp_file(&self.vault_path, &note.id.to_string(), &markdown_text)
             .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to write temp file: {}", e)))?;
 
-        // STEP 4: Update the note in SQLite
         let updated_at_str = note
             .updated_at
             .format(&time::format_description::well_known::Rfc3339)
@@ -364,19 +377,40 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             ));
         }
 
-        // STEP 5: Commit temp file (atomic rename)
+        // STEP 4: Commit temp file (atomic rename)
         file_ops::commit_temp_file(&temp_path, &file_path)
             .map_err(|e| pkm_core::CoreError::Invariant(format!("failed to commit file: {}", e)))?;
+
+        // Cleanup old file if renaming occurred
+        if let Some(old_path) = old_file_path_str {
+            let old_path_buf = std::path::PathBuf::from(&old_path);
+            let new_path_buf = std::path::PathBuf::from(&file_path_str);
+            
+            if old_path_buf.exists() {
+                // Safely compare canonical paths to prevent deleting the newly created file on case-insensitive OS
+                if let (Ok(old_canon), Ok(new_canon)) = (old_path_buf.canonicalize(), new_path_buf.canonicalize()) {
+                    if old_canon != new_canon {
+                        let _ = std::fs::remove_file(old_path_buf);
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
 
     fn delete(&self, id: NoteId) -> Result<()> {
+        let note_id_str = id.to_string();
+
+        // Use drop-safe unchecked_transaction
+        let tx = self.conn.unchecked_transaction()
+            .map_err(crate::StorageError::from)?;
+
         // Step 1: Get the file path before deleting from database
         let file_path = {
-            let result: std::result::Result<String, rusqlite::Error> = self.conn.query_row(
+            let result: std::result::Result<String, rusqlite::Error> = tx.query_row(
                 "SELECT file_path FROM note WHERE id = ?1",
-                params![id.to_string()],
+                params![&note_id_str],
                 |row| row.get(0),
             );
             match result {
@@ -386,22 +420,51 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             }
         };
 
-        // Step 2: Delete child blocks first (no ON DELETE CASCADE in schema).
-        self.conn
-            .execute("DELETE FROM block WHERE note_id = ?1", params![id.to_string()])
+        // Step 2: Get all block IDs for this note to delete links
+        let mut stmt = tx.prepare("SELECT id FROM block WHERE note_id = ?1")
+            .map_err(crate::StorageError::from)?;
+        let block_ids: Vec<String> = stmt.query_map(params![&note_id_str], |row| row.get(0))
+            .map_err(crate::StorageError::from)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(crate::StorageError::from)?;
+        drop(stmt);
+
+        // Step 3: Delete all links that reference this note or its blocks
+        tx.execute("DELETE FROM link WHERE from_type = 'note' AND from_id = ?1", params![&note_id_str])
+            .map_err(crate::StorageError::from)?;
+        tx.execute("DELETE FROM link WHERE to_type = 'note' AND to_id = ?1", params![&note_id_str])
             .map_err(crate::StorageError::from)?;
 
-        // Step 3: Delete the note from the database
-        self.conn
-            .execute("DELETE FROM note WHERE id = ?1", params![id.to_string()])
-            .map_err(crate::StorageError::from)?;
-
-        // Step 4: Delete the markdown file from disk (if it exists)
-        if let Some(path) = file_path {
-            // Ignore errors if file doesn't exist - it may have been manually deleted
-            let _ = std::fs::remove_file(&path);
+        for block_id in block_ids {
+            tx.execute("DELETE FROM link WHERE from_type = 'block' AND from_id = ?1", params![&block_id])
+                .map_err(crate::StorageError::from)?;
+            tx.execute("DELETE FROM link WHERE to_type = 'block' AND to_id = ?1", params![&block_id])
+                .map_err(crate::StorageError::from)?;
         }
 
+        // Step 4: Delete child blocks
+        tx.execute("DELETE FROM block WHERE note_id = ?1", params![&note_id_str])
+            .map_err(crate::StorageError::from)?;
+
+        // Step 5: Delete the note from the database
+        tx.execute("DELETE FROM note WHERE id = ?1", params![&note_id_str])
+            .map_err(crate::StorageError::from)?;
+
+        tx.commit().map_err(crate::StorageError::from)?;
+
+        // Step 6: Delete the markdown file from disk (after transaction commits)
+        if let Some(path) = file_path {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {},
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // File doesn't exist; this is acceptable
+                }
+                Err(e) => {
+                    // Log but don't fail; database is already committed
+                    eprintln!("Warning: Failed to delete markdown file {}: {}", path, e);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -413,13 +476,22 @@ impl NoteRepo for SqliteNoteRepo<'_> {
     ) -> Result<Block> {
         let now = pkm_core::Timestamp::now_utc();
 
+        // Use drop-safe unchecked_transaction
+        let tx = self.conn.unchecked_transaction()
+            .map_err(crate::StorageError::from)?;
+
+        // Acquire an immediate write lock by performing a dummy write before reading the file
+        tx.execute(
+            "UPDATE note SET version = version WHERE id = ?1",
+            params![note_id.to_string()],
+        ).map_err(crate::StorageError::from)?;
+
         // STEP 1: Query SQLite for the file path
-        let file_path_str: String = self
-            .conn
+        let file_path_str: String = tx
             .query_row(
                 "SELECT file_path FROM note WHERE id = ?1",
                 params![note_id.to_string()],
-                |row| row.get(0),
+                |row: &rusqlite::Row<'_>| row.get::<_, String>(0),
             )
             .map_err(crate::StorageError::from)?;
 
@@ -458,15 +530,14 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             ))?;
 
         // STEP 5: Fetch the full note from the database
-        let mut stmt = self
-            .conn
+        let mut stmt = tx
             .prepare(
                 "SELECT title, created_at, created_by, version, updated_at, metadata FROM note WHERE id = ?1",
             )
             .map_err(crate::StorageError::from)?;
 
         let (title, created_at_str, created_by_json, version, updated_at_str, metadata_json) = stmt
-            .query_row(params![note_id.to_string()], |row| {
+            .query_row(params![note_id.to_string()], |row: &rusqlite::Row<'_>| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -477,6 +548,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 ))
             })
             .map_err(crate::StorageError::from)?;
+        drop(stmt);
 
         let created_by = serde_json::from_str(&created_by_json)?;
         let created_at = time::OffsetDateTime::parse(
@@ -524,7 +596,7 @@ impl NoteRepo for SqliteNoteRepo<'_> {
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".to_string());
 
-        if let Err(e) = self.conn.execute(
+        let update_res = tx.execute(
             "UPDATE block SET content = ?1, version = ?2, updated_at = ?3 WHERE id = ?4 AND note_id = ?5",
             params![
                 content_json,
@@ -533,18 +605,61 @@ impl NoteRepo for SqliteNoteRepo<'_> {
                 block_id.to_string(),
                 note_id.to_string()
             ],
-        ) {
+        );
+
+        if let Err(e) = update_res {
             let _ = file_ops::abort_temp_file(&temp_path);
             return Err(crate::StorageError::from(e).into());
         }
 
-        // STEP 8: Commit temp file (atomic rename)
+        // STEP 8: Commit the transaction
+        tx.commit().map_err(crate::StorageError::from)?;
+
+        // STEP 9: Commit temp file (atomic rename) - only after DB commit succeeds
         file_ops::commit_temp_file(&temp_path, std::path::Path::new(&file_path_str))
             .map_err(|e| pkm_core::CoreError::Invariant(
                 format!("failed to commit file: {}", e)
             ))?;
 
         Ok(updated_block)
+    }
+
+    fn get_blocks(&self, note_id: NoteId) -> Result<Vec<Block>> {
+        self.fetch_blocks(note_id)
+    }
+
+    fn get_note_id_for_block(&self, block_id: BlockId) -> Result<Option<NoteId>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT note_id FROM block WHERE id = ?1")
+            .map_err(crate::StorageError::from)?;
+        
+        let result = stmt.query_row(params![block_id.to_string()], |row| {
+            let note_id_str: String = row.get(0)?;
+            Ok(note_id_str)
+        });
+        
+        match result {
+            Ok(note_id_str) => {
+                let uuid = uuid::Uuid::parse_str(&note_id_str)
+                    .map_err(|_| pkm_core::CoreError::Invariant("invalid note uuid".into()))?;
+                Ok(Some(NoteId(uuid)))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(crate::StorageError::from(e).into()),
+        }
+    }
+
+    fn create_block(&self, block: &Block) -> Result<()> {
+        self.insert_block(block)
+    }
+
+    fn delete_block(&self, note_id: NoteId, block_id: BlockId) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM block WHERE id = ?1 AND note_id = ?2",
+            params![block_id.to_string(), note_id.to_string()],
+        ).map_err(crate::StorageError::from)?;
+        Ok(())
     }
 }
 

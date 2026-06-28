@@ -35,6 +35,8 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }
 regex = "1"
 url = "2"
+json-patch = "1"
+chrono = { version = "0.4", features = ["serde"] }
 
 # Internal crates referenced by path. Dependency direction is strict and
 # acyclic (see README "Dependency graph"):

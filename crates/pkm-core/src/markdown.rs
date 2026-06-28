@@ -30,7 +30,9 @@ struct NoteFrontmatter {
 
 /// Extract YAML frontmatter from the beginning of markdown text.
 /// Returns (frontmatter, remaining_text). If no frontmatter, returns None for frontmatter.
+/// Supports both Unix (\n) and Windows (\r\n) line endings.
 fn extract_frontmatter(text: &str) -> (Option<NoteFrontmatter>, String) {
+    let text = text.replace("\r\n", "\n");
     if !text.starts_with("---\n") {
         return (None, text.to_string());
     }
@@ -90,8 +92,8 @@ fn block_content_to_markdown(content: &BlockContent) -> String {
         } => {
             // Internal embeds use HTML comment + blockquote fallback
             format!(
-                "<!-- embed:internal:{:?} -->\n\n> **[Embedded: {}]**\n> \n> {}\n> \n> *[This is a dynamic view embedded here. Open in app to interact.]*",
-                target,
+                "<!-- embed:internal:{} -->\n> **[Embedded: {}]**\n> \n> {}\n> \n> *[This is a dynamic view embedded here. Open in app to interact.]*",
+                object_ref_to_embed_string(target),
                 target_display_name(target),
                 fallback_text.lines().map(|l| format!("> {}", l)).collect::<Vec<_>>().join("\n")
             )
@@ -100,7 +102,7 @@ fn block_content_to_markdown(content: &BlockContent) -> String {
         BlockContent::ExternalEmbed { url, provider } => {
             // External embeds use HTML comment + link fallback
             format!(
-                "<!-- embed:external:{}:{} -->\n\n[{}]({}) *[{}]*",
+                "<!-- embed:external:{}:{} -->\n[{}]({}) *[{}]*",
                 provider.domain(),
                 url,
                 url,
@@ -158,6 +160,18 @@ fn serialize_table(headers: &[String], rows: &[Vec<String>]) -> String {
     result.trim_end().to_string()
 }
 
+fn object_ref_to_embed_string(target: &ObjectRef) -> String {
+    match target {
+        ObjectRef::Source(id) => format!("source:{}", id),
+        ObjectRef::Note(id) => format!("note:{}", id),
+        ObjectRef::Block(id) => format!("block:{}", id),
+        ObjectRef::Entity(id) => format!("entity:{}", id),
+        ObjectRef::Link(id) => format!("link:{}", id),
+        ObjectRef::View(id) => format!("view:{}", id),
+        ObjectRef::AgentAction(id) => format!("agent_action:{}", id),
+    }
+}
+
 /// Get a display name for an ObjectRef for use in fallback text.
 fn target_display_name(target: &crate::id::ObjectRef) -> String {
     match target {
@@ -167,6 +181,7 @@ fn target_display_name(target: &crate::id::ObjectRef) -> String {
         crate::id::ObjectRef::Entity(id) => format!("Entity {}", id),
         crate::id::ObjectRef::Link(id) => format!("Link {}", id),
         crate::id::ObjectRef::Source(id) => format!("Source {}", id),
+        crate::id::ObjectRef::AgentAction(id) => format!("AgentAction {}", id),
     }
 }
 
@@ -177,15 +192,15 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
     let mut md = String::new();
 
     for block in blocks {
-        // Serialize block content
-        let content_md = block_content_to_markdown(&block.content);
-        md.push_str(&content_md);
-        md.push_str("\n\n");
-
         // Add a block id reference and order as an HTML comment for round-tripping.
         // Format: <!-- block:uuid order:1.5 -->
         // The order is preserved for fractional ordering (e.g., inserting between existing blocks)
         md.push_str(&format!("<!-- block:{} order:{} -->\n\n", block.id, block.order));
+
+        // Serialize block content
+        let content_md = block_content_to_markdown(&block.content);
+        md.push_str(&content_md);
+        md.push_str("\n\n");
     }
 
     md.trim_end().to_string()
@@ -193,6 +208,7 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
 
 /// Deserialize a table from markdown-like content.
 /// This is a best-effort parser for GFM tables found in markdown.
+/// Properly handles escaped pipes: \| is treated as literal content, not a separator.
 fn deserialize_table(text: &str) -> Option<(Vec<String>, Vec<Vec<String>>)> {
     let lines: Vec<&str> = text.lines().collect();
     if lines.len() < 3 {
@@ -205,10 +221,8 @@ fn deserialize_table(text: &str) -> Option<(Vec<String>, Vec<Vec<String>>)> {
         return None;
     }
 
-    let headers: Vec<String> = header_line
-        .trim_start_matches('|')
-        .trim_end_matches('|')
-        .split('|')
+    let headers: Vec<String> = split_table_row(header_line)
+        .into_iter()
         .map(|s| s.trim().to_string())
         .collect();
 
@@ -225,40 +239,73 @@ fn deserialize_table(text: &str) -> Option<(Vec<String>, Vec<Vec<String>>)> {
             break;
         }
 
-        let row: Vec<String> = line
-            .trim_start_matches('|')
-            .trim_end_matches('|')
-            .split('|')
+        let mut row: Vec<String> = split_table_row(line)
+            .into_iter()
             .map(|s| s.trim().replace("\\|", "|"))
             .collect();
 
-        if row.len() == headers.len() {
-            rows.push(row);
-        }
+        row.resize(headers.len(), String::new());
+        rows.push(row);
     }
 
     Some((headers, rows))
 }
 
+/// Split a table row on unescaped pipes.
+/// Pipes preceded by backslash (\|) are not treated as separators.
+fn split_table_row(line: &str) -> Vec<String> {
+    let line = line.trim_start_matches('|').trim_end_matches('|');
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\\' && chars.peek() == Some(&'|') {
+            current.push('\\');
+            current.push('|');
+            chars.next();
+        } else if ch == '|' {
+            parts.push(current);
+            current = String::new();
+        } else {
+            current.push(ch);
+        }
+    }
+    parts.push(current);
+    parts
+}
+
 /// Parse markdown into blocks. Recognizes rich block types (tables, math, media)
 /// and converts them back to their BlockContent variants. Falls back to Markdown
 /// blocks for unrecognized content. Block IDs and order are preserved from HTML comments:
-/// <!-- block:uuid order:1.5 -->
+/// <!-- block:uuid order:a -->
+///
+/// Uses an internal pure function with parameterized ID generation to ensure testability.
 pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, String> {
+    markdown_to_blocks_internal(text, note_id, &mut BlockId::new)
+}
+
+/// Internal implementation with parameterized ID generation for testability.
+/// Allows tests to inject deterministic ID generators instead of using system timestamps.
+fn markdown_to_blocks_internal(
+    text: &str,
+    note_id: NoteId,
+    id_gen: &mut dyn FnMut() -> BlockId,
+) -> Result<Vec<Block>, String> {
     let mut blocks = Vec::new();
-    let mut next_order = 1.0_f32;
+    let mut next_order_idx = 0;
     let now = Timestamp::now_utc();
 
     let lines = text.lines().collect::<Vec<_>>();
     let mut i = 0;
     let mut pending_block_id: Option<BlockId> = None;
-    let mut pending_block_order: Option<f32> = None;
+    let mut pending_block_order: Option<String> = None;
 
     while i < lines.len() {
         let line = lines[i];
 
         // Check for block ID comment with optional order — if found, store it for the next block.
-        // Format: <!-- block:uuid -->  (legacy, no order) or <!-- block:uuid order:1.5 -->
+        // Format: <!-- block:uuid -->  (legacy, no order) or <!-- block:uuid order:a -->
         if line.starts_with("<!-- block:") && line.ends_with(" -->") {
             let comment_content = line
                 .trim_start_matches("<!-- block:")
@@ -270,11 +317,9 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
             if let Ok(uuid) = uuid::Uuid::parse_str(parts[0]) {
                 pending_block_id = Some(BlockId(uuid));
 
-                // Parse order if present (format: order:1.5)
+                // Parse order if present (format: order:a, order:am, etc.)
                 if parts.len() > 1 && parts[1].starts_with("order:") {
-                    if let Ok(order_val) = parts[1][6..].parse::<f32>() {
-                        pending_block_order = Some(order_val);
-                    }
+                    pending_block_order = Some(parts[1][6..].to_string());
                 }
             }
             i += 1;
@@ -289,9 +334,28 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
 
         // Collect block content until next blank line or block ID comment
         let mut block_text = String::new();
+        let mut in_math_fence = false;
+        let mut in_code_fence = false;
+
         while i < lines.len() {
             let current = lines[i];
-            if current.is_empty() || (current.starts_with("<!-- block:") && current.ends_with(" -->")) {
+            let trimmed = current.trim();
+
+            // Toggle fences if we hit a boundary line
+            if trimmed.starts_with("```") {
+                if !trimmed[3..].ends_with("```") || trimmed == "```" {
+                    in_code_fence = !in_code_fence;
+                }
+            }
+            if trimmed.starts_with("$$") {
+                if !trimmed[2..].ends_with("$$") || trimmed == "$$" {
+                    in_math_fence = !in_math_fence;
+                }
+            }
+
+            let is_fence_active = in_code_fence || in_math_fence;
+
+            if !is_fence_active && (current.is_empty() || (current.starts_with("<!-- block:") && current.ends_with(" -->"))) {
                 break;
             }
             if !block_text.is_empty() {
@@ -334,21 +398,26 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
                 target,
                 fallback_text: fallback,
             }
+        } else if let Some((url, provider)) = try_parse_external_embed(&block_text) {
+            BlockContent::ExternalEmbed {
+                url,
+                provider,
+            }
         } else {
             BlockContent::Markdown {
                 text: block_text.trim().to_string(),
             }
         };
 
-        // Use persisted order if available; otherwise use auto-incremented order
+        // Use persisted order if available; otherwise use auto-generated string index
         let block_order = pending_block_order.take().unwrap_or_else(|| {
-            let current = next_order;
-            next_order += 1.0;
-            current
+            let order = generate_lexorank_index(next_order_idx);
+            next_order_idx += 1;
+            order
         });
 
         let block = Block {
-            id: pending_block_id.take().unwrap_or_else(BlockId::new),
+            id: pending_block_id.take().unwrap_or_else(|| id_gen()),
             note_id,
             content,
             order: block_order,
@@ -364,28 +433,27 @@ pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, Str
     Ok(blocks)
 }
 
+fn generate_lexorank_index(index: usize) -> String {
+    format!("{:06}", index) // "000000", "000001", etc.
+}
+
 /// Try to parse internal embed (e.g., <!-- embed:internal:view:uuid -->).
 fn try_parse_internal_embed(text: &str) -> Option<(ObjectRef, String)> {
-    // Pattern: <!-- embed:internal:TYPE:ID -->
     let trimmed = text.trim();
-    if !trimmed.starts_with("<!-- embed:internal:") || !trimmed.ends_with(" -->") {
+    if !trimmed.starts_with("<!-- embed:internal:") {
         return None;
     }
-
-    let inner = trimmed
-        .trim_start_matches("<!-- embed:internal:")
-        .trim_end_matches(" -->");
-
-    // Parse TYPE:ID format
+    
+    let end_comment = trimmed.find(" -->")?;
+    let inner = &trimmed["<!-- embed:internal:".len()..end_comment];
+    
     let parts: Vec<&str> = inner.split(':').collect();
-    if parts.len() < 2 {
-        return None;
-    }
-
+    if parts.len() < 2 { return None; }
+    
     let obj_type = parts[0];
     let obj_id = parts[1..].join(":");
-
-    // Try to parse as UUID and build ObjectRef
+    let fallback = trimmed[end_comment + 4..].trim().to_string(); // Capture everything after comment
+    
     if let Ok(uuid) = uuid::Uuid::parse_str(&obj_id) {
         let target = match obj_type {
             "note" => ObjectRef::Note(crate::id::NoteId(uuid)),
@@ -393,15 +461,28 @@ fn try_parse_internal_embed(text: &str) -> Option<(ObjectRef, String)> {
             "entity" => ObjectRef::Entity(crate::id::EntityId(uuid)),
             "source" => ObjectRef::Source(crate::id::SourceId(uuid)),
             "block" => ObjectRef::Block(crate::id::BlockId(uuid)),
+            "agent_action" => ObjectRef::AgentAction(crate::id::AgentActionId(uuid)),
             _ => return None,
         };
-
-        // Create a fallback text representation
-        let fallback = format!("[Embedded {}]", obj_type);
-
         return Some((target, fallback));
     }
+    None
+}
 
+/// Try to parse external embed.
+fn try_parse_external_embed(text: &str) -> Option<(String, EmbedProvider)> {
+    let trimmed = text.trim();
+    if !trimmed.starts_with("<!-- embed:external:") {
+        return None;
+    }
+    let end_comment = trimmed.find(" -->")?;
+    let inner = &trimmed["<!-- embed:external:".len()..end_comment];
+    
+    if let Some(colon) = inner.find(':') {
+        let url = inner[colon + 1..].to_string();
+        let provider = EmbedProvider::from_url(&url);
+        return Some((url, provider));
+    }
     None
 }
 
@@ -434,8 +515,8 @@ fn try_parse_image(text: &str) -> Option<(String, String)> {
 /// Extract title from markdown text (first line that looks like a heading).
 /// Returns the heading text without the # prefix.
 pub fn extract_title(text: &str) -> Option<String> {
-    for line in text.lines() {
-        if let Some(heading) = line.strip_prefix("# ") {
+    if let Some(first_line) = text.lines().find(|l| !l.trim().is_empty()) {
+        if let Some(heading) = first_line.strip_prefix("# ") {
             return Some(heading.trim().to_string());
         }
     }
@@ -499,10 +580,14 @@ pub fn markdown_to_note(
     // Extract title from remaining markdown
     let title = extract_title(&remaining_text).unwrap_or_default();
 
-    // Parse blocks from markdown (without title line)
-    let mut blocks_text = remaining_text.to_string();
-    if let Some(newline_pos) = remaining_text.find('\n') {
-        blocks_text = remaining_text[newline_pos + 1..].to_string();
+    // BUG FIX: Properly strip ONLY the title line (including preceding blank lines)
+    let mut blocks_text = remaining_text.trim_start().to_string();
+    if blocks_text.starts_with("# ") {
+        if let Some(newline_pos) = blocks_text.find('\n') {
+            blocks_text = blocks_text[newline_pos + 1..].to_string();
+        } else {
+            blocks_text = String::new();
+        }
     }
 
     let mut parsed_blocks = markdown_to_blocks(&blocks_text, final_note_id)?;
@@ -545,7 +630,7 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "First paragraph".to_string(),
                 },
-                order: 1.0,
+                order: "a".to_string(),
                 created_by: Actor::User,
                 created_at: now,
                 source_provenance_ref: None,
@@ -558,7 +643,7 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "Second paragraph".to_string(),
                 },
-                order: 2.0,
+                order: "b".to_string(),
                 created_by: Actor::User,
                 created_at: now,
                 source_provenance_ref: None,
@@ -580,8 +665,8 @@ mod tests {
 
         let blocks = markdown_to_blocks(text, note_id).expect("parse");
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].order, 1.0);
-        assert_eq!(blocks[1].order, 2.0);
+        assert_eq!(blocks[0].order, "000000");
+        assert_eq!(blocks[1].order, "000001");
     }
 
     #[test]
@@ -634,7 +719,7 @@ mod tests {
             content: BlockContent::Markdown {
                 text: "Some content".to_string(),
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -659,8 +744,8 @@ mod tests {
 
         assert_eq!(note.title, "Test Note");
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].order, 1.0);
-        assert_eq!(blocks[1].order, 2.0);
+        assert_eq!(blocks[0].order, "000000");
+        assert_eq!(blocks[1].order, "000001");
 
         // Export back to markdown and verify structure is preserved
         let exported = note_to_markdown(&note, &blocks);
@@ -694,7 +779,7 @@ mod tests {
             content: BlockContent::Markdown {
                 text: "Some content".to_string(),
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -733,7 +818,7 @@ mod tests {
                 expression: "E = mc^2".to_string(),
                 display_mode: true,
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -779,7 +864,7 @@ mod tests {
                     vec!["Orange".to_string(), "$2".to_string()],
                 ],
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -823,7 +908,7 @@ mod tests {
                 alt_text: "A beautiful sunset".to_string(),
                 media_type: MediaType::Image,
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -868,7 +953,7 @@ mod tests {
                 url: "https://youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
                 provider: EmbedProvider::YouTube,
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -894,7 +979,7 @@ mod tests {
                 headers: vec!["Code".to_string()],
                 rows: vec![vec!["if a | b".to_string()]],
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -919,7 +1004,7 @@ mod tests {
                 headers: vec!["A".to_string(), "B".to_string(), "C".to_string()],
                 rows: vec![vec!["1".to_string(), "2".to_string()]], // Only 2 cells
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -947,7 +1032,7 @@ mod tests {
                     vec!["".to_string(), "100".to_string()],
                 ],
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -972,7 +1057,7 @@ mod tests {
                 headers: vec!["A".to_string(), "B".to_string()],
                 rows: vec![],
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -1035,7 +1120,7 @@ mod tests {
                 expression: "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}".to_string(),
                 display_mode: true,
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,

@@ -286,6 +286,17 @@ impl LinkRepo for SqliteLinkRepo<'_> {
             })?;
         Ok(())
     }
+
+    fn delete(&self, link_id: LinkId) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM link WHERE id = ?", params![link_id.to_string()])
+            .map_err(|e| {
+                let se = crate::StorageError::from(e);
+                let ce: CoreError = se.into();
+                ce
+            })?;
+        Ok(())
+    }
 }
 
 /// Convert ObjectRef to (type_str, id_str) for storage.
@@ -297,6 +308,7 @@ fn object_ref_to_parts(obj: &ObjectRef) -> (&'static str, String) {
         ObjectRef::Entity(id) => ("entity", id.to_string()),
         ObjectRef::Link(id) => ("link", id.to_string()),
         ObjectRef::View(id) => ("view", id.to_string()),
+        ObjectRef::AgentAction(id) => ("agent_action", id.to_string()),
     }
 }
 
@@ -313,6 +325,7 @@ fn parts_to_object_ref(type_str: &str, id_str: &str) -> crate::Result<ObjectRef>
         "entity" => ObjectRef::Entity(pkm_core::id::EntityId(id)),
         "link" => ObjectRef::Link(pkm_core::id::LinkId(id)),
         "view" => ObjectRef::View(pkm_core::id::ViewId(id)),
+        "agent_action" => ObjectRef::AgentAction(pkm_core::id::AgentActionId(id)),
         _ => {
             return Err(crate::StorageError::Core(CoreError::Invariant(format!(
                 "unknown object type: {}",

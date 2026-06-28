@@ -58,8 +58,9 @@ pub fn export_notes_to_markdown(
             .ok_or_else(|| format!("Note {} not found", note.id))?;
 
         // Convert note to markdown
-        // Note: block retrieval would require access to BlockRepo; for now export just the title
-        let blocks = vec![];
+        let blocks = note_repo
+            .get_blocks(note.id)
+            .map_err(|e| format!("Failed to retrieve blocks for note {}: {}", note.id, e))?;
 
         let markdown = note_to_markdown(&note_with_blocks, &blocks);
 

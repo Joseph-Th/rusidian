@@ -8,7 +8,7 @@ use crate::service::AppService;
 use pkm_core::view::{ViewKind, ViewParams};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CreateNoteResponse {
@@ -35,44 +35,30 @@ pub struct GetNoteResponse {
     pub block_count: usize,
 }
 
-pub async fn create_note(
+pub fn create_note(
     title: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<CreateNoteResponse, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let note_id = svc.create_note(title.clone())?;
-
+    let note_id = service.create_note(title.clone())?;
     Ok(CreateNoteResponse { id: note_id, title })
 }
 
-pub async fn list_notes(
+pub fn list_notes(
     limit: Option<usize>,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<Vec<NoteInfo>, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let notes = svc.list_notes(limit)?;
-
+    let notes = service.list_notes(limit)?;
     Ok(notes
         .into_iter()
         .map(|(id, title)| NoteInfo { id, title })
         .collect())
 }
 
-pub async fn get_note(
+pub fn get_note(
     note_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<GetNoteResponse, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let note = svc
+    let note = service
         .get_note_full(&note_id)?
         .ok_or_else(|| format!("Note not found: {}", note_id))?;
 
@@ -89,25 +75,17 @@ pub async fn get_note(
     })
 }
 
-pub async fn update_note(
+pub fn update_note(
     note_id: String,
     title: String,
     metadata: BTreeMap<String, serde_json::Value>,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<(), String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.update_note(&note_id, title, metadata)
+    service.update_note(&note_id, title, metadata)
 }
 
-pub async fn delete_note(note_id: String, service: &Arc<Mutex<AppService>>) -> Result<(), String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.delete_note(&note_id)
+pub fn delete_note(note_id: String, service: &Arc<AppService>) -> Result<(), String> {
+    service.delete_note(&note_id)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,11 +132,11 @@ pub struct TimelineRenderData {
     pub events: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<TimelineEventData>>>,
 }
 
-pub async fn create_view(
+pub fn create_view(
     kind: String,
     title: String,
     params: ViewParams,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<CreateViewResponse, String> {
     let view_kind = match kind.as_str() {
         "reading_queue" => ViewKind::ReadingQueue,
@@ -177,11 +155,7 @@ pub async fn create_view(
         _ => return Err(format!("Unknown view kind: {}", kind)),
     };
 
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let view_id = svc.create_view(view_kind, title.clone(), params)?;
+    let view_id = service.create_view(view_kind, title.clone(), params)?;
 
     Ok(CreateViewResponse {
         id: view_id,
@@ -190,15 +164,11 @@ pub async fn create_view(
     })
 }
 
-pub async fn list_views(
+pub fn list_views(
     limit: Option<usize>,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<Vec<ViewInfo>, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let views = svc.list_views(limit)?;
+    let views = service.list_views(limit)?;
 
     Ok(views
         .into_iter()
@@ -213,15 +183,11 @@ pub async fn list_views(
         .collect())
 }
 
-pub async fn get_view(
+pub fn get_view(
     view_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<Option<ViewInfo>, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let view = svc.get_view(&view_id)?;
+    let view = service.get_view(&view_id)?;
 
     Ok(view.map(|v| ViewInfo {
         id: v.id.to_string(),
@@ -230,28 +196,20 @@ pub async fn get_view(
     }))
 }
 
-pub async fn render_view(
+pub fn render_view(
     view_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<RenderViewResponse, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let source_ids = svc.render_view(&view_id)?;
+    let source_ids = service.render_view(&view_id)?;
 
     Ok(RenderViewResponse { source_ids })
 }
 
-pub async fn create_graph_view(
+pub fn create_graph_view(
     title: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<CreateViewResponse, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let view_id = svc.create_view(ViewKind::GraphView, title.clone(), ViewParams::graph_view())?;
+    let view_id = service.create_view(ViewKind::GraphView, title.clone(), ViewParams::graph_view())?;
 
     Ok(CreateViewResponse {
         id: view_id,
@@ -275,16 +233,12 @@ pub struct SearchResult {
     pub title: String,
 }
 
-pub async fn search_notes(
+pub fn search_notes(
     query: String,
     limit: Option<usize>,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<Vec<SearchResult>, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let results = svc.search_notes(&query, limit)?;
+    let results = service.search_notes(&query, limit)?;
 
     Ok(results
         .into_iter()
@@ -292,15 +246,11 @@ pub async fn search_notes(
         .collect())
 }
 
-pub async fn get_preview_card(
+pub fn get_preview_card(
     entity_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<PreviewCard, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.get_preview_card(&entity_id)
+    service.get_preview_card(&entity_id)
 }
 
 /// A node in the graph view with spatial coordinates and metadata.
@@ -329,19 +279,15 @@ pub struct GraphViewData {
     pub nodes: Vec<GraphNode>,
 }
 
-pub async fn get_graph_view_data(
+pub fn get_graph_view_data(
     view_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<Option<GraphViewData>, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let view = svc
+    let view = service
         .get_view(&view_id)?
         .ok_or_else(|| format!("View not found: {}", view_id))?;
 
-    match svc.get_graph_view_data(&view_id)? {
+    match service.get_graph_view_data(&view_id)? {
         Some(nodes) => Ok(Some(GraphViewData {
             title: view.title,
             nodes: nodes
@@ -504,74 +450,50 @@ pub struct CanvasViewRenderData {
     pub frames: Vec<CanvasFrameData>,
 }
 
-pub async fn get_link_network(
+pub fn get_link_network(
     root_id: String,
     depth: Option<usize>,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<LinkNetworkData, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.get_link_network(&root_id, depth.unwrap_or(2))
+    service.get_link_network(&root_id, depth.unwrap_or(2))
 }
 
-pub async fn get_neighbors(
+pub fn get_neighbors(
     target_id: String,
     depth: Option<usize>,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<LinkNetworkData, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.get_neighbors(&target_id, depth.unwrap_or(1))
+    service.get_neighbors(&target_id, depth.unwrap_or(1))
 }
 
-pub async fn get_canvas_view_data(
+pub fn get_canvas_view_data(
     view_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<Option<CanvasViewRenderData>, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.get_canvas_view_data(&view_id)
+    service.get_canvas_view_data(&view_id)
 }
 
-pub async fn get_timeline_view_data(
+pub fn get_timeline_view_data(
     view_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<Option<TimelineRenderData>, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.get_timeline_view_data(&view_id)
+    service.get_timeline_view_data(&view_id)
 }
 
-pub async fn get_provenance_chain(
+pub fn get_provenance_chain(
     block_id: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<ProvenanceChainData, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.get_provenance_chain(&block_id)
+    service.get_provenance_chain(&block_id)
 }
 
-pub async fn get_entity_matrix(
+pub fn get_entity_matrix(
     row_kind: String,
     col_kind: String,
     min_confidence: Option<f32>,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<EntityMatrixData, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    svc.get_entity_matrix(&row_kind, &col_kind, min_confidence)
+    service.get_entity_matrix(&row_kind, &col_kind, min_confidence)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -585,15 +507,11 @@ pub struct BulkIngestionResponse {
 /// Ingest bulk links from pasted text.
 /// Extracts all URLs, queues them for concurrent processing in the background.
 /// Returns immediately with a count of URLs found.
-pub async fn ingest_bulk_links(
+pub fn ingest_bulk_links(
     raw_text: String,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<BulkIngestionResponse, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let count = svc.ingest_bulk_links(raw_text).await?;
+    let count = service.ingest_bulk_links(raw_text)?;
 
     let message = if count == 0 {
         "No URLs found in text".to_string()
@@ -614,15 +532,11 @@ pub struct RollbackResponse {
 
 /// Rollback recent autonomous ingestion actions.
 /// Undoes all agent actions from the past N minutes.
-pub async fn rollback_autonomous_ingestion(
+pub fn rollback_autonomous_ingestion(
     minutes: i64,
-    service: &Arc<Mutex<AppService>>,
+    service: &Arc<AppService>,
 ) -> Result<RollbackResponse, String> {
-    let svc = service
-        .lock()
-        .map_err(|_| "Failed to acquire service lock".to_string())?;
-
-    let rolled_back = svc.rollback_recent_autonomous_ingestion(minutes)?;
+    let rolled_back = service.rollback_recent_autonomous_ingestion(minutes)?;
 
     let message = if rolled_back == 0 {
         format!("No actions found in the past {} minutes", minutes)

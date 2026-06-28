@@ -65,7 +65,7 @@ pub enum Operation {
         note_id: NoteId,
         block_id: BlockId,
         content: BlockContent,
-        order: f32,
+        order: String,
     },
     /// Update the content of an existing block.
     UpdateBlock {
@@ -178,10 +178,8 @@ impl Operation {
             Operation::MarkReviewed { target_ref, .. } => *target_ref,
             Operation::CreateView { view_id, .. } => ObjectRef::View(*view_id),
             Operation::UpdateView { view_id, .. } => ObjectRef::View(*view_id),
-            Operation::RollbackAction { .. } => {
-                // This targets the action itself; could be any object type
-                // In practice, the caller tracks what was rolled back.
-                ObjectRef::Source(SourceId::new())
+            Operation::RollbackAction { action_id } => {
+                ObjectRef::AgentAction(*action_id)
             }
         }
     }
@@ -215,6 +213,7 @@ pub fn requires_review(_op: &Operation) -> bool {
 pub fn execute(
     req: OperationRequest,
     action_repo: &dyn pkm_core::ports::AgentActionRepo,
+    note_repo: &dyn pkm_core::ports::NoteRepo,
 ) -> Result<AgentAction> {
     let now = Timestamp::now_utc();
     let status = if requires_review(&req.operation) {
@@ -224,25 +223,75 @@ pub fn execute(
         AgentActionStatus::Applied
     };
 
-    // Store operation payload in diff for later execution
+    // Store operation payload in diff for later execution using JSON Patch
     let diff = match &req.operation {
+        Operation::CreateNote { note_id, title } => {
+            let before = serde_json::json!({});
+            let after = serde_json::json!({
+                "note_id": note_id.to_string(),
+                "title": title,
+            });
+            let patch = pkm_core::json_patch::create_patch(&before, &after);
+            serde_json::to_value(patch)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        }
+        Operation::CreateTypedLink { from, to, link_type } => {
+            let before = serde_json::json!({});
+            let after = serde_json::json!({
+                "from": from,
+                "to": to,
+                "link_type": link_type,
+            });
+            let patch = pkm_core::json_patch::create_patch(&before, &after);
+            serde_json::to_value(patch)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        }
         Operation::UpdateBlock {
             note_id,
             block_id,
             new_content,
         } => {
-            serde_json::json!({
+            let blocks = note_repo.get_blocks(*note_id)?;
+            let old_block = blocks
+                .iter()
+                .find(|b| b.id == *block_id)
+                .ok_or_else(|| pkm_core::CoreError::Invariant(format!("Block {} not found in note {}", block_id, note_id)))?;
+            let mut new_block = old_block.clone();
+            new_block.content = new_content.clone();
+
+            let before = serde_json::to_value(&old_block)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+            let after = serde_json::to_value(&new_block)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+            let patch = pkm_core::json_patch::create_patch(&before, &after);
+            serde_json::to_value(patch)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        }
+        Operation::MergeEntities { survivor_id: _, loser_ids } => {
+            let before = serde_json::json!({
+                "loser_ids": []
+            });
+            let after = serde_json::json!({
+                "loser_ids": loser_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
+            });
+            let patch = pkm_core::json_patch::create_patch(&before, &after);
+            serde_json::to_value(patch)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
+        }
+        Operation::CreateBlock { note_id, block_id, content, order } => {
+            let before = serde_json::json!({});
+            let after = serde_json::json!({
                 "note_id": note_id.to_string(),
                 "block_id": block_id.to_string(),
-                "new_content": new_content,
-            })
+                "content": content,
+                "order": order,
+            });
+            let patch = pkm_core::json_patch::create_patch(&before, &after);
+            serde_json::to_value(patch)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         }
-        Operation::MergeEntities { loser_ids, .. } => {
-            serde_json::json!({
-                "loser_ids": loser_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()
-            })
-        }
-        _ => serde_json::json!({}),
+        _ => serde_json::json!([]),
     };
 
     let action = AgentAction {
@@ -261,6 +310,13 @@ pub fn execute(
     action_repo.create(&action)?;
 
     Ok(action)
+}
+
+fn reconstruct_after(diff: &serde_json::Value, before: &serde_json::Value) -> Result<serde_json::Value> {
+    let patch_ops: Vec<pkm_core::json_patch::PatchOp> = serde_json::from_value(diff.clone())
+        .map_err(|e| AgentError::Rejected(format!("Failed to parse patch: {}", e)))?;
+    pkm_core::json_patch::apply_patch(before, &patch_ops)
+        .map_err(|e| AgentError::Rejected(format!("Failed to apply patch: {}", e)))
 }
 
 /// Apply a proposed action, actually executing the operation on the databases.
@@ -286,31 +342,33 @@ pub fn apply_action(
     // Handle the operation based on its kind
     match action.operation {
         OperationKind::UpdateBlock => {
-            // Extract the block update data from the persisted diff
-            if let (Some(note_id_str), Some(block_id_str), Some(new_content)) = (
-                action.diff.get("note_id").and_then(|v| v.as_str()),
-                action.diff.get("block_id").and_then(|v| v.as_str()),
-                action.diff.get("new_content"),
-            ) {
-                // Parse IDs from strings
-                let note_uuid = Uuid::parse_str(note_id_str)
-                    .map_err(|_| AgentError::Rejected("Invalid note_id in action diff".into()))?;
-                let block_uuid = Uuid::parse_str(block_id_str)
-                    .map_err(|_| AgentError::Rejected("Invalid block_id in action diff".into()))?;
+            let block_id = match action.target {
+                ObjectRef::Block(id) => id,
+                _ => return Err(AgentError::Rejected("UpdateBlock target must be a Block".into())),
+            };
+            let note_id = note_repo.get_note_id_for_block(block_id)?
+                .ok_or_else(|| AgentError::Rejected(format!("Note for block {} not found", block_id)))?;
 
-                let note_id = NoteId(note_uuid);
-                let block_id = BlockId(block_uuid);
+            let blocks = note_repo.get_blocks(note_id)?;
+            let old_block = blocks.iter().find(|b| b.id == block_id)
+                .ok_or_else(|| AgentError::Rejected(format!("Block {} not found in note {}", block_id, note_id)))?;
 
-                // Deserialize new_content
-                let content: BlockContent = serde_json::from_value(new_content.clone())
-                    .map_err(|_| AgentError::Rejected("Invalid new_content in action diff".into()))?;
+            let old_val = serde_json::to_value(old_block)
+                .map_err(|e| AgentError::Core(pkm_core::CoreError::Invariant(e.to_string())))?;
+            let new_val = reconstruct_after(&action.diff, &old_val)?;
+            let new_block: pkm_core::block::Block = serde_json::from_value(new_val)
+                .map_err(|e| AgentError::Rejected(format!("Failed to deserialize new block: {}", e)))?;
 
-                // Actually execute the block update
-                note_repo.update_block(note_id, block_id, content)
-                    .map_err(|e| AgentError::Rejected(format!("Failed to update block: {}", e)))?;
-            }
+            // Store the entire pre-mutation block snapshot (old_val) as the rollback diff
+            let rollback_diff = old_val;
 
-            // Mark as Applied
+            // Actually execute the block update
+            note_repo.update_block(note_id, block_id, new_block.content)
+                .map_err(|e| AgentError::Rejected(format!("Failed to update block: {}", e)))?;
+
+            // Store rollback diff and set status to Applied
+            action_repo.set_diff(action_id, rollback_diff.clone())?;
+            action.diff = rollback_diff;
             action_repo.set_status(action_id, AgentActionStatus::Applied)?;
             action.status = AgentActionStatus::Applied;
 
@@ -333,28 +391,49 @@ pub fn apply_action(
                 }
             };
 
-            // We need to find loser IDs from the stored action's diff or metadata.
-            // For now, we can extract them from the diff if it was populated.
-            // The diff should contain: {"loser_ids": ["uuid1", "uuid2", ...]}
-            if let Ok(Some(loser_ids)) = extract_loser_ids_from_diff(&action.diff) {
-                for loser_id in loser_ids {
-                    // Get all links pointing to this loser entity
-                    let links_to_loser = link_repo.get_by_to(ObjectRef::Entity(loser_id))?;
+            // Track which links are re-pointed for rollback: { link_id: original_loser_id }
+            let mut repointed_links = serde_json::json!({});
 
-                    // Re-point each link to the survivor
-                    for link in links_to_loser {
-                        link_repo.set_to(link.id, ObjectRef::Entity(survivor_id))?;
-                    }
+            let after = reconstruct_after(&action.diff, &serde_json::json!({"loser_ids": []}))?;
+            if let Some(loser_ids_arr) = after.get("loser_ids").and_then(|v| v.as_array()) {
+                for id_val in loser_ids_arr {
+                    if let Some(id_str) = id_val.as_str() {
+                        if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                            let loser_id = EntityId(uuid);
+                            // Get all links pointing to this loser entity
+                            let links_to_loser = link_repo.get_by_to(ObjectRef::Entity(loser_id))?;
 
-                    // Get all links originating from this loser entity
-                    let links_from_loser = link_repo.get_by_from(ObjectRef::Entity(loser_id))?;
+                            // Re-point each link to the survivor, recording the original loser
+                            for link in links_to_loser {
+                                link_repo.set_to(link.id, ObjectRef::Entity(survivor_id))?;
+                                repointed_links[link.id.to_string()] = serde_json::json!(loser_id.to_string());
+                            }
 
-                    // Re-point each link's source to the survivor
-                    for link in links_from_loser {
-                        link_repo.set_from(link.id, ObjectRef::Entity(survivor_id))?;
+                            // Get all links originating from this loser entity
+                            let links_from_loser = link_repo.get_by_from(ObjectRef::Entity(loser_id))?;
+
+                            // Re-point each link's source to the survivor, recording the original loser
+                            for link in links_from_loser {
+                                link_repo.set_from(link.id, ObjectRef::Entity(survivor_id))?;
+                                repointed_links[link.id.to_string()] = serde_json::json!(loser_id.to_string());
+                            }
+                        }
                     }
                 }
             }
+
+            // Store the repointed links mapping in the diff for accurate rollback
+            let before_val = serde_json::json!({"loser_ids": [], "repointed_links": {}});
+            let after_val = serde_json::json!({
+                "loser_ids": after.get("loser_ids").cloned().unwrap_or_default(),
+                "repointed_links": repointed_links,
+            });
+            let final_patch = pkm_core::json_patch::create_patch(&before_val, &after_val);
+            let final_diff = serde_json::to_value(final_patch)
+                .map_err(|e| AgentError::Core(pkm_core::CoreError::Invariant(e.to_string())))?;
+
+            action_repo.set_diff(action_id, final_diff.clone())?;
+            action.diff = final_diff;
 
             // Mark as Applied
             action_repo.set_status(action_id, AgentActionStatus::Applied)?;
@@ -362,37 +441,154 @@ pub fn apply_action(
 
             Ok(action)
         }
+        OperationKind::CreateNote => {
+            let after = reconstruct_after(&action.diff, &serde_json::json!({}))?;
+            if let (Some(note_id_str), Some(title)) = (
+                after.get("note_id").and_then(|v| v.as_str()),
+                after.get("title").and_then(|v| v.as_str()),
+            ) {
+                let note_uuid = Uuid::parse_str(note_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid note_id in action diff".into()))?;
+                let note_id = NoteId(note_uuid);
+
+                let now = Timestamp::now_utc();
+                let note = pkm_core::note::Note {
+                    id: note_id,
+                    title: title.to_string(),
+                    blocks: vec![],
+                    metadata: std::collections::BTreeMap::new(),
+                    created_by: action.actor.clone(),
+                    created_at: now,
+                    version: 1,
+                    updated_at: now,
+                };
+
+                note_repo.create(&note)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to create note: {}", e)))?;
+            } else {
+                return Err(AgentError::Rejected("Missing note_id or title in action diff".into()));
+            }
+
+            action_repo.set_status(action_id, AgentActionStatus::Applied)?;
+            action.status = AgentActionStatus::Applied;
+            Ok(action)
+        }
+        OperationKind::CreateTypedLink => {
+            let link_repo = link_repo.ok_or_else(|| {
+                AgentError::Rejected("LinkRepo required for CreateTypedLink".into())
+            })?;
+
+            let after = reconstruct_after(&action.diff, &serde_json::json!({}))?;
+            if let (Some(from_val), Some(to_val), Some(link_type_val)) = (
+                after.get("from"),
+                after.get("to"),
+                after.get("link_type"),
+            ) {
+                let from: ObjectRef = serde_json::from_value(from_val.clone())
+                    .map_err(|_| AgentError::Rejected("Invalid from in action diff".into()))?;
+                let to: ObjectRef = serde_json::from_value(to_val.clone())
+                    .map_err(|_| AgentError::Rejected("Invalid to in action diff".into()))?;
+                let link_type: LinkType = serde_json::from_value(link_type_val.clone())
+                    .map_err(|_| AgentError::Rejected("Invalid link_type in action diff".into()))?;
+
+                let now = Timestamp::now_utc();
+                let link = pkm_core::link::Link {
+                    id: pkm_core::id::LinkId::new(),
+                    from,
+                    to,
+                    link_type,
+                    created_by: action.actor.clone(),
+                    created_at: now,
+                    reviewed: pkm_core::review::ReviewState::Accepted,
+                    confidence: None,
+                    version: 1,
+                    updated_at: now,
+                };
+
+                // Store the newly created link ID in the diff so rollback knows which link to delete
+                let before_val = serde_json::json!({});
+                let after_val = serde_json::json!({
+                    "from": from,
+                    "to": to,
+                    "link_type": link_type,
+                    "created_link_id": link.id.to_string(),
+                });
+                let new_patch = pkm_core::json_patch::create_patch(&before_val, &after_val);
+                let new_diff = serde_json::to_value(new_patch)
+                    .map_err(|e| AgentError::Core(pkm_core::CoreError::Invariant(e.to_string())))?;
+
+                action_repo.set_diff(action_id, new_diff.clone())?;
+                action.diff = new_diff;
+
+                link_repo.create(&link)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to create link: {}", e)))?;
+            } else {
+                return Err(AgentError::Rejected("Missing from, to, or link_type in action diff".into()));
+            }
+
+            action_repo.set_status(action_id, AgentActionStatus::Applied)?;
+            action.status = AgentActionStatus::Applied;
+            Ok(action)
+        }
+        OperationKind::CreateBlock => {
+            let after = reconstruct_after(&action.diff, &serde_json::json!({}))?;
+            if let (Some(note_id_str), Some(block_id_str), Some(content_val), Some(order)) = (
+                after.get("note_id").and_then(|v| v.as_str()),
+                after.get("block_id").and_then(|v| v.as_str()),
+                after.get("content"),
+                after.get("order").and_then(|v| v.as_str()),
+            ) {
+                let note_uuid = Uuid::parse_str(note_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid note_id in action diff".into()))?;
+                let note_id = NoteId(note_uuid);
+                let block_uuid = Uuid::parse_str(block_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid block_id in action diff".into()))?;
+                let block_id = BlockId(block_uuid);
+                let content: BlockContent = serde_json::from_value(content_val.clone())
+                    .map_err(|_| AgentError::Rejected("Invalid content in action diff".into()))?;
+
+                let now = Timestamp::now_utc();
+                let block = pkm_core::block::Block {
+                    id: block_id,
+                    note_id,
+                    content,
+                    order: order.to_string(),
+                    created_by: action.actor.clone(),
+                    created_at: now,
+                    source_provenance_ref: None,
+                    version: 1,
+                    updated_at: now,
+                };
+
+                // Save to DB
+                note_repo.create_block(&block)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to create block: {}", e)))?;
+
+                // Rewrite note markdown file to persist block order and structure
+                let note = note_repo.get(note_id)?
+                    .ok_or_else(|| AgentError::Rejected(format!("Note {} not found", note_id)))?;
+                note_repo.update(&note)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to update note: {}", e)))?;
+            } else {
+                return Err(AgentError::Rejected("Missing note_id, block_id, content, or order in action diff".into()));
+            }
+
+            action_repo.set_status(action_id, AgentActionStatus::Applied)?;
+            action.status = AgentActionStatus::Applied;
+            Ok(action)
+        }
         _ => Err(AgentError::Rejected(
-            "Only UpdateBlock and MergeEntities are currently supported for apply".into(),
+            "Only CreateBlock, UpdateBlock, MergeEntities, CreateNote, and CreateTypedLink are currently supported for apply".into(),
         )),
     }
 }
 
-/// Extract loser IDs from the action diff (if populated).
-/// Expected format: {"loser_ids": ["uuid1", "uuid2", ...]}
-fn extract_loser_ids_from_diff(diff: &serde_json::Value) -> Result<Option<Vec<EntityId>>> {
-    if let Some(loser_ids_arr) = diff.get("loser_ids").and_then(|v| v.as_array()) {
-        let mut loser_ids = Vec::new();
-        for id_val in loser_ids_arr {
-            if let Some(id_str) = id_val.as_str() {
-                // Parse the UUID string directly and wrap it in EntityId
-                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                    loser_ids.push(EntityId(uuid));
-                }
-            }
-        }
-        if !loser_ids.is_empty() {
-            return Ok(Some(loser_ids));
-        }
-    }
-    Ok(None)
-}
 
 /// Rollback an applied action, restoring the prior state.
 pub fn rollback_action(
     action_id: AgentActionId,
     action_repo: &dyn AgentActionRepo,
-    _note_repo: &dyn NoteRepo,
+    note_repo: &dyn NoteRepo,
     entity_repo: Option<&dyn EntityRepo>,
     link_repo: Option<&dyn LinkRepo>,
 ) -> Result<AgentAction> {
@@ -411,9 +607,24 @@ pub fn rollback_action(
     // Handle the operation based on its kind
     match action.operation {
         OperationKind::UpdateBlock => {
-            // In a full implementation, we'd extract the before state from the diff.
-            // For S2, we're testing the action lifecycle, so we accept rollback without
-            // a fully populated diff. D3+ will implement actual block restoration.
+            let block_id = match action.target {
+                ObjectRef::Block(id) => id,
+                _ => return Err(AgentError::Rejected("UpdateBlock target must be a Block".into())),
+            };
+            let note_id = note_repo.get_note_id_for_block(block_id)?
+                .ok_or_else(|| AgentError::Rejected(format!("Note for block {} not found", block_id)))?;
+
+            let blocks = note_repo.get_blocks(note_id)?;
+            let current_block = blocks.iter().find(|b| b.id == block_id)
+                .ok_or_else(|| AgentError::Rejected(format!("Block {} not found", block_id)))?;
+
+            // Diff now holds the exact snapshot of the original block prior to the mutation.
+            let orig_block: pkm_core::block::Block = serde_json::from_value(action.diff.clone())
+                .map_err(|e| AgentError::Rejected(format!("Failed to deserialize original block snapshot: {}", e)))?;
+
+            // Restore the block to its previous content
+            note_repo.update_block(note_id, block_id, orig_block.content)
+                .map_err(|e| AgentError::Rejected(format!("Failed to restore block: {}", e)))?;
 
             // Mark original as Reverted
             action_repo.set_status(action_id, AgentActionStatus::Reverted)?;
@@ -427,7 +638,7 @@ pub fn rollback_action(
                 status: AgentActionStatus::Applied,
                 rationale: format!("Rollback of action {}", action_id),
                 created_at: Timestamp::now_utc(),
-                diff: serde_json::json!({}),
+                diff: serde_json::json!([]),
                 rollback_of: Some(action_id),
             };
 
@@ -444,34 +655,41 @@ pub fn rollback_action(
                 AgentError::Rejected("LinkRepo required for MergeEntities rollback".into())
             })?;
 
-            // Extract survivor ID from the target (the surviving entity)
-            let survivor_id = match action.target {
-                ObjectRef::Entity(id) => id,
-                _ => {
-                    return Err(AgentError::Rejected(
-                        "MergeEntities target must be an Entity".into(),
-                    ))
+            let after = reconstruct_after(&action.diff, &serde_json::json!({"loser_ids": [], "repointed_links": {}}))?;
+            if let Some(loser_ids_arr) = after.get("loser_ids").and_then(|v| v.as_array()) {
+                for id_val in loser_ids_arr {
+                    if let Some(id_str) = id_val.as_str() {
+                        if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                            let loser_id = EntityId(uuid);
+                            // Restore loser entity's merged_into to NULL
+                            entity_repo.clear_merged_into(loser_id)?;
+                        }
+                    }
                 }
-            };
+            }
 
-            // Extract loser IDs from the diff
-            if let Ok(Some(loser_ids)) = extract_loser_ids_from_diff(&action.diff) {
-                for loser_id in loser_ids {
-                    // Restore loser entity's merged_into to NULL
-                    entity_repo.clear_merged_into(loser_id)?;
+            if let Some(repointed_links_obj) = after.get("repointed_links").and_then(|v| v.as_object()) {
+                for (link_id_str, loser_id_val) in repointed_links_obj.iter() {
+                    if let (Ok(link_uuid), Some(loser_id_str)) = (
+                        uuid::Uuid::parse_str(link_id_str),
+                        loser_id_val.as_str(),
+                    ) {
+                        if let Ok(loser_uuid) = uuid::Uuid::parse_str(loser_id_str) {
+                            let link_id = pkm_core::id::LinkId(link_uuid);
+                            let loser_id = EntityId(loser_uuid);
 
-                    // Re-point links back from survivor to loser.
-                    // Note: A full implementation would track which specific links were re-pointed
-                    // during the merge. For now, we reconstruct by looking at links that
-                    // point to the survivor entity (these are the ones that pointed to the loser
-                    // before the merge).
-                    let links_to_survivor = link_repo.get_by_to(ObjectRef::Entity(survivor_id))?;
-
-                    for link in links_to_survivor {
-                        // Re-point this link back to the loser if it doesn't originate from
-                        // the survivor (those links were originally from the loser)
-                        if link.from != ObjectRef::Entity(survivor_id) {
-                            link_repo.set_to(link.id, ObjectRef::Entity(loser_id))?;
+                            // Get the link to check if it points to survivor (the ones that were repointed)
+                            if let Ok(Some(link)) = link_repo.get(link_id) {
+                                // If this link still exists and was originally from this loser, restore it
+                                // For "to" links: set target back to loser
+                                if link.to == action.target {
+                                    link_repo.set_to(link_id, ObjectRef::Entity(loser_id))?;
+                                }
+                                // For "from" links: set source back to loser
+                                if link.from == action.target {
+                                    link_repo.set_from(link_id, ObjectRef::Entity(loser_id))?;
+                                }
+                            }
                         }
                     }
                 }
@@ -489,7 +707,123 @@ pub fn rollback_action(
                 status: AgentActionStatus::Applied,
                 rationale: format!("Rollback of action {}", action_id),
                 created_at: Timestamp::now_utc(),
-                diff: serde_json::json!({}),
+                diff: serde_json::json!([]),
+                rollback_of: Some(action_id),
+            };
+
+            action_repo.create(&rollback_action)?;
+
+            Ok(rollback_action)
+        }
+        OperationKind::CreateNote => {
+            let after = reconstruct_after(&action.diff, &serde_json::json!({}))?;
+            if let Some(note_id_str) = after.get("note_id").and_then(|v| v.as_str()) {
+                let note_uuid = Uuid::parse_str(note_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid note_id in action diff".into()))?;
+                let note_id = NoteId(note_uuid);
+
+                note_repo.delete(note_id)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to delete note: {}", e)))?;
+            } else {
+                return Err(AgentError::Rejected("Missing note_id in action diff".into()));
+            }
+
+            // Mark original as Reverted
+            action_repo.set_status(action_id, AgentActionStatus::Reverted)?;
+
+            // Create rollback action
+            let rollback_action = AgentAction {
+                id: AgentActionId::new(),
+                actor: Actor::System,
+                operation: OperationKind::RollbackAction,
+                target: action.target,
+                status: AgentActionStatus::Applied,
+                rationale: format!("Rollback of action {}", action_id),
+                created_at: Timestamp::now_utc(),
+                diff: action.diff.clone(),
+                rollback_of: Some(action_id),
+            };
+
+            action_repo.create(&rollback_action)?;
+
+            Ok(rollback_action)
+        }
+        OperationKind::CreateTypedLink => {
+            let link_repo = link_repo.ok_or_else(|| {
+                AgentError::Rejected("LinkRepo required for CreateTypedLink rollback".into())
+            })?;
+
+            let after = reconstruct_after(&action.diff, &serde_json::json!({}))?;
+            if let Some(link_id_str) = after.get("created_link_id").and_then(|v| v.as_str()) {
+                let link_uuid = Uuid::parse_str(link_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid created_link_id in action diff".into()))?;
+                let link_id = pkm_core::id::LinkId(link_uuid);
+
+                link_repo.delete(link_id)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to delete link: {}", e)))?;
+            } else {
+                return Err(AgentError::Rejected("Missing created_link_id in action diff".into()));
+            }
+
+            // Mark original as Reverted
+            action_repo.set_status(action_id, AgentActionStatus::Reverted)?;
+
+            // Create rollback action
+            let rollback_action = AgentAction {
+                id: AgentActionId::new(),
+                actor: Actor::System,
+                operation: OperationKind::RollbackAction,
+                target: action.target,
+                status: AgentActionStatus::Applied,
+                rationale: format!("Rollback of action {}", action_id),
+                created_at: Timestamp::now_utc(),
+                diff: action.diff.clone(),
+                rollback_of: Some(action_id),
+            };
+
+            action_repo.create(&rollback_action)?;
+
+            Ok(rollback_action)
+        }
+        OperationKind::CreateBlock => {
+            let after = reconstruct_after(&action.diff, &serde_json::json!({}))?;
+            if let (Some(note_id_str), Some(block_id_str)) = (
+                after.get("note_id").and_then(|v| v.as_str()),
+                after.get("block_id").and_then(|v| v.as_str()),
+            ) {
+                let note_uuid = Uuid::parse_str(note_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid note_id in action diff".into()))?;
+                let note_id = NoteId(note_uuid);
+                let block_uuid = Uuid::parse_str(block_id_str)
+                    .map_err(|_| AgentError::Rejected("Invalid block_id in action diff".into()))?;
+                let block_id = BlockId(block_uuid);
+
+                // Delete the block
+                note_repo.delete_block(note_id, block_id)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to delete block: {}", e)))?;
+
+                // Rewrite note markdown file to reflect deletion
+                let note = note_repo.get(note_id)?
+                    .ok_or_else(|| AgentError::Rejected(format!("Note {} not found", note_id)))?;
+                note_repo.update(&note)
+                    .map_err(|e| AgentError::Rejected(format!("Failed to update note after block deletion: {}", e)))?;
+            } else {
+                return Err(AgentError::Rejected("Missing note_id or block_id in action diff for rollback".into()));
+            }
+
+            // Mark original as Reverted
+            action_repo.set_status(action_id, AgentActionStatus::Reverted)?;
+
+            // Create rollback action
+            let rollback_action = AgentAction {
+                id: AgentActionId::new(),
+                actor: Actor::System,
+                operation: OperationKind::RollbackAction,
+                target: action.target,
+                status: AgentActionStatus::Applied,
+                rationale: format!("Rollback of action {}", action_id),
+                created_at: Timestamp::now_utc(),
+                diff: action.diff.clone(),
                 rollback_of: Some(action_id),
             };
 
@@ -498,10 +832,11 @@ pub fn rollback_action(
             Ok(rollback_action)
         }
         _ => Err(AgentError::Rejected(
-            "Only UpdateBlock and MergeEntities rollback are currently supported".into(),
+            "Only CreateBlock, UpdateBlock, MergeEntities, CreateNote, and CreateTypedLink rollback are currently supported".into(),
         )),
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -601,7 +936,7 @@ mod tests {
             rationale: "User created a note".to_string(),
         };
 
-        let action = execute(req, &repo).unwrap();
+        let action = execute(req, &repo, &MockNoteRepo).unwrap();
         assert_eq!(action.status, AgentActionStatus::Applied);
         assert_eq!(action.operation, OperationKind::CreateNote);
 
@@ -622,7 +957,7 @@ mod tests {
             rationale: "Automatic indexing".to_string(),
         };
 
-        let action = execute(req, &repo).unwrap();
+        let action = execute(req, &repo, &MockNoteRepo).unwrap();
         assert_eq!(action.status, AgentActionStatus::Applied);
         assert_eq!(action.operation, OperationKind::ParseSource);
 
@@ -662,9 +997,10 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "Hello".to_string(),
                 },
-                order: 1.0,
+                order: "000000".to_string(),
             },
             Operation::UpdateBlock {
+                note_id: NoteId::new(),
                 block_id: BlockId::new(),
                 new_content: BlockContent::Markdown {
                     text: "Updated".to_string(),
@@ -771,6 +1107,10 @@ mod tests {
             self.set_from_calls.borrow_mut().push((link_id, new_from));
             Ok(())
         }
+
+        fn delete(&self, _link_id: pkm_core::id::LinkId) -> pkm_core::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -793,6 +1133,7 @@ mod tests {
             kind: pkm_core::entity::EntityKind::Person,
             name: "Loser Entity".to_string(),
             aliases: vec![],
+            semantic_date: None,
             created_by: Actor::User,
             created_at: now,
             merged_into: None,
@@ -819,6 +1160,11 @@ mod tests {
         link_repo.add_link_to(ObjectRef::Entity(loser_id), link1.clone());
 
         // Create merge action
+        let before_val = serde_json::json!({"loser_ids": []});
+        let after_val = serde_json::json!({"loser_ids": [loser_id.to_string()]});
+        let patch = pkm_core::json_patch::create_patch(&before_val, &after_val);
+        let diff = serde_json::to_value(patch).unwrap();
+
         let merge_action = AgentAction {
             id: AgentActionId::new(),
             actor: Actor::User,
@@ -827,9 +1173,7 @@ mod tests {
             status: AgentActionStatus::Proposed,
             rationale: "Merging duplicate entities".to_string(),
             created_at: Timestamp::now_utc(),
-            diff: serde_json::json!({
-                "loser_ids": [loser_id.to_string()]
-            }),
+            diff,
             rollback_of: None,
         };
 
@@ -919,6 +1263,11 @@ mod tests {
         link_repo.add_link_from(ObjectRef::Entity(loser_id), link2.clone());
 
         // Create a merge operation in an action with loser IDs in the diff
+        let before_val = serde_json::json!({"loser_ids": []});
+        let after_val = serde_json::json!({"loser_ids": [loser_id.to_string()]});
+        let patch = pkm_core::json_patch::create_patch(&before_val, &after_val);
+        let diff = serde_json::to_value(patch).unwrap();
+
         let action = AgentAction {
             id: AgentActionId::new(),
             actor: Actor::User,
@@ -927,9 +1276,7 @@ mod tests {
             status: AgentActionStatus::Proposed,
             rationale: "Merging duplicate entities".to_string(),
             created_at: Timestamp::now_utc(),
-            diff: serde_json::json!({
-                "loser_ids": [loser_id.to_string()]
-            }),
+            diff,
             rollback_of: None,
         };
 
@@ -986,6 +1333,22 @@ mod tests {
             _new_content: pkm_core::block::BlockContent,
         ) -> pkm_core::Result<pkm_core::block::Block> {
             unimplemented!()
+        }
+
+        fn get_blocks(&self, _note_id: NoteId) -> pkm_core::Result<Vec<pkm_core::block::Block>> {
+            Ok(vec![])
+        }
+
+        fn get_note_id_for_block(&self, _block_id: BlockId) -> pkm_core::Result<Option<NoteId>> {
+            Ok(None)
+        }
+
+        fn create_block(&self, _block: &pkm_core::block::Block) -> pkm_core::Result<()> {
+            Ok(())
+        }
+
+        fn delete_block(&self, _note_id: NoteId, _block_id: BlockId) -> pkm_core::Result<()> {
+            Ok(())
         }
     }
 

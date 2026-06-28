@@ -1100,10 +1100,17 @@ impl ViewModel for DefaultViewModel {
             }
         }
 
+        if source_ids_ordered.is_empty() {
+            // Fallback to all sources sorted by captured_at descending up to limit
+            let mut sorted = _sources.to_vec();
+            sorted.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+            let source_ids: Vec<_> = sorted.into_iter().take(limit).map(|s| s.id).collect();
+            return Ok(ViewRenderResult { source_ids });
+        }
+
         // Convert to string representation and return in rendering order
         let source_ids: Vec<_> = source_ids_ordered
             .into_iter()
-            .map(|id| id)
             .collect();
 
         Ok(ViewRenderResult { source_ids })

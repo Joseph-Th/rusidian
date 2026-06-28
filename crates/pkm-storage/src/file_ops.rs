@@ -10,13 +10,16 @@ use std::io;
 /// Write file atomically: temp file -> database -> rename.
 /// Returns path to temp file; caller must rename after DB succeeds or delete on failure.
 pub fn write_to_temp_file(vault_path: &Path, note_id: &str, content: &str) -> io::Result<std::path::PathBuf> {
-    let temp_path = vault_path.join(format!("{}.tmp", note_id));
+    let temp_path = vault_path.join(format!("{}.{}.tmp", note_id, uuid::Uuid::now_v7()));
     fs::write(&temp_path, content)?;
     Ok(temp_path)
 }
 
 /// Atomically replace old file with temp file (OS-level atomic rename).
 pub fn commit_temp_file(temp_path: &Path, target_path: &Path) -> io::Result<()> {
+    if cfg!(target_os = "windows") && target_path.exists() {
+        let _ = std::fs::remove_file(target_path); // Ignore error, rename will catch it if locked
+    }
     fs::rename(temp_path, target_path)
 }
 

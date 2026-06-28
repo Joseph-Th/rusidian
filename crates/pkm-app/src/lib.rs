@@ -22,8 +22,8 @@ pub use watcher::{watch_vault, NoteWatcherEvent};
 mod tests {
     use super::*;
 
-    #[test]
-    fn service_creates_and_retrieves_note() {
+    #[tokio::test]
+    async fn service_creates_and_retrieves_note() {
         let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
         let db_path = temp_dir.path().join("test.db");
         let db_path_str = db_path.to_str().expect("invalid path");
@@ -54,8 +54,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn crud_workflow_end_to_end() {
+    #[tokio::test]
+    async fn crud_workflow_end_to_end() {
         use std::collections::BTreeMap;
 
         let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
@@ -123,8 +123,8 @@ mod tests {
         assert!(final_list.is_empty(), "list should be empty after deletion");
     }
 
-    #[test]
-    fn vault_watcher_syncs_external_markdown_changes() {
+    #[tokio::test]
+    async fn vault_watcher_syncs_external_markdown_changes() {
         use std::thread;
         use std::time::Duration;
 

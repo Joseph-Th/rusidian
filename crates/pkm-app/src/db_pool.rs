@@ -10,25 +10,36 @@ use std::path::Path;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
 
-/// Custom connection manager that initializes SQLite pragmas.
-pub struct InitializedSqliteManager {
-    manager: SqliteConnectionManager,
-    initialized: std::sync::atomic::AtomicBool,
+/// Enforces SQLite pragmas on every connection acquired from the pool.
+/// This ensures foreign key constraints and busy timeout are enabled on all connections.
+#[derive(Debug)]
+struct PragmaCustomizer;
+
+impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer {
+    fn on_acquire(&self, conn: &mut Connection) -> Result<(), rusqlite::Error> {
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(())
+    }
 }
 
 /// Create a new database connection pool.
 pub fn create_pool(db_path: &Path) -> Result<DbPool, String> {
     let manager = SqliteConnectionManager::file(db_path);
 
-    let pool = Pool::new(manager)
+    let pool = Pool::builder()
+        .connection_customizer(Box::new(PragmaCustomizer))
+        .build(manager)
         .map_err(|e| format!("Failed to create connection pool: {}", e))?;
 
-    // Initialize pragmas on one connection to set up the database
+    // Initialize WAL mode on one connection (subsequent connections inherit via CustomizeConnection)
     {
-        let conn = pool
+        let mut conn = pool
             .get()
             .map_err(|e| format!("Failed to get connection for initialization: {}", e))?;
         init_pragmas(&conn)?;
+        pkm_storage::migrations::run(&mut conn)
+            .map_err(|e| format!("Failed to run database migrations: {}", e))?;
     }
 
     Ok(pool)
@@ -37,9 +48,5 @@ pub fn create_pool(db_path: &Path) -> Result<DbPool, String> {
 fn init_pragmas(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA journal_mode = WAL")
         .map_err(|e| format!("Failed to enable WAL: {}", e))?;
-    conn.execute_batch("PRAGMA foreign_keys = ON")
-        .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))
-        .map_err(|e| format!("Failed to set busy timeout: {}", e))?;
     Ok(())
 }

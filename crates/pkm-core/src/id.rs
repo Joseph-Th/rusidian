@@ -77,6 +77,7 @@ pub enum ObjectRef {
     Entity(EntityId),
     Link(LinkId),
     View(ViewId),
+    AgentAction(AgentActionId),
 }
 
 #[cfg(test)]
@@ -92,6 +93,7 @@ mod tests {
             ObjectRef::Entity(EntityId::new()),
             ObjectRef::Link(LinkId::new()),
             ObjectRef::View(ViewId::new()),
+            ObjectRef::AgentAction(AgentActionId::new()),
         ] {
             let json = serde_json::to_string(&obj_ref).unwrap();
             let back: ObjectRef = serde_json::from_str(&json).unwrap();

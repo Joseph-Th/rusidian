@@ -49,6 +49,22 @@ pub const MIGRATIONS: &[(&str, &str)] = &[
         "0010_markdown_first",
         include_str!("../migrations/0010_markdown_first.sql"),
     ),
+    (
+        "0011_add_semantic_dates",
+        include_str!("../migrations/0011_add_semantic_dates.sql"),
+    ),
+    (
+        "0012_embeddings",
+        include_str!("../migrations/0012_embeddings.sql"),
+    ),
+    (
+        "0013_add_ingestion_queue",
+        include_str!("../migrations/0013_add_ingestion_queue.sql"),
+    ),
+    (
+        "0014_standardize_block_order",
+        include_str!("../migrations/0014_standardize_block_order.sql"),
+    ),
 ];
 
 /// Apply all pending migrations inside a transaction. Idempotent: safe to call

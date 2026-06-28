@@ -72,9 +72,11 @@ pub struct Block {
     pub id: BlockId,
     pub note_id: NoteId,
     pub content: BlockContent,
-    /// Fractional order key for stable insertion/reordering (not array position).
-    /// Insert between blocks by choosing an intermediate value.
-    pub order: f32,
+    /// String-based fractional index for stable insertion/reordering (like LexoRank).
+    /// Allows arbitrary insertions between blocks without precision collapse.
+    /// Format: alphanumeric string where lexicographic ordering preserves block order.
+    /// Examples: "a", "am", "b", "c", "cz", "d"
+    pub order: String,
     /// Who created this block (user or agent).
     pub created_by: Actor,
     /// When this block was created.
@@ -102,11 +104,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn block_ordering_stable_with_fractional_keys() {
+    fn block_ordering_stable_with_fractional_indices() {
         let note_id = NoteId::new();
         let now = Timestamp::now_utc();
 
-        // Create three blocks with fractional order keys.
+        // Create three blocks with string-based order keys (LexoRank-style).
         let mut blocks = [
             Block {
                 id: BlockId::new(),
@@ -114,7 +116,7 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "First".to_string(),
                 },
-                order: 1.0,
+                order: "a".to_string(),
                 created_by: Actor::User,
                 created_at: now,
                 source_provenance_ref: None,
@@ -127,7 +129,7 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "Third".to_string(),
                 },
-                order: 3.0,
+                order: "c".to_string(),
                 created_by: Actor::User,
                 created_at: now,
                 source_provenance_ref: None,
@@ -140,7 +142,7 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "Second".to_string(),
                 },
-                order: 2.0,
+                order: "b".to_string(),
                 created_by: Actor::User,
                 created_at: now,
                 source_provenance_ref: None,
@@ -149,13 +151,13 @@ mod tests {
             },
         ];
 
-        // Sort by order key.
-        blocks.sort_by(|a, b| a.order.partial_cmp(&b.order).unwrap());
+        // Sort by order key (lexicographic).
+        blocks.sort_by(|a, b| a.order.cmp(&b.order));
 
         // Verify order is correct.
-        assert_eq!(blocks[0].order, 1.0);
-        assert_eq!(blocks[1].order, 2.0);
-        assert_eq!(blocks[2].order, 3.0);
+        assert_eq!(blocks[0].order, "a");
+        assert_eq!(blocks[1].order, "b");
+        assert_eq!(blocks[2].order, "c");
     }
 
     #[test]
@@ -163,14 +165,14 @@ mod tests {
         let note_id = NoteId::new();
         let now = Timestamp::now_utc();
 
-        // Create a block between two existing blocks.
+        // Create blocks with string-based indices.
         let first = Block {
             id: BlockId::new(),
             note_id,
             content: BlockContent::Markdown {
                 text: "First".to_string(),
             },
-            order: 1.0,
+            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -184,7 +186,7 @@ mod tests {
             content: BlockContent::Markdown {
                 text: "Third".to_string(),
             },
-            order: 3.0,
+            order: "c".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -192,14 +194,14 @@ mod tests {
             updated_at: now,
         };
 
-        // Insert a new block between them (order = 2.0, which is between 1.0 and 3.0).
+        // Insert a new block between "a" and "c" (order = "am", which sorts between "a" and "c")
         let middle = Block {
             id: BlockId::new(),
             note_id,
             content: BlockContent::Markdown {
                 text: "Inserted".to_string(),
             },
-            order: 2.0,
+            order: "am".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -207,9 +209,30 @@ mod tests {
             updated_at: now,
         };
 
-        // Verify ordering: 1.0 < 2.0 < 3.0
+        // Verify ordering: "a" < "am" < "c"
         assert!(first.order < middle.order);
         assert!(middle.order < last.order);
+    }
+
+    #[test]
+    fn block_ordering_supports_infinite_insertions() {
+        let note_id = NoteId::new();
+        let now = Timestamp::now_utc();
+
+        // Demonstrate that string-based indexing supports unlimited insertions
+        // between two blocks without precision loss.
+        let mut current_order = "a".to_string();
+
+        for _ in 0..100 {
+            // Insert many blocks between "a" and "z" by appending characters
+            current_order.push('m');
+            assert!(current_order.as_str() > "a");
+            assert!(current_order.as_str() < "z");
+        }
+
+        // The order string is still valid and comparable
+        assert!("a" < current_order.as_str());
+        assert!(current_order.as_str() < "z");
     }
 
     #[test]

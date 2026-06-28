@@ -36,11 +36,11 @@ pub struct Note {
 impl Note {
     /// Generate a safe filename from the note title.
     /// Converts to lowercase, replaces spaces with hyphens, removes special characters,
-    /// and appends .md extension.
-    /// Example: "My Great Idea!" -> "my-great-idea.md"
+    /// appends UUID suffix for uniqueness, and adds .md extension.
+    /// Example: "My Great Idea!" -> "my-great-idea-abc123de.md"
     pub fn file_name(&self) -> String {
         if self.title.is_empty() {
-            return "untitled.md".to_string();
+            return format!("untitled-{}.md", &self.id.0.to_string()[..8]);
         }
 
         let mut filename = String::new();
@@ -54,15 +54,15 @@ impl Note {
                 filename.push('-');
                 last_was_separator = true;
             }
-            // Skip all other special characters
         }
 
         let filename = filename.trim_matches('-').to_string();
+        let uuid_suffix = &self.id.0.to_string()[..8];
 
         if filename.is_empty() {
-            "untitled.md".to_string()
+            format!("untitled-{}.md", uuid_suffix)
         } else {
-            format!("{}.md", filename)
+            format!("{}-{}.md", filename, uuid_suffix)
         }
     }
 }
@@ -124,7 +124,8 @@ mod tests {
             updated_at: now,
         };
 
-        assert_eq!(note.file_name(), "my-great-idea.md");
+        let suffix = &note.id.0.to_string()[..8];
+        assert_eq!(note.file_name(), format!("my-great-idea-{}.md", suffix));
     }
 
     #[test]
@@ -141,7 +142,8 @@ mod tests {
             updated_at: now,
         };
 
-        assert_eq!(note.file_name(), "my-great-idea.md");
+        let suffix = &note.id.0.to_string()[..8];
+        assert_eq!(note.file_name(), format!("my-great-idea-{}.md", suffix));
     }
 
     #[test]
@@ -158,7 +160,8 @@ mod tests {
             updated_at: now,
         };
 
-        assert_eq!(note.file_name(), "test-note.md");
+        let suffix = &note.id.0.to_string()[..8];
+        assert_eq!(note.file_name(), format!("test-note-{}.md", suffix));
     }
 
     #[test]
@@ -175,7 +178,8 @@ mod tests {
             updated_at: now,
         };
 
-        assert_eq!(note.file_name(), "untitled.md");
+        let suffix = &note.id.0.to_string()[..8];
+        assert_eq!(note.file_name(), format!("untitled-{}.md", suffix));
     }
 
     #[test]
@@ -192,7 +196,8 @@ mod tests {
             updated_at: now,
         };
 
-        assert_eq!(note.file_name(), "untitled.md");
+        let suffix = &note.id.0.to_string()[..8];
+        assert_eq!(note.file_name(), format!("untitled-{}.md", suffix));
     }
 
     #[test]
@@ -209,7 +214,8 @@ mod tests {
             updated_at: now,
         };
 
-        assert_eq!(note.file_name(), "my-test-note.md");
+        let suffix = &note.id.0.to_string()[..8];
+        assert_eq!(note.file_name(), format!("my-test-note-{}.md", suffix));
     }
 
     #[test]
@@ -226,6 +232,7 @@ mod tests {
             updated_at: now,
         };
 
-        assert_eq!(note.file_name(), "test-123-note-456.md");
+        let suffix = &note.id.0.to_string()[..8];
+        assert_eq!(note.file_name(), format!("test-123-note-456-{}.md", suffix));
     }
 }

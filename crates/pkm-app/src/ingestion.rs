@@ -9,7 +9,7 @@
 //! This ensures Jina free tier compliance while maximizing throughput.
 
 use crate::db_pool::DbPool;
-use pkm_core::id::{SourceId, NoteId, ObjectRef};
+use pkm_core::id::{SourceId, NoteId, ObjectRef, BlockId};
 use pkm_core::source::{Source, SourceOrigin};
 use pkm_core::ingestion::IngestionState;
 use pkm_core::ports::SourceRepo;
@@ -18,13 +18,17 @@ use pkm_storage::{SqliteSourceRepo, SqliteAgentActionRepo, SqliteNoteRepo};
 use pkm_storage::repositories::SqliteLinkRepo;
 use pkm_agent::{Operation, OperationRequest};
 use regex::Regex;
+use std::sync::LazyLock;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration};
 
+static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"https?://[^\s]+").expect("Invalid URL regex")
+});
+
 /// Extract all URLs from a text block using regex.
 pub fn extract_urls(text: &str) -> Vec<String> {
-    let url_regex = Regex::new(r"https?://[^\s]+").expect("Invalid URL regex");
-    url_regex
+    URL_REGEX
         .find_iter(text)
         .map(|mat| {
             mat.as_str()
@@ -43,39 +47,95 @@ pub fn compute_hash(content: &str) -> String {
 }
 
 /// Start the rate-limited background ingestion worker.
-/// Returns an unbounded sender for queuing individual URLs.
+/// Returns a sender for queuing individual URLs.
 ///
 /// Architecture:
-/// - The sender accepts URLs immediately (unbounded queue)
+/// - URLs are persisted to the SQLite ingestion_queue table
 /// - Fetcher loop runs at exactly 1 request per 3 seconds (20 RPM)
 /// - LLM + DB work happens in separate tokio::spawn tasks (non-blocking)
+/// - Queue survives app restarts for durability
 pub fn start_ingestion_worker(
     pool: DbPool,
     vault_path: std::path::PathBuf,
-) -> mpsc::UnboundedSender<String> {
-    let (tx, rx) = mpsc::unbounded_channel::<String>();
+) -> mpsc::Sender<String> {
+    let (tx, rx) = mpsc::channel::<String>(100);
 
-    tokio::spawn(run_rate_limited_fetcher(pool, vault_path, rx));
+    tokio::spawn(run_ingestion_dispatcher(pool.clone(), rx));
+    tokio::spawn(run_rate_limited_fetcher(pool, vault_path));
 
     tx
 }
 
-/// The rate-limited fetcher loop.
-/// Processes exactly one URL every 3 seconds (20 RPM limit).
-///
-/// This ensures we never violate Jina's free tier rate limit while keeping
-/// the fetcher moving at a steady cadence regardless of LLM latency.
+/// Dispatcher: receives URLs from the channel and persists them to SQLite.
+async fn run_ingestion_dispatcher(
+    pool: DbPool,
+    mut rx: mpsc::Receiver<String>,
+) {
+    while let Some(url) = rx.recv().await {
+        let pool_clone = pool.clone();
+        tokio::spawn(async move {
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Ok(conn) = pool_clone.get() {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let _ = conn.execute(
+                        "INSERT INTO ingestion_queue (url, status, created_at) VALUES (?1, 'pending', ?2)",
+                        rusqlite::params![&url, &now],
+                    );
+                }
+            }).await;
+        });
+    }
+}
+
 async fn run_rate_limited_fetcher(
     pool: DbPool,
     vault_path: std::path::PathBuf,
-    mut rx: mpsc::UnboundedReceiver<String>,
 ) {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let mut ticker = interval(Duration::from_secs(3)); // 20 RPM = 1 request per 3 seconds
 
-    while let Some(url) = rx.recv().await {
+    loop {
         // CRITICAL: Wait for the tick before processing the next URL
         ticker.tick().await;
+
+        // Fetch one pending URL from the queue, atomically marking it as processing
+        let pool_clone_fetch = pool.clone();
+        let db_res = tokio::task::spawn_blocking(move || {
+            let conn = pool_clone_fetch.get().map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare(
+                "UPDATE ingestion_queue SET status = 'processing' \
+                 WHERE id = (SELECT id FROM ingestion_queue WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1) \
+                 RETURNING id, url"
+            ).map_err(|e| e.to_string())?;
+
+            match stmt.query_row([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            }) {
+                Ok(result) => Ok(Some(result)),
+                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(e) => Err(e.to_string()),
+            }
+        }).await;
+
+        let db_res = match db_res {
+            Ok(Ok(res)) => res,
+            Ok(Err(e)) => {
+                eprintln!("[Queue] DB error: {}", e);
+                continue;
+            }
+            Err(e) => {
+                eprintln!("[Queue] Spawn blocking join error: {}", e);
+                continue;
+            }
+        };
+
+        let (queue_id, url) = match db_res {
+            Some(res) => res,
+            None => continue, // No more URLs to process
+        };
 
         println!("[Jina Fetcher] Processing URL (3-sec rate limit): {}", url);
 
@@ -84,32 +144,61 @@ async fn run_rate_limited_fetcher(
         let vault_clone = vault_path.clone();
         let client_clone = client.clone();
 
-        // Fetch markdown from Jina (blocking I/O, but quick)
-        let jina_url = format!("https://r.jina.ai/{}", url.clone());
-        let markdown = match client.get(&jina_url).send().await {
-            Ok(resp) if resp.status().is_success() => resp.text().await.unwrap_or_default(),
-            Ok(resp) => {
-                eprintln!("[Jina] HTTP {}: {}", resp.status(), url);
-                continue;
-            }
-            Err(e) => {
-                eprintln!("[Jina] Network error: {}", e);
-                continue;
-            }
-        };
-
-        if markdown.is_empty() {
-            eprintln!("[Jina] Empty response for {}", url);
-            continue;
-        }
-
-        println!("[Jina Fetcher] ✓ Fetched {} bytes from {}", markdown.len(), url);
-
-        // CRITICAL: Spawn a separate task for LLM reasoning + database writes.
-        // This ensures a slow LLM (10+ seconds) doesn't block the next 3-second Jina fetch.
+        // Spawn the fetch + process in a separate task so the loop immediately loops again
+        // This decouples network latency from the rate limit ticker
         tokio::spawn(async move {
-            if let Err(e) = process_and_promote_source(
-                pool_clone,
+            let jina_url = format!("https://r.jina.ai/{}", url.clone());
+            let markdown = match client_clone.get(&jina_url).send().await {
+                Ok(resp) if resp.status().is_success() => resp.text().await.unwrap_or_default(),
+                Ok(resp) => {
+                    eprintln!("[Jina] HTTP {}: {}", resp.status(), url);
+                    // Mark as failed
+                    let pool_db = pool_clone.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if let Ok(conn) = pool_db.get() {
+                            let _ = conn.execute(
+                                "UPDATE ingestion_queue SET status = 'failed', error_message = ?1, processed_at = ?2 WHERE id = ?3",
+                                rusqlite::params![format!("HTTP {}", resp.status()), chrono::Utc::now().to_rfc3339(), queue_id],
+                            );
+                        }
+                    }).await;
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("[Jina] Network error (timeout or connection): {}", e);
+                    // Mark as failed
+                    let pool_db = pool_clone.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if let Ok(conn) = pool_db.get() {
+                            let _ = conn.execute(
+                                "UPDATE ingestion_queue SET status = 'failed', error_message = ?1, processed_at = ?2 WHERE id = ?3",
+                                rusqlite::params![e.to_string(), chrono::Utc::now().to_rfc3339(), queue_id],
+                            );
+                        }
+                    }).await;
+                    return;
+                }
+            };
+
+            if markdown.is_empty() {
+                eprintln!("[Jina] Empty response for {}", url);
+                let pool_db = pool_clone.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    if let Ok(conn) = pool_db.get() {
+                        let _ = conn.execute(
+                            "UPDATE ingestion_queue SET status = 'failed', error_message = ?1, processed_at = ?2 WHERE id = ?3",
+                            rusqlite::params!["Empty response", chrono::Utc::now().to_rfc3339(), queue_id],
+                        );
+                    }
+                }).await;
+                return;
+            }
+
+            println!("[Jina Fetcher] ✓ Fetched {} bytes from {}", markdown.len(), url);
+
+            // Process markdown (LLM reasoning + DB writes) in the spawned task
+            match process_and_promote_source(
+                pool_clone.clone(),
                 vault_clone,
                 client_clone,
                 url.clone(),
@@ -117,7 +206,31 @@ async fn run_rate_limited_fetcher(
             )
             .await
             {
-                eprintln!("[Processor] Error for {}: {}", url, e);
+                Ok(()) => {
+                    // Mark as completed
+                    let pool_db = pool_clone.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if let Ok(conn) = pool_db.get() {
+                            let _ = conn.execute(
+                                "UPDATE ingestion_queue SET status = 'completed', processed_at = ?1 WHERE id = ?2",
+                                rusqlite::params![chrono::Utc::now().to_rfc3339(), queue_id],
+                            );
+                        }
+                    }).await;
+                }
+                Err(e) => {
+                    eprintln!("[Processor] Error for {}: {}", url, e);
+                    // Mark as failed
+                    let pool_db = pool_clone.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if let Ok(conn) = pool_db.get() {
+                            let _ = conn.execute(
+                                "UPDATE ingestion_queue SET status = 'failed', error_message = ?1, processed_at = ?2 WHERE id = ?3",
+                                rusqlite::params![e, chrono::Utc::now().to_rfc3339(), queue_id],
+                            );
+                        }
+                    }).await;
+                }
             }
         });
     }
@@ -206,14 +319,36 @@ async fn process_and_promote_source(
                 },
             };
 
-            let action = pkm_agent::execute(create_note_op, &action_repo)
+            let action = pkm_agent::execute(create_note_op, &action_repo, &note_repo)
                 .map_err(|e| format!("Execute CreateNote failed: {}", e))?;
             pkm_agent::apply_action(action.id, &action_repo, &note_repo, Some(&link_repo))
                 .map_err(|e| format!("Apply CreateNote failed: {}", e))?;
 
             println!("[Processor] ✓ Note created: {}", note_id);
 
-            // ACTION B: Create DerivedFrom link
+            // ACTION B: Create Block (inject ai_results.summary)
+            let block_id = BlockId::new();
+            let create_block_op = OperationRequest {
+                actor: agent_actor.clone(),
+                rationale: "Autonomous note summary block".to_string(),
+                operation: Operation::CreateBlock {
+                    note_id,
+                    block_id,
+                    content: pkm_core::block::BlockContent::Markdown {
+                        text: ai_results.summary.clone(),
+                    },
+                    order: "000000".to_string(),
+                },
+            };
+
+            let action = pkm_agent::execute(create_block_op, &action_repo, &note_repo)
+                .map_err(|e| format!("Execute CreateBlock failed: {}", e))?;
+            pkm_agent::apply_action(action.id, &action_repo, &note_repo, Some(&link_repo))
+                .map_err(|e| format!("Apply CreateBlock failed: {}", e))?;
+
+            println!("[Processor] ✓ Block created: {}", block_id);
+
+            // ACTION C: Create DerivedFrom link
             let link_op = OperationRequest {
                 actor: agent_actor.clone(),
                 rationale: "Provenance link to source".to_string(),
@@ -224,7 +359,7 @@ async fn process_and_promote_source(
                 },
             };
 
-            let action = pkm_agent::execute(link_op, &action_repo)
+            let action = pkm_agent::execute(link_op, &action_repo, &note_repo)
                 .map_err(|e| format!("Execute CreateTypedLink failed: {}", e))?;
             pkm_agent::apply_action(action.id, &action_repo, &note_repo, Some(&link_repo))
                 .map_err(|e| format!("Apply CreateTypedLink failed: {}", e))?;

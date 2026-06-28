@@ -50,8 +50,15 @@ impl BlobStore {
         Ok(hash)
     }
 
+    fn is_valid_hash(hash: &str) -> bool {
+        hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+    }
+
     /// Fetch a blob by its hash.
     pub fn fetch(&self, hash: &str) -> Result<Vec<u8>> {
+        if !Self::is_valid_hash(hash) {
+            return Err(StorageError::Migration(format!("invalid hash format: {}", hash)));
+        }
         let path = self.blob_path(hash);
 
         std::fs::read(&path)
@@ -60,6 +67,9 @@ impl BlobStore {
 
     /// Check if a blob exists.
     pub fn exists(&self, hash: &str) -> bool {
+        if !Self::is_valid_hash(hash) {
+            return false;
+        }
         self.blob_path(hash).exists()
     }
 
@@ -138,7 +148,20 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let store = BlobStore::new(temp_dir.path().to_path_buf()).unwrap();
 
+        // Valid SHA256 hex length (64 chars) but not stored
+        let valid_but_missing = "a".repeat(64);
+        assert!(!store.exists(&valid_but_missing));
         assert!(!store.exists("nonexistent_hash_value"));
+    }
+
+    #[test]
+    fn path_traversal_rejected() {
+        let temp_dir = TempDir::new().unwrap();
+        let store = BlobStore::new(temp_dir.path().to_path_buf()).unwrap();
+
+        let bad_hash = "../../../etc/passwd";
+        assert!(!store.exists(bad_hash));
+        assert!(store.fetch(bad_hash).is_err());
     }
 
     #[test]

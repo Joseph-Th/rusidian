@@ -19,17 +19,57 @@ pub struct PatchOp {
 
 /// Create a JSON Patch by comparing two JSON values.
 /// Returns a minimal patch that transforms `before` into `after`.
+/// Uses json-patch crate for RFC 6902 compliance.
 pub fn create_patch(before: &Value, after: &Value) -> Vec<PatchOp> {
-    let mut ops = Vec::new();
+    if before == after {
+        return Vec::new();
+    }
 
-    // For now, use a simple full replacement (future: implement Myers diff for minimal patches)
-    if before != after {
-        ops.push(PatchOp {
-            op: "replace".to_string(),
-            path: "/".to_string(),
-            value: Some(after.clone()),
-            from: None,
-        });
+    // Use json_patch::diff for minimal RFC 6902-compliant patches
+    let diff = json_patch::diff(before, after);
+
+    // Convert from json_patch operations to our PatchOp format
+    let mut ops = Vec::new();
+    for op in diff.0 {
+        let patch_op = match op {
+            json_patch::PatchOperation::Add(add_op) => PatchOp {
+                op: "add".to_string(),
+                path: add_op.path,
+                value: Some(add_op.value),
+                from: None,
+            },
+            json_patch::PatchOperation::Remove(remove_op) => PatchOp {
+                op: "remove".to_string(),
+                path: remove_op.path,
+                value: None,
+                from: None,
+            },
+            json_patch::PatchOperation::Replace(replace_op) => PatchOp {
+                op: "replace".to_string(),
+                path: replace_op.path,
+                value: Some(replace_op.value),
+                from: None,
+            },
+            json_patch::PatchOperation::Move(move_op) => PatchOp {
+                op: "move".to_string(),
+                path: move_op.path,
+                value: None,
+                from: Some(move_op.from),
+            },
+            json_patch::PatchOperation::Copy(copy_op) => PatchOp {
+                op: "copy".to_string(),
+                path: copy_op.path,
+                value: None,
+                from: Some(copy_op.from),
+            },
+            json_patch::PatchOperation::Test(test_op) => PatchOp {
+                op: "test".to_string(),
+                path: test_op.path,
+                value: Some(test_op.value),
+                from: None,
+            },
+        };
+        ops.push(patch_op);
     }
 
     ops
@@ -39,86 +79,14 @@ pub fn create_patch(before: &Value, after: &Value) -> Vec<PatchOp> {
 pub fn apply_patch(value: &Value, patch: &[PatchOp]) -> Result<Value, String> {
     let mut result = value.clone();
 
-    for op in patch {
-        match op.op.as_str() {
-            "add" => {
-                if let Some(val) = &op.value {
-                    apply_add(&mut result, &op.path, val.clone())?;
-                }
-            }
-            "remove" => {
-                apply_remove(&mut result, &op.path)?;
-            }
-            "replace" => {
-                if let Some(val) = &op.value {
-                    apply_replace(&mut result, &op.path, val.clone())?;
-                }
-            }
-            _ => return Err(format!("Unsupported patch op: {}", op.op)),
-        }
-    }
+    // Convert our PatchOp array to json_patch::Patch object via JSON value conversion
+    let patch_value = serde_json::to_value(patch)
+        .map_err(|e| format!("Failed to serialize patch ops: {}", e))?;
+    let patch_ops: json_patch::Patch = serde_json::from_value(patch_value)
+        .map_err(|e| format!("Failed to parse patch ops: {}", e))?;
 
+    json_patch::patch(&mut result, &patch_ops).map_err(|e| e.to_string())?;
     Ok(result)
-}
-
-fn apply_add(value: &mut Value, path: &str, new_val: Value) -> Result<(), String> {
-    if path == "/" {
-        *value = new_val;
-        return Ok(());
-    }
-
-    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-    let mut current = value;
-
-    for (i, part) in parts.iter().enumerate() {
-        if i == parts.len() - 1 {
-            if let Value::Object(ref mut obj) = current {
-                obj.insert(part.to_string(), new_val);
-            }
-            return Ok(());
-        }
-
-        if let Value::Object(ref mut obj) = current {
-            current = obj.entry(part.to_string()).or_insert(Value::Object(Default::default()));
-        }
-    }
-
-    Ok(())
-}
-
-fn apply_remove(value: &mut Value, path: &str) -> Result<(), String> {
-    if path == "/" {
-        return Err("Cannot remove root".to_string());
-    }
-
-    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-    let mut current = value;
-
-    for (i, part) in parts.iter().enumerate() {
-        if i == parts.len() - 1 {
-            if let Value::Object(ref mut obj) = current {
-                obj.remove(*part);
-            }
-            return Ok(());
-        }
-
-        if let Value::Object(ref mut obj) = current {
-            current = obj.entry(part.to_string()).or_insert(Value::Object(Default::default()));
-        }
-    }
-
-    Ok(())
-}
-
-fn apply_replace(value: &mut Value, path: &str, new_val: Value) -> Result<(), String> {
-    if path == "/" {
-        *value = new_val;
-        return Ok(());
-    }
-
-    apply_remove(value, path)?;
-    apply_add(value, path, new_val)?;
-    Ok(())
 }
 
 #[cfg(test)]

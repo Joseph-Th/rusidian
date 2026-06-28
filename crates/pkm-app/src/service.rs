@@ -15,6 +15,7 @@ use std::sync::OnceLock;
 use crate::db_pool::{create_pool, DbPool};
 use crate::watcher::{watch_vault, NoteWatcherEvent, IgnoreNextEvent};
 use tokio::sync::mpsc;
+use rusqlite::params;
 
 type GraphNode = (String, String, f64, f64, String, String, String);
 
@@ -33,8 +34,8 @@ pub struct AppService {
     pool: DbPool,
     db_path: PathBuf,
     vault_path: PathBuf,
-    /// Unbounded sender for ingestion URLs (rate-limited in fetcher)
-    pub ingestion_tx: Option<mpsc::UnboundedSender<String>>,
+    /// Bounded sender for ingestion URLs (rate-limited in fetcher)
+    pub ingestion_tx: Option<mpsc::Sender<String>>,
 }
 
 impl AppService {
@@ -54,6 +55,9 @@ impl AppService {
 
         // Create vault directory if it doesn't exist
         std::fs::create_dir_all(&vault).map_err(|e| format!("Failed to create vault dir: {}", e))?;
+
+        // Canonicalize the vault path immediately to ensure consistent, absolute paths
+        let vault = std::fs::canonicalize(vault).map_err(|e| format!("Failed to canonicalize vault path: {}", e))?;
 
         // Start the rate-limited background ingestion worker
         let ingestion_tx = crate::ingestion::start_ingestion_worker(pool.clone(), vault.clone());
@@ -83,11 +87,20 @@ impl AppService {
         let _ = WATCHER_IGNORE_HANDLE.set(ignore_handle);
 
         // Spawn a background task to process watcher events
-        std::thread::spawn(move || {
-            while let Ok(event) = watcher_rx.recv() {
-                // Process the watcher event: sync to database
-                if let Err(e) = Self::sync_external_note(&pool, event) {
-                    eprintln!("Failed to sync external note change: {}", e);
+        tokio::spawn(async move {
+            let mut rx = watcher_rx;
+            while let Some(event) = rx.recv().await {
+                match event {
+                    NoteWatcherEvent::Modified { .. } => {
+                        if let Err(e) = Self::sync_external_note(&pool, event) {
+                            eprintln!("Failed to sync external note change: {}", e);
+                        }
+                    }
+                    NoteWatcherEvent::Deleted { file_path } => {
+                        if let Err(e) = Self::sync_external_note_delete(&pool, &file_path) {
+                            eprintln!("Failed to sync external note deletion: {}", e);
+                        }
+                    }
                 }
             }
         });
@@ -97,16 +110,22 @@ impl AppService {
 
     /// Sync a note from an external file change into the database.
     /// This is called when the file watcher detects a change to a markdown file.
+    /// Also handles block ID regeneration: if any block lacked a persistent ID comment,
+    /// the markdown file is rewritten to bake in the newly assigned UUIDs.
     fn sync_external_note(
         pool: &DbPool,
         event: NoteWatcherEvent,
     ) -> Result<(), String> {
+        let (file_path, note, blocks, needs_rewrite) = match event {
+            NoteWatcherEvent::Modified { file_path, note, blocks, needs_rewrite } => (file_path, note, blocks, needs_rewrite),
+            _ => return Err("Expected Modified event".to_string()),
+        };
+
         let conn = pool
             .get()
             .map_err(|e| format!("Failed to get database connection: {}", e))?;
 
         // Insert or replace the note in the database
-        let note = &event.note;
         let created_at_str = note
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
@@ -120,8 +139,9 @@ impl AppService {
             .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
         let created_by_json = serde_json::to_string(&note.created_by)
             .map_err(|e| format!("Failed to serialize actor: {}", e))?;
-        let file_path_str = event
-            .file_path
+        let file_path_canonical = std::fs::canonicalize(file_path.clone())
+            .unwrap_or_else(|_| file_path.clone());
+        let file_path_str = file_path_canonical
             .to_str()
             .ok_or_else(|| "Invalid file path".to_string())?;
 
@@ -142,7 +162,26 @@ impl AppService {
         )
         .map_err(|e| format!("Failed to insert note: {}", e))?;
 
-        // Process external block changes: delete old blocks and insert new ones
+        // BUG FIX: Fetch old metadata to preserve it before deleting
+        let mut stmt = conn
+            .prepare("SELECT id, content, created_at, created_by, version, updated_at FROM block WHERE note_id = ?1")
+            .map_err(|e| format!("Failed to prepare select block stmt: {}", e))?;
+        let existing_blocks: std::collections::HashMap<String, (String, String, String, i64, String)> = stmt
+            .query_map(rusqlite::params![note.id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?, 
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?, 
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?
+                ))
+            })
+            .map_err(|e| format!("Failed to query blocks: {}", e))?
+            .filter_map(Result::ok)
+            .map(|(id, c, ca, cb, v, ua)| (id, (c, ca, cb, v, ua)))
+            .collect();
+
         conn.execute(
             "DELETE FROM block WHERE note_id = ?1",
             rusqlite::params![note.id.to_string()],
@@ -150,19 +189,32 @@ impl AppService {
         .map_err(|e| format!("Failed to delete old blocks: {}", e))?;
 
         // Insert the new blocks from the parsed markdown
-        for block in &event.blocks {
-            let created_at_str = block
+        for block in &blocks {
+            let mut created_at_str = block
                 .created_at
                 .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_else(|_| "unknown".to_string());
-            let updated_at_str = block
+                .map_err(|e| format!("Failed to format created_at: {}", e))?;
+            let mut updated_at_str = block
                 .updated_at
                 .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_else(|_| "unknown".to_string());
-            let created_by_json = serde_json::to_string(&block.created_by)
-                .map_err(|e| format!("Failed to serialize block actor: {}", e))?;
+                .map_err(|e| format!("Failed to format updated_at: {}", e))?;
+            let mut created_by_json = serde_json::to_string(&block.created_by)
+                .map_err(|e| format!("Failed to serialize actor: {}", e))?;
+            let mut version = block.version as i64;
             let content_json = serde_json::to_string(&block.content)
                 .map_err(|e| format!("Failed to serialize block content: {}", e))?;
+
+            // Merge metadata
+            if let Some((old_content, old_ca, old_cb, old_v, old_ua)) = existing_blocks.get(&block.id.to_string()) {
+                created_at_str = old_ca.clone();
+                created_by_json = old_cb.clone();
+                if &content_json != old_content {
+                    version = old_v + 1; // Content changed, increment version. updated_at is `now`
+                } else {
+                    version = *old_v;
+                    updated_at_str = old_ua.clone(); // Keep original updated_at
+                }
+            }
 
             conn.execute(
                 "INSERT INTO block (id, note_id, block_type, content, \"order\", created_at, created_by, version, updated_at)
@@ -175,17 +227,69 @@ impl AppService {
                     block.order,
                     created_at_str,
                     created_by_json,
-                    block.version as i64,
+                    version,
                     updated_at_str,
                 ],
             )
             .map_err(|e| format!("Failed to insert block: {}", e))?;
         }
 
+        // If blocks had regenerated IDs, rewrite the markdown file to persist them
+        if needs_rewrite {
+            // Register the upcoming write with the watcher cache to prevent infinite loop
+            if let Some(ignore_handle) = get_watcher_ignore_handle() {
+                ignore_handle.skip_next(file_path_canonical.clone());
+            }
+            let markdown_text = pkm_core::markdown::note_to_markdown(&note, &blocks);
+            if let Err(e) = std::fs::write(file_path_str, markdown_text) {
+                eprintln!("Warning: Failed to persist block IDs to file: {}", e);
+            } else {
+                println!("✓ Persisted block IDs to {}", file_path.display());
+            }
+        }
+
         println!(
             "✓ Synced external note: {} ({} blocks from {})",
-            note.title, event.blocks.len(), event.file_path.display()
+            note.title, blocks.len(), file_path.display()
         );
+
+        Ok(())
+    }
+
+    fn sync_external_note_delete(
+        pool: &DbPool,
+        file_path: &Path,
+    ) -> Result<(), String> {
+        let conn = pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
+
+        let file_path_canonical = std::fs::canonicalize(file_path)
+            .unwrap_or_else(|_| file_path.to_path_buf());
+        let file_path_str = file_path_canonical
+            .to_str()
+            .ok_or_else(|| "Invalid file path".to_string())?;
+
+        let note_id_str: Option<String> = conn.query_row(
+            "SELECT id FROM note WHERE file_path = ?1",
+            params![file_path_str],
+            |row| row.get(0),
+        ).ok();
+
+        if let Some(note_id) = note_id_str {
+            let note_uuid = uuid::Uuid::parse_str(&note_id)
+                .map_err(|_| format!("Invalid note ID in DB: {}", note_id))?;
+            let vault_path = file_path_canonical.parent()
+                .ok_or_else(|| "Invalid vault path".to_string())?
+                .to_path_buf();
+            let note_repo = SqliteNoteRepo {
+                conn: &conn,
+                vault_path,
+            };
+            note_repo.delete(pkm_core::id::NoteId(note_uuid))
+                .map_err(|e| format!("Failed to delete note: {}", e))?;
+            println!("[Watcher] Deleted note from DB: {}", note_id);
+        }
 
         Ok(())
     }
@@ -205,6 +309,12 @@ impl AppService {
         };
 
         let note_id = note.id.to_string();
+
+        // Skip the next watcher event for this file to prevent infinite loop
+        let file_path = self.vault_path.join(note.file_name());
+        if let Some(ignore_handle) = get_watcher_ignore_handle() {
+            ignore_handle.skip_next(file_path);
+        }
 
         let conn = self
             .pool
@@ -302,6 +412,12 @@ impl AppService {
         note.version += 1;
         note.updated_at = Timestamp::now_utc();
 
+        // Skip the next watcher event for this file to prevent infinite loop
+        let file_path = self.vault_path.join(note.file_name());
+        if let Some(ignore_handle) = get_watcher_ignore_handle() {
+            ignore_handle.skip_next(file_path);
+        }
+
         note_repo
             .update(&note)
             .map_err(|e| format!("Failed to update note: {}", e))?;
@@ -314,17 +430,30 @@ impl AppService {
         let uuid =
             uuid::Uuid::parse_str(note_id).map_err(|_| format!("Invalid note ID: {}", note_id))?;
         let parsed_id = pkm_core::id::NoteId(uuid);
-
+ 
         let conn = self
             .pool
             .get()
             .map_err(|e| format!("Failed to get database connection: {}", e))?;
+ 
+        // Retrieve file path to ignore in watcher
+        let file_path_str: Option<String> = conn.query_row(
+            "SELECT file_path FROM note WHERE id = ?1",
+            params![note_id],
+            |row| row.get(0),
+        ).ok();
+
+        if let Some(path_str) = file_path_str {
+            if let Some(ignore_handle) = get_watcher_ignore_handle() {
+                ignore_handle.skip_next(PathBuf::from(path_str));
+            }
+        }
 
         let note_repo = SqliteNoteRepo { conn: &conn, vault_path: self.vault_path.clone() };
         note_repo
             .delete(parsed_id)
             .map_err(|e| format!("Failed to delete note: {}", e))?;
-
+ 
         Ok(())
     }
 
@@ -455,20 +584,14 @@ impl AppService {
         limit: Option<usize>,
     ) -> Result<Vec<(String, String)>, String> {
         use pkm_core::id::ObjectRef;
-        use std::sync::{Arc, Mutex};
-        use pkm_storage::open;
 
         let search_query = parse_query(SearchMode::FuzzyText, query);
 
-        // For search, we need a stable connection that lives across the search operation.
-        // Since SqliteRetriever requires Arc<Mutex<Connection>>, we open a dedicated connection
-        // for the search operation. This is acceptable because:
-        // 1. Reads in WAL mode don't block writes
-        // 2. Multiple read connections are efficient in SQLite
-        let search_conn = open(&self.db_path)
-            .map_err(|e| format!("Failed to open search connection: {}", e))?;
-        let conn_arc = Arc::new(Mutex::new(search_conn));
-        let retriever = SqliteRetriever::new(conn_arc);
+        let search_conn = self
+            .pool
+            .get()
+            .map_err(|e| format!("Failed to get database connection: {}", e))?;
+        let retriever = SqliteRetriever::new(&search_conn);
 
         let hits = retriever
             .search(&search_query)
@@ -1153,7 +1276,7 @@ impl AppService {
         };
 
         // Step 1: Generate the audit log entry (execute)
-        let action = pkm_agent::execute(req, &action_repo)
+        let action = pkm_agent::execute(req, &action_repo, &note_repo)
             .map_err(|e| format!("Failed to execute operation: {}", e))?;
 
         // Step 2: Immediately apply it (bypassing human review)
@@ -1170,7 +1293,7 @@ impl AppService {
     /// Ingest bulk links from raw pasted text.
     /// Extracts URLs, queues them for rate-limited background processing.
     /// Returns immediately with the count of URLs found.
-    pub async fn ingest_bulk_links(&self, raw_text: String) -> Result<usize, String> {
+    pub fn ingest_bulk_links(&self, raw_text: String) -> Result<usize, String> {
         // Extract all URLs from the pasted text
         let urls = crate::ingestion::extract_urls(&raw_text);
         let count = urls.len();
@@ -1179,11 +1302,11 @@ impl AppService {
             return Ok(0);
         }
 
-        // Queue each URL individually to the unbounded fetcher queue
+        // Queue each URL individually to the bounded fetcher queue
         if let Some(ref tx) = self.ingestion_tx {
             for url in urls {
                 // Ignore send errors if channel is closed (shouldn't happen)
-                let _ = tx.send(url);
+                let _ = tx.blocking_send(url);
             }
         } else {
             return Err("Ingestion worker not available".to_string());

@@ -12,28 +12,25 @@ use rusqlite::Connection;
 
 /// SQLite FTS5-backed retriever. Searches across notes, blocks, sources, and
 /// entities with keyword and phrase matching. Preserves ContentStatus for display.
-pub struct SqliteRetriever {
-    conn: std::sync::Arc<std::sync::Mutex<Connection>>,
+pub struct SqliteRetriever<'a> {
+    conn: &'a Connection,
 }
 
-impl SqliteRetriever {
+impl<'a> SqliteRetriever<'a> {
     /// Create a new retriever backed by an existing SQLite connection.
-    pub fn new(conn: std::sync::Arc<std::sync::Mutex<Connection>>) -> Self {
+    pub fn new(conn: &'a Connection) -> Self {
         Self { conn }
     }
 }
 
-impl pkm_core::ports::Retriever for SqliteRetriever {
+impl<'a> pkm_core::ports::Retriever for SqliteRetriever<'a> {
     fn search(&self, query: &SearchQuery) -> pkm_core::Result<Vec<SearchHit>> {
         if query.text.trim().is_empty() {
             return Ok(Vec::new());
         }
 
         let mut results = Vec::new();
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|_| pkm_core::CoreError::Invariant("failed to lock connection".to_string()))?;
+        let conn = self.conn;
 
         use pkm_core::ports::SearchMode;
 
@@ -149,7 +146,7 @@ fn get_linked_objects(conn: &Connection, obj: &ObjectRef) -> pkm_core::Result<Ve
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
     let to_objects: Vec<(String, String)> = stmt
-        .query_map([obj_type, &obj_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map(rusqlite::params![obj_type, obj_id], |row| Ok((row.get(0)?, row.get(1)?)))
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
@@ -166,7 +163,7 @@ fn get_linked_objects(conn: &Connection, obj: &ObjectRef) -> pkm_core::Result<Ve
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
 
     let from_objects: Vec<(String, String)> = stmt
-        .query_map([obj_type, &obj_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map(rusqlite::params![obj_type, obj_id], |row| Ok((row.get(0)?, row.get(1)?)))
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
@@ -195,6 +192,7 @@ fn object_ref_to_string_parts(obj: &ObjectRef) -> (&'static str, String) {
         ObjectRef::Entity(id) => ("entity", id.to_string()),
         ObjectRef::Link(id) => ("link", id.to_string()),
         ObjectRef::View(id) => ("view", id.to_string()),
+        ObjectRef::AgentAction(id) => ("agent_action", id.to_string()),
     }
 }
 
@@ -210,6 +208,7 @@ fn string_to_object_ref(type_str: &str, id_str: &str) -> pkm_core::Result<Object
         "entity" => ObjectRef::Entity(pkm_core::id::EntityId(uuid)),
         "link" => ObjectRef::Link(pkm_core::id::LinkId(uuid)),
         "view" => ObjectRef::View(pkm_core::id::ViewId(uuid)),
+        "agent_action" => ObjectRef::AgentAction(pkm_core::id::AgentActionId(uuid)),
         _ => {
             return Err(pkm_core::CoreError::Invariant(
                 "unknown object type".to_string(),
@@ -350,15 +349,26 @@ fn fts_expr(text: &str, fuzzy: bool) -> Option<String> {
     // Escape inner double-quotes per FTS5 spec (double them).
     let escaped = sanitized.replace('"', "\"\"");
 
-    Some(if fuzzy {
-        format!("\"{}\"*", escaped)
+    let terms: Vec<String> = escaped
+        .split_whitespace()
+        .map(|word| {
+            if fuzzy {
+                format!("\"{}\"*", word)
+            } else {
+                format!("\"{}\"", word)
+            }
+        })
+        .collect();
+
+    if terms.is_empty() {
+        None
     } else {
-        format!("\"{}\"", escaped)
-    })
+        Some(terms.join(" "))
+    }
 }
 
 /// Sanitize user input for FTS5 queries by removing reserved operators and keywords.
-/// Preserves alphanumerics, spaces, and common punctuation that won't break FTS5.
+/// Properly escapes backslashes and single quotes to prevent query injection.
 fn sanitize_fts_input(text: &str) -> String {
     let text_lower = text.to_lowercase();
 
@@ -372,14 +382,15 @@ fn sanitize_fts_input(text: &str) -> String {
         return String::new();
     }
 
-    // Remove or replace problematic FTS5 operator characters
-    // * ^ ( ) : - are FTS5 operators
-    text.chars()
+    // Escape backslashes first, then remove or replace problematic FTS5 operator characters
+    let escaped = text.replace('\\', "");
+
+    escaped.chars()
         .filter(|c| match c {
             // Remove FTS5 operator characters
-            '*' | '^' | '(' | ')' | ':' | '-' => false,
+            '*' | '^' | '(' | ')' | ':' | '\'' => false,
             // Keep alphanumerics, spaces, and common punctuation
-            c if c.is_alphanumeric() || c.is_whitespace() || *c == '_' || *c == '.' || *c == ',' => true,
+            c if c.is_alphanumeric() || c.is_whitespace() || *c == '_' || *c == '.' || *c == ',' || *c == '"' => true,
             // Remove everything else
             _ => false,
         })
@@ -610,6 +621,7 @@ fn apply_filters(results: &mut Vec<SearchHit>, query: &SearchQuery) {
                 ObjectRef::Entity(_) => "entity",
                 ObjectRef::Link(_) => "link",
                 ObjectRef::View(_) => "view",
+                ObjectRef::AgentAction(_) => "agent_action",
             };
             hit_type.to_lowercase() == obj_type.to_lowercase()
         });
@@ -678,8 +690,7 @@ mod tests {
     fn basic_retriever_initialization() {
         // This is a placeholder test that ensures the retriever can be instantiated.
         // Full integration tests should use the migration test infrastructure.
-        let _ = SqliteRetriever::new(std::sync::Arc::new(std::sync::Mutex::new(
-            rusqlite::Connection::open_in_memory().unwrap(),
-        )));
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let _ = SqliteRetriever::new(&conn);
     }
 }

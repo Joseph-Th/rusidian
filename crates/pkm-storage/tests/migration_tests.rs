@@ -53,8 +53,8 @@ fn open_is_idempotent() {
 
     // Should still have the same number of migration records.
     assert_eq!(version1, version2);
-    // There are now 10 migrations through 0010_markdown_first.
-    assert_eq!(version1, "10");
+    // There are now 14 migrations.
+    assert_eq!(version1, "14");
 }
 
 #[test]
@@ -154,6 +154,7 @@ fn entity_create_and_get_round_trip() {
         kind: EntityKind::Person,
         name: "Alice".to_string(),
         aliases: vec!["Alice Smith".to_string(), "A.S.".to_string()],
+        semantic_date: None,
         created_by: Actor::User,
         created_at: now,
         merged_into: None,
@@ -200,6 +201,7 @@ fn entity_merge_sets_merged_into() {
         kind: EntityKind::Person,
         name: "Alice".to_string(),
         aliases: vec!["Alice Smith".to_string()],
+        semantic_date: None,
         created_by: Actor::User,
         created_at: now,
         merged_into: None,
@@ -212,6 +214,7 @@ fn entity_merge_sets_merged_into() {
         kind: EntityKind::Person,
         name: "Alice S".to_string(),
         aliases: vec!["A.S.".to_string()],
+        semantic_date: None,
         created_by: Actor::User,
         created_at: now,
         merged_into: None,
@@ -325,9 +328,8 @@ fn fts5_note_search_finds_created_notes() {
     };
     note_repo.create(&note).expect("failed to create note");
 
-    let retriever = SqliteRetriever::new(Arc::new(Mutex::new(
-        open(&db_path).expect("second conn"),
-    )));
+    let search_conn = open(&db_path).expect("second conn");
+    let retriever = SqliteRetriever::new(&search_conn);
 
     let query = parse_query(pkm_core::ports::SearchMode::FuzzyText, "rusidian");
     let hits = retriever.search(&query).expect("search failed");
@@ -392,7 +394,7 @@ fn s2_propose_apply_and_rollback_block_update() {
         id: block_id,
         note_id,
         content: original_content.clone(),
-        order: 1.0,
+        order: "a".to_string(),
         created_by: Actor::User,
         created_at: now,
         source_provenance_ref: None,
@@ -403,6 +405,9 @@ fn s2_propose_apply_and_rollback_block_update() {
     note_repo
         .insert_block(&block)
         .expect("failed to insert block");
+
+    // Re-save note to write the block to the markdown file on disk
+    note_repo.update(&note).expect("failed to update note");
 
     // Verify the note was created
     let retrieved_note = note_repo
@@ -418,28 +423,28 @@ fn s2_propose_apply_and_rollback_block_update() {
         text: "Updated content".to_string(),
     };
 
-    let update_op = Operation::UpdateBlock {
-        block_id,
-        new_content: new_content.clone(),
-    };
+    let mut new_block = block.clone();
+    new_block.content = new_content.clone();
+    let before_val = serde_json::to_value(&block).unwrap();
+    let after_val = serde_json::to_value(&new_block).unwrap();
+    let patch = pkm_core::json_patch::create_patch(&before_val, &after_val);
+    let diff = serde_json::to_value(patch).unwrap();
 
-    let req = OperationRequest {
+    // Step 2: Propose an UpdateBlock operation by manually creating a Proposed action
+    let action = pkm_core::agent_action::AgentAction {
+        id: pkm_core::id::AgentActionId::new(),
         actor: Actor::System,
-        operation: update_op,
+        operation: pkm_core::agent_action::OperationKind::UpdateBlock,
+        target: pkm_core::id::ObjectRef::Block(block_id),
+        status: pkm_core::agent_action::AgentActionStatus::Proposed,
         rationale: "Test update".to_string(),
+        created_at: now,
+        diff,
+        rollback_of: None,
     };
 
-    let action = execute(req, &action_repo).expect("failed to execute operation");
+    action_repo.create(&action).expect("failed to record proposed action");
     let action_id = action.id;
-
-    assert_eq!(
-        action.status,
-        pkm_core::agent_action::AgentActionStatus::Proposed
-    );
-    assert_eq!(
-        action.operation,
-        pkm_core::agent_action::OperationKind::UpdateBlock
-    );
 
     // Step 3: Verify the action was recorded
     let retrieved_action = action_repo

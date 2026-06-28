@@ -339,8 +339,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -1803,6 +1805,17 @@ dependencies = [
 
 [[package]]
 name = "json-patch"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec9ad60d674508f3ca8f380a928cfe7b096bc729c4e2dbfe3852bc45da3ab30b"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "json-patch"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "863726d7afb6bc2590eeff7135d923545e5e964f004c2ccf8716c25e70a86f08"
@@ -2588,6 +2601,7 @@ dependencies = [
 name = "pkm-app"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "notify",
  "pkm-agent",
  "pkm-core",
@@ -2616,6 +2630,7 @@ dependencies = [
 name = "pkm-core"
 version = "0.0.0"
 dependencies = [
+ "json-patch 1.4.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3795,7 +3810,7 @@ dependencies = [
  "dirs",
  "glob",
  "heck 0.5.0",
- "json-patch",
+ "json-patch 3.0.1",
  "schemars 0.8.22",
  "semver",
  "serde",
@@ -3814,7 +3829,7 @@ dependencies = [
  "base64 0.22.1",
  "brotli",
  "ico",
- "json-patch",
+ "json-patch 3.0.1",
  "plist",
  "png 0.17.16",
  "proc-macro2",
@@ -3912,7 +3927,7 @@ dependencies = [
  "glob",
  "http 1.4.2",
  "infer",
- "json-patch",
+ "json-patch 3.0.1",
  "log",
  "memchr",
  "phf",
