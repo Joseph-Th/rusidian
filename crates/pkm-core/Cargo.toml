@@ -23,4 +23,3 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
-json-patch = { workspace = true }

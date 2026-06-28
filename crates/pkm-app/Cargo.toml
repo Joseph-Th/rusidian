@@ -10,7 +10,7 @@ rust-version.workspace = true
 
 [dependencies]
 pkm-core = { workspace = true }
-pkm-storage = { workspace = true }
+pkm-fs = { workspace = true }
 pkm-search = { workspace = true }
 pkm-agent = { workspace = true }
 pkm-ingestion = { workspace = true }
@@ -20,9 +20,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
-rusqlite = { workspace = true }
-r2d2 = { workspace = true }
-r2d2_sqlite = { workspace = true }
 tauri = { workspace = true, optional = true }
 notify = { workspace = true }
 tokio = { workspace = true }

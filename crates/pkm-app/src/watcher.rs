@@ -26,7 +26,6 @@ pub enum NoteWatcherEvent {
         file_path: PathBuf,
         note: Note,
         blocks: Vec<pkm_core::block::Block>,
-        needs_rewrite: bool,
     },
     Deleted {
         file_path: PathBuf,
@@ -149,13 +148,10 @@ async fn watch_impl(
                                 now,
                             ) {
                                 Ok((note, blocks)) => {
-                                    // BUG FIX: If there is no frontmatter, rewrite the file immediately so block/note IDs stabilize
-                                    let needs_rewrite = !markdown_text.starts_with("---\n") || blocks.iter().any(|b| !markdown_text.contains(&b.id.to_string()));
                                     let event = NoteWatcherEvent::Modified {
                                         file_path: path_clone.clone(),
                                         note,
                                         blocks,
-                                        needs_rewrite,
                                     };
                                     let _ = tx_clone.send(event);
                                 }

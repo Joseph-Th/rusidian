@@ -192,10 +192,9 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
     let mut md = String::new();
 
     for block in blocks {
-        // Add a block id reference and order as an HTML comment for round-tripping.
-        // Format: <!-- block:uuid order:1.5 -->
-        // The order is preserved for fractional ordering (e.g., inserting between existing blocks)
-        md.push_str(&format!("<!-- block:{} order:{} -->\n\n", block.id, block.order));
+        // Add a block id reference as an HTML comment for round-tripping.
+        // Format: <!-- block:uuid -->
+        md.push_str(&format!("<!-- block:{} -->\n\n", block.id));
 
         // Serialize block content
         let content_md = block_content_to_markdown(&block.content);
@@ -277,8 +276,8 @@ fn split_table_row(line: &str) -> Vec<String> {
 
 /// Parse markdown into blocks. Recognizes rich block types (tables, math, media)
 /// and converts them back to their BlockContent variants. Falls back to Markdown
-/// blocks for unrecognized content. Block IDs and order are preserved from HTML comments:
-/// <!-- block:uuid order:a -->
+/// blocks for unrecognized content. Block IDs are preserved from HTML comments:
+/// <!-- block:uuid -->
 ///
 /// Uses an internal pure function with parameterized ID generation to ensure testability.
 pub fn markdown_to_blocks(text: &str, note_id: NoteId) -> Result<Vec<Block>, String> {
@@ -293,34 +292,26 @@ fn markdown_to_blocks_internal(
     id_gen: &mut dyn FnMut() -> BlockId,
 ) -> Result<Vec<Block>, String> {
     let mut blocks = Vec::new();
-    let mut next_order_idx = 0;
     let now = Timestamp::now_utc();
 
     let lines = text.lines().collect::<Vec<_>>();
     let mut i = 0;
     let mut pending_block_id: Option<BlockId> = None;
-    let mut pending_block_order: Option<String> = None;
 
     while i < lines.len() {
         let line = lines[i];
 
-        // Check for block ID comment with optional order — if found, store it for the next block.
-        // Format: <!-- block:uuid -->  (legacy, no order) or <!-- block:uuid order:a -->
+        // Check for block ID comment: <!-- block:uuid -->
         if line.starts_with("<!-- block:") && line.ends_with(" -->") {
             let comment_content = line
                 .trim_start_matches("<!-- block:")
                 .trim_end_matches(" -->");
 
-            // Split on space to extract id and optional order
+            // Split on space to extract id (we ignore any extra legacy order info)
             let parts: Vec<&str> = comment_content.split_whitespace().collect();
 
             if let Ok(uuid) = uuid::Uuid::parse_str(parts[0]) {
                 pending_block_id = Some(BlockId(uuid));
-
-                // Parse order if present (format: order:a, order:am, etc.)
-                if parts.len() > 1 && parts[1].starts_with("order:") {
-                    pending_block_order = Some(parts[1][6..].to_string());
-                }
             }
             i += 1;
             continue;
@@ -409,18 +400,10 @@ fn markdown_to_blocks_internal(
             }
         };
 
-        // Use persisted order if available; otherwise use auto-generated string index
-        let block_order = pending_block_order.take().unwrap_or_else(|| {
-            let order = generate_lexorank_index(next_order_idx);
-            next_order_idx += 1;
-            order
-        });
-
         let block = Block {
             id: pending_block_id.take().unwrap_or_else(|| id_gen()),
             note_id,
             content,
-            order: block_order,
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -431,10 +414,6 @@ fn markdown_to_blocks_internal(
     }
 
     Ok(blocks)
-}
-
-fn generate_lexorank_index(index: usize) -> String {
-    format!("{:06}", index) // "000000", "000001", etc.
 }
 
 /// Try to parse internal embed (e.g., <!-- embed:internal:view:uuid -->).
@@ -630,7 +609,6 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "First paragraph".to_string(),
                 },
-                order: "a".to_string(),
                 created_by: Actor::User,
                 created_at: now,
                 source_provenance_ref: None,
@@ -643,7 +621,6 @@ mod tests {
                 content: BlockContent::Markdown {
                     text: "Second paragraph".to_string(),
                 },
-                order: "b".to_string(),
                 created_by: Actor::User,
                 created_at: now,
                 source_provenance_ref: None,
@@ -665,8 +642,6 @@ mod tests {
 
         let blocks = markdown_to_blocks(text, note_id).expect("parse");
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].order, "000000");
-        assert_eq!(blocks[1].order, "000001");
     }
 
     #[test]
@@ -719,7 +694,6 @@ mod tests {
             content: BlockContent::Markdown {
                 text: "Some content".to_string(),
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -744,8 +718,6 @@ mod tests {
 
         assert_eq!(note.title, "Test Note");
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].order, "000000");
-        assert_eq!(blocks[1].order, "000001");
 
         // Export back to markdown and verify structure is preserved
         let exported = note_to_markdown(&note, &blocks);
@@ -779,7 +751,6 @@ mod tests {
             content: BlockContent::Markdown {
                 text: "Some content".to_string(),
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -818,7 +789,6 @@ mod tests {
                 expression: "E = mc^2".to_string(),
                 display_mode: true,
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -864,7 +834,6 @@ mod tests {
                     vec!["Orange".to_string(), "$2".to_string()],
                 ],
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -908,7 +877,6 @@ mod tests {
                 alt_text: "A beautiful sunset".to_string(),
                 media_type: MediaType::Image,
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -953,7 +921,6 @@ mod tests {
                 url: "https://youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
                 provider: EmbedProvider::YouTube,
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -979,7 +946,6 @@ mod tests {
                 headers: vec!["Code".to_string()],
                 rows: vec![vec!["if a | b".to_string()]],
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -1004,7 +970,6 @@ mod tests {
                 headers: vec!["A".to_string(), "B".to_string(), "C".to_string()],
                 rows: vec![vec!["1".to_string(), "2".to_string()]], // Only 2 cells
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -1032,7 +997,6 @@ mod tests {
                     vec!["".to_string(), "100".to_string()],
                 ],
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -1057,7 +1021,6 @@ mod tests {
                 headers: vec!["A".to_string(), "B".to_string()],
                 rows: vec![],
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,
@@ -1120,7 +1083,6 @@ mod tests {
                 expression: "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}".to_string(),
                 display_mode: true,
             },
-            order: "a".to_string(),
             created_by: Actor::User,
             created_at: now,
             source_provenance_ref: None,

@@ -63,9 +63,9 @@ pub struct AgentAction {
     pub status: AgentActionStatus,
     pub rationale: String,
     pub created_at: Timestamp,
-    /// JSON Patch (RFC 6902) operations describing changes made. Array of objects
-    /// with { "op": "add|remove|replace", "path": "/...", "value": ... }
-    /// This avoids the database bloat that would result from storing full snapshots.
+    /// Full state snapshots before and after the operation, plus metadata for rollbacks.
+    /// Format: `{ "before": { ... }, "after": { ... }, "rollback_data": { ... } }`
+    /// This guarantees safe, bulletproof rollbacks without fragile diffing logic.
     pub diff: serde_json::Value,
     /// Action this one rolls back, if any.
     pub rollback_of: Option<AgentActionId>,

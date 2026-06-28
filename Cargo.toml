@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/pkm-core",
-    "crates/pkm-storage",
+    "crates/pkm-fs",
     "crates/pkm-search",
     "crates/pkm-agent",
     "crates/pkm-ingestion",
@@ -35,7 +35,6 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.11", features = ["json"] }
 regex = "1"
 url = "2"
-json-patch = "1"
 chrono = { version = "0.4", features = ["serde"] }
 
 # Internal crates referenced by path. Dependency direction is strict and
@@ -47,7 +46,7 @@ chrono = { version = "0.4", features = ["serde"] }
 #   pkm-ingestion  <- pkm-core
 #   pkm-app        <- all (wires concrete impls to ports)  [later]
 pkm-core = { path = "crates/pkm-core" }
-pkm-storage = { path = "crates/pkm-storage" }
+pkm-fs = { path = "crates/pkm-fs" }
 pkm-search = { path = "crates/pkm-search" }
 pkm-agent = { path = "crates/pkm-agent" }
 pkm-ingestion = { path = "crates/pkm-ingestion" }

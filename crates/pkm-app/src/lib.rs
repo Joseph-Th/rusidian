@@ -10,7 +10,6 @@
 //! - UI-shell wiring only (Tauri setup, window management, command routing)
 
 pub mod commands;
-pub mod db_pool;
 pub mod service;
 pub mod watcher;
 pub mod ingestion;
@@ -151,8 +150,10 @@ mod tests {
             .expect("failed to get note")
             .expect("note should exist");
 
-        // Simulate an external edit: modify the markdown file directly
-        let file_path = temp_dir.path().join(original_note.file_name());
+        // Wait for ignore TTL to expire before writing the external edit
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+
+        let file_path = temp_dir.path().join("notes").join(original_note.file_name());
         let markdown_content = "---\nid: ".to_string()
             + &original_note.id.to_string()
             + "\ncreated_by: User\ncreated_at: "
@@ -163,7 +164,7 @@ mod tests {
             .expect("failed to write external edit");
 
         // Give the watcher time to detect and process the change
-        thread::sleep(Duration::from_millis(500));
+        tokio::time::sleep(Duration::from_millis(1000)).await;
 
         // Verify the database was synced with the external change
         let synced_note = service
