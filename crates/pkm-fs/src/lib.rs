@@ -3,9 +3,9 @@ pub mod repositories;
 pub mod retriever;
 pub mod blob_store;
 
-pub use state::{load_vault, SharedVault, VaultState, IngestionItem};
+pub use state::{load_vault, persist_metadata, MetadataSaveData, SharedVault, VaultState, IngestionItem};
 pub use repositories::{
-    FsNoteRepo, FsSourceRepo, FsEntityRepo, FsLinkRepo, FsViewRepo, FsAgentActionRepo,
+    FsNoteRepo, FsSourceRepo, FsEntityRepo, FsLinkRepo, FsViewRepo,
 };
 pub use retriever::FsRetriever;
 pub use blob_store::BlobStore;

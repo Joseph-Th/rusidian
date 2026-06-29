@@ -5,7 +5,7 @@ use pkm_core::{Actor, Timestamp};
 use pkm_search::parse_query;
 use pkm_fs::{SharedVault, FsNoteRepo, FsSourceRepo, FsViewRepo, FsRetriever, load_vault};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use crate::watcher::{IgnoreNextEvent};
 use tokio::sync::mpsc;
 
@@ -223,6 +223,14 @@ impl AppService {
                         results.push((format!("{:?}", hit.object), snippet.clone()));
                     }
                 }
+                ObjectRef::Block(block_id) => {
+                    if let Ok(Some(note_id)) = note_repo.get_note_id_for_block(block_id) {
+                        if let Ok(Some(note)) = note_repo.get(note_id) {
+                            let snippet = hit.snippet.clone().unwrap_or_default();
+                            results.push((note.id.to_string(), format!("{} - {}", note.title, snippet)));
+                        }
+                    }
+                }
                 _ => {
                     if let Some(snippet) = &hit.snippet {
                         results.push((format!("{:?}", hit.object), snippet.clone()));
@@ -232,6 +240,32 @@ impl AppService {
         }
 
         Ok(results)
+    }
+
+    pub fn start_vault_watcher(self: &Arc<Self>) -> Result<(), String> {
+        let (mut rx, ignore_handle) = crate::watcher::watch_vault(&self.vault_path, self.vault.clone())
+            .map_err(|e| e.to_string())?;
+
+        WATCHER_IGNORE_HANDLE.set(ignore_handle).ok();
+
+        let service = self.clone();
+        tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    crate::watcher::NoteWatcherEvent::Modified { note, blocks, .. } => {
+                        let repo = FsNoteRepo {
+                            state: service.vault.clone(),
+                            vault_path: service.vault_path.clone(),
+                        };
+                        let _ = repo.upsert_from_external(&note, &blocks);
+                    }
+                    crate::watcher::NoteWatcherEvent::Deleted { .. } => {
+                        // TODO: map file path to NoteId, then delete
+                    }
+                }
+            }
+        });
+        Ok(())
     }
 
     pub fn ingest_bulk_links(&self, raw_text: String) -> Result<usize, String> {

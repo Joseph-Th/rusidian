@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::id::{LinkId, ObjectRef};
-use crate::sync::SyncEligible;
 
 /// The minimum supported set of typed relationships (AGENTS.md "Link").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,16 +45,6 @@ pub struct Link {
     pub version: u32,
     /// When this version was created.
     pub updated_at: crate::Timestamp,
-}
-
-impl SyncEligible for Link {
-    fn version(&self) -> u32 {
-        self.version
-    }
-
-    fn updated_at(&self) -> crate::Timestamp {
-        self.updated_at
-    }
 }
 
 #[cfg(test)]

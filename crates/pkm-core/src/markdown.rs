@@ -168,7 +168,6 @@ fn object_ref_to_embed_string(target: &ObjectRef) -> String {
         ObjectRef::Entity(id) => format!("entity:{}", id),
         ObjectRef::Link(id) => format!("link:{}", id),
         ObjectRef::View(id) => format!("view:{}", id),
-        ObjectRef::AgentAction(id) => format!("agent_action:{}", id),
     }
 }
 
@@ -181,7 +180,6 @@ fn target_display_name(target: &crate::id::ObjectRef) -> String {
         crate::id::ObjectRef::Entity(id) => format!("Entity {}", id),
         crate::id::ObjectRef::Link(id) => format!("Link {}", id),
         crate::id::ObjectRef::Source(id) => format!("Source {}", id),
-        crate::id::ObjectRef::AgentAction(id) => format!("AgentAction {}", id),
     }
 }
 
@@ -440,7 +438,6 @@ fn try_parse_internal_embed(text: &str) -> Option<(ObjectRef, String)> {
             "entity" => ObjectRef::Entity(crate::id::EntityId(uuid)),
             "source" => ObjectRef::Source(crate::id::SourceId(uuid)),
             "block" => ObjectRef::Block(crate::id::BlockId(uuid)),
-            "agent_action" => ObjectRef::AgentAction(crate::id::AgentActionId(uuid)),
             _ => return None,
         };
         return Some((target, fallback));

@@ -11,10 +11,9 @@
 //! STUB — method sets are the agreed minimum shape. Tasks B2 (repos) and E2
 //! (retriever) flesh them out. Keep the trait split one-per-aggregate.
 
-use crate::agent_action::{ActionDiff, AgentAction, AgentActionStatus};
 use crate::block::Block;
 use crate::entity::Entity;
-use crate::id::{AgentActionId, BlockId, EntityId, NoteId, ObjectRef, SourceId};
+use crate::id::{BlockId, EntityId, NoteId, ObjectRef, SourceId};
 use crate::link::Link;
 use crate::note::Note;
 use crate::review::ReviewState;
@@ -91,24 +90,6 @@ pub trait LinkRepo {
     fn set_from(&self, link_id: crate::id::LinkId, new_from: ObjectRef) -> Result<()>;
     /// Delete a link by ID.
     fn delete(&self, link_id: crate::id::LinkId) -> Result<()>;
-}
-
-/// Append-only persistence for agent action audit trail (AGENTS.md "Agent Action").
-/// Actions record what agents changed, who/what triggered it, before/after state,
-/// and rollback references. The log is append-only: statuses advance (Proposed →
-/// Accepted → Applied), but actions are never deleted or modified in place.
-pub trait AgentActionRepo {
-    /// Persist a new action record. Returns the action as persisted (with any DB-
-    /// generated fields like id, created_at).
-    fn create(&self, action: &AgentAction) -> Result<()>;
-    /// Retrieve an action by id.
-    fn get(&self, id: AgentActionId) -> Result<Option<AgentAction>>;
-    /// Update the status of an action. Only valid status transitions are allowed:
-    /// Proposed → Accepted/Rejected/Applied → Reverted/Failed.
-    fn set_status(&self, id: AgentActionId, new_status: AgentActionStatus) -> Result<()>;
-    /// Update the diff of an action (to record before/after states when applied).
-    fn set_diff(&self, id: AgentActionId, diff: ActionDiff) -> Result<()>;
-    // TODO(D2): list/filter (by target, by status, by actor, by date range), batch get.
 }
 
 /// Persistence for [`View`] (a saved presentation of structured knowledge).

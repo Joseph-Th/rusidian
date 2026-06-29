@@ -71,6 +71,7 @@ async fn run_rate_limited_fetcher(
 
     // Enforce exactly 1 iteration per 3 seconds (20 RPM limit for Jina Free Tier)
     let mut ticker = interval(Duration::from_secs(3));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     while let Some(url) = rx.recv().await {
         ticker.tick().await;
@@ -186,23 +187,34 @@ async fn process_and_promote(
         updated_at: now,
     };
 
-    // 5. Persist through repository traits (handles both memory and disk I/O)
+    // 5. Persist through repository traits (wrap blocking I/O in spawn_blocking)
     let source_repo = FsSourceRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
     let note_repo = FsNoteRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
     let link_repo = FsLinkRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
 
-    source_repo
-        .create(&source)
-        .map_err(|e| format!("Failed to save source: {}", e))?;
-    note_repo
-        .create(&note)
-        .map_err(|e| format!("Failed to save note: {}", e))?;
-    note_repo
-        .create_block(&block)
-        .map_err(|e| format!("Failed to save block: {}", e))?;
-    link_repo
-        .create(&link)
-        .map_err(|e| format!("Failed to save link: {}", e))?;
+    let source_clone = source.clone();
+    let note_clone = note.clone();
+    let block_clone = block.clone();
+    let link_clone = link.clone();
+
+    tokio::task::spawn_blocking(move || {
+        source_repo
+            .create(&source_clone)
+            .map_err(|e| format!("Failed to save source: {}", e))?;
+        note_repo
+            .create(&note_clone)
+            .map_err(|e| format!("Failed to save note: {}", e))?;
+        note_repo
+            .create_block(&block_clone)
+            .map_err(|e| format!("Failed to save block: {}", e))?;
+        link_repo
+            .create(&link_clone)
+            .map_err(|e| format!("Failed to save link: {}", e))?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking join error: {}", e))?
+    .map_err(|e: String| e)?;
 
     println!("[Processor] ✓ Successfully ingested & promoted: {}", url);
     Ok(())

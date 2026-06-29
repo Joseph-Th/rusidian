@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::path::Path;
 use std::fs;
-use pkm_core::id::{NoteId, BlockId, EntityId, LinkId, SourceId, ViewId};
-use pkm_core::agent_action::AgentAction;
+use pkm_core::id::{NoteId, BlockId, EntityId, LinkId, ObjectRef, SourceId, ViewId};
 use pkm_core::{note::Note, block::Block, entity::Entity, link::Link, source::Source, view::View};
 
 /// In-memory vault state.
@@ -18,11 +17,10 @@ pub struct VaultState {
     pub(crate) entities: HashMap<EntityId, Entity>,
     pub(crate) links: HashMap<LinkId, Link>,
     pub(crate) views: HashMap<ViewId, View>,
-    pub(crate) actions: Vec<AgentAction>,
     pub(crate) ingestion_queue: Vec<IngestionItem>,
 
-    pub(crate) links_by_source: HashMap<String, Vec<LinkId>>,
-    pub(crate) links_by_target: HashMap<String, Vec<LinkId>>,
+    pub(crate) links_by_source: HashMap<ObjectRef, Vec<LinkId>>,
+    pub(crate) links_by_target: HashMap<ObjectRef, Vec<LinkId>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -44,30 +42,19 @@ impl VaultState {
             entities: HashMap::new(),
             links: HashMap::new(),
             views: HashMap::new(),
-            actions: Vec::new(),
             ingestion_queue: Vec::new(),
             links_by_source: HashMap::new(),
             links_by_target: HashMap::new(),
         }
     }
 
-    pub fn save_metadata(&self, vault_path: &Path) -> std::io::Result<()> {
-        let pkm_dir = vault_path.join(".pkm");
-        std::fs::create_dir_all(&pkm_dir)?;
-
-        let entities_file = std::fs::File::create(pkm_dir.join("entities.json"))?;
-        serde_json::to_writer_pretty(entities_file, &self.entities)?;
-
-        let links_file = std::fs::File::create(pkm_dir.join("links.json"))?;
-        serde_json::to_writer_pretty(links_file, &self.links)?;
-
-        let views_file = std::fs::File::create(pkm_dir.join("views.json"))?;
-        serde_json::to_writer_pretty(views_file, &self.views)?;
-
-        let actions_file = std::fs::File::create(pkm_dir.join("actions.json"))?;
-        serde_json::to_writer_pretty(actions_file, &self.actions)?;
-
-        Ok(())
+    /// Clone data needed for metadata persistence (must be called under lock).
+    pub fn extract_save_data(&self) -> MetadataSaveData {
+        MetadataSaveData {
+            entities: self.entities.clone(),
+            links: self.links.clone(),
+            views: self.views.clone(),
+        }
     }
 
     pub fn rebuild_indexes(&mut self) {
@@ -75,40 +62,33 @@ impl VaultState {
         self.links_by_target.clear();
 
         for link in self.links.values() {
-            let from_key = format!("{:?}", link.from);
-            let to_key = format!("{:?}", link.to);
-
             self.links_by_source
-                .entry(from_key)
+                .entry(link.from)
                 .or_default()
                 .push(link.id);
             self.links_by_target
-                .entry(to_key)
+                .entry(link.to)
                 .or_default()
                 .push(link.id);
         }
     }
 
     pub fn index_link_add(&mut self, link: &pkm_core::link::Link) {
-        let from_key = format!("{:?}", link.from);
-        let to_key = format!("{:?}", link.to);
         self.links_by_source
-            .entry(from_key)
+            .entry(link.from)
             .or_default()
             .push(link.id);
         self.links_by_target
-            .entry(to_key)
+            .entry(link.to)
             .or_default()
             .push(link.id);
     }
 
     pub fn index_link_remove(&mut self, link: &pkm_core::link::Link) {
-        let from_key = format!("{:?}", link.from);
-        if let Some(vec) = self.links_by_source.get_mut(&from_key) {
+        if let Some(vec) = self.links_by_source.get_mut(&link.from) {
             vec.retain(|&id| id != link.id);
         }
-        let to_key = format!("{:?}", link.to);
-        if let Some(vec) = self.links_by_target.get_mut(&to_key) {
+        if let Some(vec) = self.links_by_target.get_mut(&link.to) {
             vec.retain(|&id| id != link.id);
         }
     }
@@ -122,13 +102,36 @@ impl VaultState {
     pub fn entities(&self) -> &HashMap<EntityId, Entity> { &self.entities }
     pub fn links(&self) -> &HashMap<LinkId, Link> { &self.links }
     pub fn views(&self) -> &HashMap<ViewId, View> { &self.views }
-    pub fn actions(&self) -> &[AgentAction] { &self.actions }
 }
 
 impl Default for VaultState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Snapshot of metadata needed for persistence. Cloned under lock, written outside.
+pub struct MetadataSaveData {
+    pub entities: HashMap<EntityId, pkm_core::entity::Entity>,
+    pub links: HashMap<LinkId, Link>,
+    pub views: HashMap<ViewId, pkm_core::view::View>,
+}
+
+/// Write metadata files to disk. No lock should be held when calling this.
+pub fn persist_metadata(vault_path: &Path, data: &MetadataSaveData) -> std::io::Result<()> {
+    let pkm_dir = vault_path.join(".pkm");
+    std::fs::create_dir_all(&pkm_dir)?;
+
+    let entities_file = std::fs::File::create(pkm_dir.join("entities.json"))?;
+    serde_json::to_writer_pretty(entities_file, &data.entities)?;
+
+    let links_file = std::fs::File::create(pkm_dir.join("links.json"))?;
+    serde_json::to_writer_pretty(links_file, &data.links)?;
+
+    let views_file = std::fs::File::create(pkm_dir.join("views.json"))?;
+    serde_json::to_writer_pretty(views_file, &data.views)?;
+
+    Ok(())
 }
 
 pub type SharedVault = Arc<RwLock<VaultState>>;
@@ -227,16 +230,6 @@ pub fn load_vault(vault_path: &Path) -> SharedVault {
         if let Ok(file) = std::fs::File::open(&views_path) {
             if let Ok(views) = serde_json::from_reader::<_, HashMap<ViewId, View>>(file) {
                 state.views = views;
-            }
-        }
-    }
-
-    // 6. Load Agent Actions from JSON
-    let actions_path = pkm_dir.join("actions.json");
-    if actions_path.exists() {
-        if let Ok(file) = std::fs::File::open(&actions_path) {
-            if let Ok(actions) = serde_json::from_reader::<_, Vec<AgentAction>>(file) {
-                state.actions = actions;
             }
         }
     }

@@ -3,7 +3,7 @@ use pkm_core::link::Link;
 use pkm_core::id::{LinkId, ObjectRef};
 use pkm_core::Result;
 use std::path::PathBuf;
-use crate::state::SharedVault;
+use crate::state::{SharedVault, persist_metadata};
 
 pub struct FsLinkRepo {
     pub state: SharedVault,
@@ -12,11 +12,14 @@ pub struct FsLinkRepo {
 
 impl LinkRepo for FsLinkRepo {
     fn create(&self, link: &Link) -> Result<()> {
-        let vault_path = self.vault_path.clone();
-        let mut state = self.state.write().unwrap();
-        state.links.insert(link.id, link.clone());
-        state.index_link_add(link);
-        let _ = state.save_metadata(&vault_path);
+        let save_data = {
+            let mut state = self.state.write().unwrap();
+            state.links.insert(link.id, link.clone());
+            state.index_link_add(link);
+            state.extract_save_data()
+        };
+        persist_metadata(&self.vault_path, &save_data)
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
         Ok(())
     }
 
@@ -46,8 +49,7 @@ impl LinkRepo for FsLinkRepo {
     }
 
     fn set_to(&self, link_id: LinkId, new_to: ObjectRef) -> Result<()> {
-        let vault_path = self.vault_path.clone();
-        let (old_link, updated_link) = {
+        let save_data = {
             let mut state = self.state.write().unwrap();
             if let Some(l) = state.links.get_mut(&link_id) {
                 let old = l.clone();
@@ -55,23 +57,22 @@ impl LinkRepo for FsLinkRepo {
                 l.version += 1;
                 l.updated_at = pkm_core::Timestamp::now_utc();
                 let updated = l.clone();
-                (Some(old), Some(updated))
+                state.index_link_remove(&old);
+                state.index_link_add(&updated);
+                Some(state.extract_save_data())
             } else {
-                (None, None)
+                None
             }
         };
-        if let (Some(old), Some(updated)) = (old_link, updated_link) {
-            let mut state = self.state.write().unwrap();
-            state.index_link_remove(&old);
-            state.index_link_add(&updated);
-            let _ = state.save_metadata(&vault_path);
+        if let Some(data) = save_data {
+            persist_metadata(&self.vault_path, &data)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
         }
         Ok(())
     }
 
     fn set_from(&self, link_id: LinkId, new_from: ObjectRef) -> Result<()> {
-        let vault_path = self.vault_path.clone();
-        let (old_link, updated_link) = {
+        let save_data = {
             let mut state = self.state.write().unwrap();
             if let Some(l) = state.links.get_mut(&link_id) {
                 let old = l.clone();
@@ -79,31 +80,31 @@ impl LinkRepo for FsLinkRepo {
                 l.version += 1;
                 l.updated_at = pkm_core::Timestamp::now_utc();
                 let updated = l.clone();
-                (Some(old), Some(updated))
+                state.index_link_remove(&old);
+                state.index_link_add(&updated);
+                Some(state.extract_save_data())
             } else {
-                (None, None)
+                None
             }
         };
-        if let (Some(old), Some(updated)) = (old_link, updated_link) {
-            let mut state = self.state.write().unwrap();
-            state.index_link_remove(&old);
-            state.index_link_add(&updated);
-            let _ = state.save_metadata(&vault_path);
+        if let Some(data) = save_data {
+            persist_metadata(&self.vault_path, &data)
+                .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
         }
         Ok(())
     }
 
     fn delete(&self, link_id: LinkId) -> Result<()> {
-        let vault_path = self.vault_path.clone();
-        let removed = {
+        let save_data = {
             let mut state = self.state.write().unwrap();
-            state.links.remove(&link_id)
+            let link = state.links.remove(&link_id);
+            if let Some(ref link) = link {
+                state.index_link_remove(link);
+            }
+            state.extract_save_data()
         };
-        if let Some(ref link) = removed {
-            let mut state = self.state.write().unwrap();
-            state.index_link_remove(link);
-            let _ = state.save_metadata(&vault_path);
-        }
+        persist_metadata(&self.vault_path, &save_data)
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
         Ok(())
     }
 }

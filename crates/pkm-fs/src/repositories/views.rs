@@ -3,7 +3,7 @@ use pkm_core::view::View;
 use pkm_core::id::ViewId;
 use pkm_core::Result;
 use std::path::PathBuf;
-use crate::state::SharedVault;
+use crate::state::{SharedVault, persist_metadata};
 
 pub struct FsViewRepo {
     pub state: SharedVault,
@@ -12,10 +12,13 @@ pub struct FsViewRepo {
 
 impl ViewRepo for FsViewRepo {
     fn create(&self, view: &View) -> Result<()> {
-        let vault_path = self.vault_path.clone();
-        let mut state = self.state.write().unwrap();
-        state.views.insert(view.id, view.clone());
-        let _ = state.save_metadata(&vault_path);
+        let save_data = {
+            let mut state = self.state.write().unwrap();
+            state.views.insert(view.id, view.clone());
+            state.extract_save_data()
+        };
+        persist_metadata(&self.vault_path, &save_data)
+            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
         Ok(())
     }
 

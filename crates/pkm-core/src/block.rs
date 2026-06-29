@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::{BlockId, NoteId, ObjectRef};
 use crate::media::{EmbedProvider, MediaType};
-use crate::sync::SyncEligible;
 use crate::{Actor, Timestamp};
 
 /// What a block holds. Each variant is strongly typed to prevent AI agents from
@@ -83,16 +82,6 @@ pub struct Block {
     pub version: u32,
     /// When this version was created.
     pub updated_at: Timestamp,
-}
-
-impl SyncEligible for Block {
-    fn version(&self) -> u32 {
-        self.version
-    }
-
-    fn updated_at(&self) -> Timestamp {
-        self.updated_at
-    }
 }
 
 #[cfg(test)]

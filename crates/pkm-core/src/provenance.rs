@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{AgentActionId, SourceId};
+use crate::id::SourceId;
 use crate::{Actor, Timestamp};
 
 /// What kind of content this is and how trustworthy it is. Retrieval and the UI
@@ -77,8 +77,8 @@ pub struct Provenance {
     pub derived_from: Vec<SourceId>,
     pub created_by: Actor,
     pub created_at: Timestamp,
-    /// The agent action that originated this content, if any.
-    pub originating_action: Option<AgentActionId>,
+    /// The agent action that originated this content, if any (UUID string).
+    pub originating_action: Option<String>,
     /// Where in the source this content was extracted from.
     pub extraction_span: Option<ExtractionSpan>,
 }
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn provenance_with_all_fields_round_trips() {
         let source_id = SourceId::new();
-        let action_id = AgentActionId::new();
+        let action_id = "some-uuid".to_string();
         let span = ExtractionSpan::new(0, 42);
         let now = Timestamp::now_utc();
 

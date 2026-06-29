@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tauri::menu::Menu;
 
 #[tauri::command]
-fn create_note(
+async fn create_note(
     title: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::CreateNoteResponse, String> {
@@ -22,7 +22,7 @@ fn create_note(
 }
 
 #[tauri::command]
-fn list_notes(
+async fn list_notes(
     limit: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Vec<commands::NoteInfo>, String> {
@@ -31,7 +31,7 @@ fn list_notes(
 }
 
 #[tauri::command]
-fn get_note(
+async fn get_note(
     note_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::GetNoteResponse, String> {
@@ -40,7 +40,7 @@ fn get_note(
 }
 
 #[tauri::command]
-fn update_note(
+async fn update_note(
     note_id: String,
     title: String,
     metadata: BTreeMap<String, serde_json::Value>,
@@ -51,7 +51,7 @@ fn update_note(
 }
 
 #[tauri::command]
-fn delete_note(
+async fn delete_note(
     note_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<(), String> {
@@ -60,7 +60,7 @@ fn delete_note(
 }
 
 #[tauri::command]
-fn search_notes(
+async fn search_notes(
     query: String,
     limit: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
@@ -70,7 +70,7 @@ fn search_notes(
 }
 
 #[tauri::command]
-fn get_graph_view_data(
+async fn get_graph_view_data(
     view_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Option<commands::GraphViewData>, String> {
@@ -79,7 +79,7 @@ fn get_graph_view_data(
 }
 
 #[tauri::command]
-fn create_view(
+async fn create_view(
     kind: String,
     title: String,
     params: ViewParams,
@@ -90,7 +90,7 @@ fn create_view(
 }
 
 #[tauri::command]
-fn list_views(
+async fn list_views(
     limit: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Vec<commands::ViewInfo>, String> {
@@ -99,7 +99,7 @@ fn list_views(
 }
 
 #[tauri::command]
-fn get_view(
+async fn get_view(
     view_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Option<commands::ViewInfo>, String> {
@@ -108,7 +108,7 @@ fn get_view(
 }
 
 #[tauri::command]
-fn render_view(
+async fn render_view(
     view_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::RenderViewResponse, String> {
@@ -117,7 +117,7 @@ fn render_view(
 }
 
 #[tauri::command]
-fn create_graph_view(
+async fn create_graph_view(
     title: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::CreateViewResponse, String> {
@@ -126,7 +126,7 @@ fn create_graph_view(
 }
 
 #[tauri::command]
-fn get_preview_card(
+async fn get_preview_card(
     entity_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::PreviewCard, String> {
@@ -135,7 +135,7 @@ fn get_preview_card(
 }
 
 #[tauri::command]
-fn get_link_network(
+async fn get_link_network(
     root_id: String,
     depth: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
@@ -145,7 +145,7 @@ fn get_link_network(
 }
 
 #[tauri::command]
-fn get_neighbors(
+async fn get_neighbors(
     target_id: String,
     depth: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
@@ -155,7 +155,7 @@ fn get_neighbors(
 }
 
 #[tauri::command]
-fn ingest_bulk_links(
+async fn ingest_bulk_links(
     raw_text: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::BulkIngestionResponse, String> {
@@ -206,9 +206,7 @@ fn main() {
         AppService::new(&vault_path).expect("failed to create AppService")
     );
 
-    // File watcher is disabled by default. To enable live external markdown sync,
-    // uncomment the start_vault_watcher() call below and add `pub mod watcher` in lib.rs.
-    // service.start_vault_watcher().expect("failed to start vault watcher");
+    service.start_vault_watcher().expect("failed to start vault watcher");
 
     tauri::Builder::default()
         .menu(Menu::new)

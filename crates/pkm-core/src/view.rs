@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 use crate::id::{ObjectRef, SourceId, ViewId};
 use crate::ingestion::IngestionState;
 use crate::source::Source;
-use crate::sync::SyncEligible;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewKind {
@@ -510,16 +508,6 @@ impl ViewModel for DefaultViewModel {
         let source_ids: Vec<_> = source_ids_ordered.into_iter().collect();
 
         Ok(ViewRenderResult { source_ids })
-    }
-}
-
-impl SyncEligible for View {
-    fn version(&self) -> u32 {
-        self.version
-    }
-
-    fn updated_at(&self) -> crate::Timestamp {
-        self.updated_at
     }
 }
 

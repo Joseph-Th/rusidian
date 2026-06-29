@@ -159,7 +159,6 @@ fn apply_filters(results: &mut Vec<SearchHit>, query: &SearchQuery) {
                 ObjectRef::Entity(_) => "entity",
                 ObjectRef::Link(_) => "link",
                 ObjectRef::View(_) => "view",
-                ObjectRef::AgentAction(_) => "agent_action",
             };
             hit_type.to_lowercase() == obj_type.to_lowercase()
         });

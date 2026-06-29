@@ -195,6 +195,34 @@ pub fn get_link_network(
                                 );
                             }
                         }
+                    } else if to_type == "note" {
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&to_id) {
+                            let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                            if let Ok(Some(note)) = note_repo.get(pkm_core::id::NoteId(uuid)) {
+                                nodes.insert(
+                                    to_id.clone(),
+                                    commands::LinkNetworkNode {
+                                        id: to_id.clone(),
+                                        title: note.title,
+                                        kind: "note".to_string(),
+                                    },
+                                );
+                            }
+                        }
+                    } else if to_type == "source" {
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&to_id) {
+                            let source_repo = FsSourceRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                            if let Ok(Some(source)) = source_repo.get(pkm_core::id::SourceId(uuid)) {
+                                nodes.insert(
+                                    to_id.clone(),
+                                    commands::LinkNetworkNode {
+                                        id: to_id.clone(),
+                                        title: source.title.unwrap_or_else(|| "Raw Source".into()),
+                                        kind: "source".to_string(),
+                                    },
+                                );
+                            }
+                        }
                     }
                 }
 
@@ -234,6 +262,34 @@ pub fn get_link_network(
                                         id: from_id.clone(),
                                         title: entity.name,
                                         kind: format!("{:?}", entity.kind).to_lowercase(),
+                                    },
+                                );
+                            }
+                        }
+                    } else if from_type == "note" {
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&from_id) {
+                            let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                            if let Ok(Some(note)) = note_repo.get(pkm_core::id::NoteId(uuid)) {
+                                nodes.insert(
+                                    from_id.clone(),
+                                    commands::LinkNetworkNode {
+                                        id: from_id.clone(),
+                                        title: note.title,
+                                        kind: "note".to_string(),
+                                    },
+                                );
+                            }
+                        }
+                    } else if from_type == "source" {
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&from_id) {
+                            let source_repo = FsSourceRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                            if let Ok(Some(source)) = source_repo.get(pkm_core::id::SourceId(uuid)) {
+                                nodes.insert(
+                                    from_id.clone(),
+                                    commands::LinkNetworkNode {
+                                        id: from_id.clone(),
+                                        title: source.title.unwrap_or_else(|| "Raw Source".into()),
+                                        kind: "source".to_string(),
                                     },
                                 );
                             }
@@ -313,6 +369,34 @@ pub fn get_neighbors(
                         );
                     }
                 }
+            } else if to_type == "note" {
+                if let Ok(uuid) = uuid::Uuid::parse_str(&to_id) {
+                    let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                    if let Ok(Some(note)) = note_repo.get(pkm_core::id::NoteId(uuid)) {
+                        nodes.insert(
+                            to_id.clone(),
+                            commands::LinkNetworkNode {
+                                id: to_id.clone(),
+                                title: note.title,
+                                kind: "note".to_string(),
+                            },
+                        );
+                    }
+                }
+            } else if to_type == "source" {
+                if let Ok(uuid) = uuid::Uuid::parse_str(&to_id) {
+                    let source_repo = FsSourceRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                    if let Ok(Some(source)) = source_repo.get(pkm_core::id::SourceId(uuid)) {
+                        nodes.insert(
+                            to_id.clone(),
+                            commands::LinkNetworkNode {
+                                id: to_id.clone(),
+                                title: source.title.unwrap_or_else(|| "Raw Source".into()),
+                                kind: "source".to_string(),
+                            },
+                        );
+                    }
+                }
             }
 
             edges.push(commands::LinkNetworkEdge {
@@ -344,6 +428,34 @@ pub fn get_neighbors(
                                 id: from_id.clone(),
                                 title: entity.name,
                                 kind: format!("{:?}", entity.kind).to_lowercase(),
+                            },
+                        );
+                    }
+                }
+            } else if from_type == "note" {
+                if let Ok(uuid) = uuid::Uuid::parse_str(&from_id) {
+                    let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                    if let Ok(Some(note)) = note_repo.get(pkm_core::id::NoteId(uuid)) {
+                        nodes.insert(
+                            from_id.clone(),
+                            commands::LinkNetworkNode {
+                                id: from_id.clone(),
+                                title: note.title,
+                                kind: "note".to_string(),
+                            },
+                        );
+                    }
+                }
+            } else if from_type == "source" {
+                if let Ok(uuid) = uuid::Uuid::parse_str(&from_id) {
+                    let source_repo = FsSourceRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                    if let Ok(Some(source)) = source_repo.get(pkm_core::id::SourceId(uuid)) {
+                        nodes.insert(
+                            from_id.clone(),
+                            commands::LinkNetworkNode {
+                                id: from_id.clone(),
+                                title: source.title.unwrap_or_else(|| "Raw Source".into()),
+                                kind: "source".to_string(),
                             },
                         );
                     }
@@ -455,7 +567,7 @@ pub fn get_timeline_view_data(
     view: &View,
 ) -> Option<commands::TimelineRenderData> {
     if let ViewParams::Timeline(params) = &view.params {
-        let source_repo = FsSourceRepo { state: vault, vault_path };
+        let source_repo = FsSourceRepo { state: vault.clone(), vault_path: vault_path.clone() };
         let mut sources = source_repo.list(None).ok()?;
 
         if params.reverse_chronological {
@@ -464,11 +576,36 @@ pub fn get_timeline_view_data(
             sources.sort_by(|a, b| a.captured_at.cmp(&b.captured_at));
         }
 
+        // Load entities with semantic dates for timeline
+        let entities: Vec<_> = {
+            let state = vault.read().unwrap();
+            state.entities().values().cloned().collect()
+        };
+        let mut timeline_entities: Vec<_> = entities
+            .into_iter()
+            .filter(|e| e.semantic_date.is_some())
+            .collect();
+
+        if params.reverse_chronological {
+            timeline_entities.sort_by(|a, b| {
+                let a_date = a.semantic_date.unwrap_or(a.created_at);
+                let b_date = b.semantic_date.unwrap_or(b.created_at);
+                b_date.cmp(&a_date)
+            });
+        } else {
+            timeline_entities.sort_by(|a, b| {
+                let a_date = a.semantic_date.unwrap_or(a.created_at);
+                let b_date = b.semantic_date.unwrap_or(b.created_at);
+                a_date.cmp(&b_date)
+            });
+        }
+
         let limit = params.limit.unwrap_or(100);
+        let per_type_limit = limit;
 
         let mut grouped: BTreeMap<String, BTreeMap<String, Vec<commands::TimelineEventData>>> = BTreeMap::new();
 
-        for source in sources.iter().take(limit) {
+        for source in sources.iter().take(per_type_limit) {
             let date_str = source.captured_at.to_string();
             let year = date_str.split('-').next().unwrap_or("unknown").to_string();
 
@@ -492,6 +629,42 @@ pub fn get_timeline_view_data(
             let event = commands::TimelineEventData {
                 id: source.id.to_string(),
                 title: source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
+                date: date_str,
+            };
+
+            grouped
+                .entry(year)
+                .or_insert_with(BTreeMap::new)
+                .entry(month_key)
+                .or_insert_with(Vec::new)
+                .push(event);
+        }
+
+        for entity in timeline_entities.iter().take(per_type_limit) {
+            let date = entity.semantic_date.unwrap_or(entity.created_at);
+            let date_str = date.to_string();
+            let year = date_str.split('-').next().unwrap_or("unknown").to_string();
+
+            let month_key = if date_str.len() >= 7 {
+                match params.grouping {
+                    TimelineGrouping::Day => {
+                        if date_str.len() >= 10 {
+                            date_str[0..10].to_string()
+                        } else {
+                            date_str[0..7].to_string()
+                        }
+                    }
+                    TimelineGrouping::Week |
+                    TimelineGrouping::Month => date_str[0..7].to_string(),
+                    TimelineGrouping::Year => year.clone(),
+                }
+            } else {
+                "unknown".to_string()
+            };
+
+            let event = commands::TimelineEventData {
+                id: entity.id.to_string(),
+                title: entity.name.clone(),
                 date: date_str,
             };
 
