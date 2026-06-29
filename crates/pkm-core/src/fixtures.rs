@@ -17,10 +17,9 @@ use crate::block::{Block, BlockContent};
 use crate::id::{BlockId, NoteId, ObjectRef, SourceId, ViewId};
 use crate::ingestion::IngestionState;
 use crate::media::{EmbedProvider, MediaType};
-use crate::note::Note;
+use crate::note::{Note, NoteMetadata};
 use crate::source::{Source, SourceOrigin};
 use crate::{Actor, Timestamp};
-use std::collections::BTreeMap;
 
 /// A minimal example [`Source`] (a pasted-text capture).
 pub fn sample_source() -> Source {
@@ -60,18 +59,12 @@ pub fn sample_block() -> Block {
 
 /// A minimal example [`Note`] with a single block.
 pub fn sample_note() -> Note {
-    let mut metadata = BTreeMap::new();
-    metadata.insert(
-        "example_key".to_string(),
-        serde_json::json!("example_value"),
-    );
-
     let now = Timestamp::now_utc();
     Note {
         id: NoteId::new(),
         title: "Example note".to_string(),
         blocks: vec![BlockId::new()],
-        metadata,
+        metadata: NoteMetadata::default(),
         created_by: Actor::User,
         created_at: now,
         version: 1,

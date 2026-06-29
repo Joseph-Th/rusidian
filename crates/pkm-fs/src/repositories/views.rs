@@ -10,25 +10,12 @@ pub struct FsViewRepo {
     pub vault_path: PathBuf,
 }
 
-impl FsViewRepo {
-    fn save_views(&self, state: &crate::state::VaultState) -> Result<()> {
-        let views_path = self.vault_path.join(".pkm").join("views.json");
-        let views_json = serde_json::to_string_pretty(&state.views)
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        std::fs::write(views_path, views_json)
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        Ok(())
-    }
-}
-
 impl ViewRepo for FsViewRepo {
     fn create(&self, view: &View) -> Result<()> {
-        {
-            let mut state = self.state.write().unwrap();
-            state.views.insert(view.id, view.clone());
-        }
-        let state = self.state.read().unwrap();
-        self.save_views(&state)?;
+        let vault_path = self.vault_path.clone();
+        let mut state = self.state.write().unwrap();
+        state.views.insert(view.id, view.clone());
+        let _ = state.save_metadata(&vault_path);
         Ok(())
     }
 

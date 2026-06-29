@@ -34,8 +34,7 @@ impl Retriever for FsRetriever {
             }).collect();
 
             let notes: Vec<_> = state.notes.values().map(|n| {
-                let project = n.metadata.get("project")
-                    .and_then(|v| v.as_str().map(|s| s.to_string()));
+                let project = n.metadata.project.clone();
                 (n.id, n.title.clone(), n.created_at.to_string(), project)
             }).collect();
 

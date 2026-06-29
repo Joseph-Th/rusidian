@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 /// Ingestion progresses: Captured → Parsed → Cleaned → Indexed → Summarized →
 /// Classified → Linked → AwaitingReview → (Promoted | Archived | Rejected).
 /// Failed indicates a processing error with diagnostics retained for retry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IngestionState {
+    #[default]
     Captured,
     Parsed,
     Cleaned,

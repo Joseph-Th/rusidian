@@ -4,7 +4,6 @@ members = [
     "crates/pkm-core",
     "crates/pkm-fs",
     "crates/pkm-search",
-    "crates/pkm-agent",
     "crates/pkm-ingestion",
     "crates/pkm-app",
 ]
@@ -39,5 +38,4 @@ chrono = { version = "0.4", features = ["serde"] }
 pkm-core = { path = "crates/pkm-core" }
 pkm-fs = { path = "crates/pkm-fs" }
 pkm-search = { path = "crates/pkm-search" }
-pkm-agent = { path = "crates/pkm-agent" }
 pkm-ingestion = { path = "crates/pkm-ingestion" }

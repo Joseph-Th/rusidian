@@ -3,23 +3,26 @@ use std::sync::{Arc, RwLock};
 use std::path::Path;
 use std::fs;
 use pkm_core::id::{NoteId, BlockId, EntityId, LinkId, SourceId, ViewId};
-use pkm_core::{note::Note, block::Block, entity::Entity, link::Link, source::Source, view::View};
 use pkm_core::agent_action::AgentAction;
+use pkm_core::{note::Note, block::Block, entity::Entity, link::Link, source::Source, view::View};
 
+/// In-memory vault state.
+///
+/// All data fields are `pub(crate)` — only `pkm-fs` internals (repositories,
+/// retriever, loader) may mutate them directly. External code MUST go through
+/// the repository traits defined in `pkm_core::ports`.
 pub struct VaultState {
-    // Core Collections
-    pub notes: HashMap<NoteId, Note>,
-    pub blocks: HashMap<BlockId, Block>, // Flattened from notes for fast O(1) lookup
-    pub sources: HashMap<SourceId, Source>,
-    pub entities: HashMap<EntityId, Entity>,
-    pub links: HashMap<LinkId, Link>,
-    pub views: HashMap<ViewId, View>,
-    pub actions: Vec<AgentAction>, // Append-only Agent Actions log
-    pub ingestion_queue: Vec<IngestionItem>, // Ingestion queue items
-    
-    // Fast Lookup Indexes (Built on boot)
-    pub links_by_source: HashMap<String, Vec<LinkId>>,
-    pub links_by_target: HashMap<String, Vec<LinkId>>,
+    pub(crate) notes: HashMap<NoteId, Note>,
+    pub(crate) blocks: HashMap<BlockId, Block>,
+    pub(crate) sources: HashMap<SourceId, Source>,
+    pub(crate) entities: HashMap<EntityId, Entity>,
+    pub(crate) links: HashMap<LinkId, Link>,
+    pub(crate) views: HashMap<ViewId, View>,
+    pub(crate) actions: Vec<AgentAction>,
+    pub(crate) ingestion_queue: Vec<IngestionItem>,
+
+    pub(crate) links_by_source: HashMap<String, Vec<LinkId>>,
+    pub(crate) links_by_target: HashMap<String, Vec<LinkId>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -48,29 +51,57 @@ impl VaultState {
         }
     }
 
-    /// Rebuilds fast-lookup indexes (called on boot)
+    pub fn save_metadata(&self, vault_path: &Path) -> std::io::Result<()> {
+        let pkm_dir = vault_path.join(".pkm");
+        std::fs::create_dir_all(&pkm_dir)?;
+
+        let entities_file = std::fs::File::create(pkm_dir.join("entities.json"))?;
+        serde_json::to_writer_pretty(entities_file, &self.entities)?;
+
+        let links_file = std::fs::File::create(pkm_dir.join("links.json"))?;
+        serde_json::to_writer_pretty(links_file, &self.links)?;
+
+        let views_file = std::fs::File::create(pkm_dir.join("views.json"))?;
+        serde_json::to_writer_pretty(views_file, &self.views)?;
+
+        let actions_file = std::fs::File::create(pkm_dir.join("actions.json"))?;
+        serde_json::to_writer_pretty(actions_file, &self.actions)?;
+
+        Ok(())
+    }
+
     pub fn rebuild_indexes(&mut self) {
         self.links_by_source.clear();
         self.links_by_target.clear();
-        
+
         for link in self.links.values() {
             let from_key = format!("{:?}", link.from);
             let to_key = format!("{:?}", link.to);
-            
-            self.links_by_source.entry(from_key).or_default().push(link.id);
-            self.links_by_target.entry(to_key).or_default().push(link.id);
+
+            self.links_by_source
+                .entry(from_key)
+                .or_default()
+                .push(link.id);
+            self.links_by_target
+                .entry(to_key)
+                .or_default()
+                .push(link.id);
         }
     }
 
-    /// Incrementally add a link to the lookup indexes
     pub fn index_link_add(&mut self, link: &pkm_core::link::Link) {
         let from_key = format!("{:?}", link.from);
         let to_key = format!("{:?}", link.to);
-        self.links_by_source.entry(from_key).or_default().push(link.id);
-        self.links_by_target.entry(to_key).or_default().push(link.id);
+        self.links_by_source
+            .entry(from_key)
+            .or_default()
+            .push(link.id);
+        self.links_by_target
+            .entry(to_key)
+            .or_default()
+            .push(link.id);
     }
 
-    /// Incrementally remove a link from the lookup indexes
     pub fn index_link_remove(&mut self, link: &pkm_core::link::Link) {
         let from_key = format!("{:?}", link.from);
         if let Some(vec) = self.links_by_source.get_mut(&from_key) {
@@ -81,16 +112,31 @@ impl VaultState {
             vec.retain(|&id| id != link.id);
         }
     }
+
+    // ── Public read-only accessors ──────────────────────────────────────
+    // External code reads through these; mutation goes through repository traits.
+
+    pub fn notes(&self) -> &HashMap<NoteId, Note> { &self.notes }
+    pub fn blocks(&self) -> &HashMap<BlockId, Block> { &self.blocks }
+    pub fn sources(&self) -> &HashMap<SourceId, Source> { &self.sources }
+    pub fn entities(&self) -> &HashMap<EntityId, Entity> { &self.entities }
+    pub fn links(&self) -> &HashMap<LinkId, Link> { &self.links }
+    pub fn views(&self) -> &HashMap<ViewId, View> { &self.views }
+    pub fn actions(&self) -> &[AgentAction] { &self.actions }
 }
 
-// Wrap it in an Arc<RwLock> so Tauri commands and background agents can share it.
+impl Default for VaultState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type SharedVault = Arc<RwLock<VaultState>>;
 
-/// Load vault from filesystem into memory
+/// Load vault from Markdown files + JSON metadata on disk.
 pub fn load_vault(vault_path: &Path) -> SharedVault {
     let mut state = VaultState::new();
 
-    // 1. Create necessary directories
     let notes_dir = vault_path.join("notes");
     let sources_dir = vault_path.join("sources");
     let media_dir = vault_path.join("media");
@@ -101,7 +147,7 @@ pub fn load_vault(vault_path: &Path) -> SharedVault {
     let _ = fs::create_dir_all(&media_dir);
     let _ = fs::create_dir_all(&pkm_dir);
 
-    // 2. Load Notes from vault/notes/*.md
+    // 1. Load Notes from Markdown files
     if let Ok(entries) = fs::read_dir(&notes_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -125,37 +171,73 @@ pub fn load_vault(vault_path: &Path) -> SharedVault {
         }
     }
 
-    // 3. Load relational metadata from .pkm/
-    if let Ok(entities_data) = fs::read_to_string(pkm_dir.join("entities.json")) {
-        if let Ok(entities) = serde_json::from_str::<HashMap<EntityId, Entity>>(&entities_data) {
-            state.entities = entities;
-        }
-    }
-    if let Ok(links_data) = fs::read_to_string(pkm_dir.join("links.json")) {
-        if let Ok(links) = serde_json::from_str::<HashMap<LinkId, Link>>(&links_data) {
-            state.links = links;
-        }
-    }
-    if let Ok(views_data) = fs::read_to_string(pkm_dir.join("views.json")) {
-        if let Ok(views) = serde_json::from_str::<HashMap<ViewId, View>>(&views_data) {
-            state.views = views;
-        }
-    }
-    if let Ok(sources_data) = fs::read_to_string(pkm_dir.join("sources.json")) {
-        if let Ok(sources) = serde_json::from_str::<HashMap<SourceId, Source>>(&sources_data) {
-            state.sources = sources;
-        }
-    }
-    if let Ok(queue_data) = fs::read_to_string(pkm_dir.join("ingestion_queue.json")) {
-        if let Ok(queue) = serde_json::from_str::<Vec<IngestionItem>>(&queue_data) {
-            state.ingestion_queue = queue;
+    // 2. Load Sources from disk
+    if let Ok(entries) = fs::read_dir(&sources_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("md") {
+                // Sources are stored as raw markdown files; metadata is re-created from path
+                let id_str = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if let Ok(id) = uuid::Uuid::parse_str(id_str) {
+                    if let Ok(raw_content) = fs::read_to_string(&path) {
+                        let now = pkm_core::Timestamp::now_utc();
+                        let source = Source {
+                            id: SourceId(id),
+                            origin: pkm_core::source::SourceOrigin::ManualCapture,
+                            title: None,
+                            raw_content,
+                            captured_at: now,
+                            content_hash: String::new(),
+                            ingestion_state: pkm_core::ingestion::IngestionState::Captured,
+                            created_by: pkm_core::Actor::User,
+                            created_at: now,
+                            version: 1,
+                            updated_at: now,
+                        };
+                        state.sources.insert(source.id, source);
+                    }
+                }
+            }
         }
     }
 
-    // 4. Load agent actions from .pkm/actions.json
-    if let Ok(actions_data) = fs::read_to_string(pkm_dir.join("actions.json")) {
-        if let Ok(actions) = serde_json::from_str::<Vec<AgentAction>>(&actions_data) {
-            state.actions = actions;
+    // 3. Load Entities from JSON
+    let entities_path = pkm_dir.join("entities.json");
+    if entities_path.exists() {
+        if let Ok(file) = std::fs::File::open(&entities_path) {
+            if let Ok(entities) = serde_json::from_reader::<_, HashMap<EntityId, Entity>>(file) {
+                state.entities = entities;
+            }
+        }
+    }
+
+    // 4. Load Links from JSON
+    let links_path = pkm_dir.join("links.json");
+    if links_path.exists() {
+        if let Ok(file) = std::fs::File::open(&links_path) {
+            if let Ok(links) = serde_json::from_reader::<_, HashMap<LinkId, Link>>(file) {
+                state.links = links;
+            }
+        }
+    }
+
+    // 5. Load Views from JSON
+    let views_path = pkm_dir.join("views.json");
+    if views_path.exists() {
+        if let Ok(file) = std::fs::File::open(&views_path) {
+            if let Ok(views) = serde_json::from_reader::<_, HashMap<ViewId, View>>(file) {
+                state.views = views;
+            }
+        }
+    }
+
+    // 6. Load Agent Actions from JSON
+    let actions_path = pkm_dir.join("actions.json");
+    if actions_path.exists() {
+        if let Ok(file) = std::fs::File::open(&actions_path) {
+            if let Ok(actions) = serde_json::from_reader::<_, Vec<AgentAction>>(file) {
+                state.actions = actions;
+            }
         }
     }
 

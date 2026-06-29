@@ -6,12 +6,12 @@
 //! without changing callers.
 //!
 //! All methods return [`crate::Result`]; implementations map their internal
-//! errors (sqlite, io) into [`crate::CoreError`]. No method panics.
+//! errors (io, serialization) into [`crate::CoreError`]. No method panics.
 //!
 //! STUB — method sets are the agreed minimum shape. Tasks B2 (repos) and E2
 //! (retriever) flesh them out. Keep the trait split one-per-aggregate.
 
-use crate::agent_action::{AgentAction, AgentActionStatus};
+use crate::agent_action::{ActionDiff, AgentAction, AgentActionStatus};
 use crate::block::Block;
 use crate::entity::Entity;
 use crate::id::{AgentActionId, BlockId, EntityId, NoteId, ObjectRef, SourceId};
@@ -56,6 +56,11 @@ pub trait NoteRepo {
     fn create_block(&self, block: &Block) -> Result<()>;
     /// Delete a block from the note repo.
     fn delete_block(&self, note_id: NoteId, block_id: BlockId) -> Result<()>;
+    /// Upsert a note and its blocks from an external source (file watcher).
+    ///
+    /// Safely overwrites the existing note + blocks in both memory and on disk.
+    /// Removes links that pointed to blocks no longer present.
+    fn upsert_from_external(&self, note: &Note, blocks: &[Block]) -> Result<()>;
     // TODO(B2): block CRUD, ordered block fetch, metadata, version history.
 }
 
@@ -102,7 +107,7 @@ pub trait AgentActionRepo {
     /// Proposed → Accepted/Rejected/Applied → Reverted/Failed.
     fn set_status(&self, id: AgentActionId, new_status: AgentActionStatus) -> Result<()>;
     /// Update the diff of an action (to record before/after states when applied).
-    fn set_diff(&self, id: AgentActionId, diff: serde_json::Value) -> Result<()>;
+    fn set_diff(&self, id: AgentActionId, diff: ActionDiff) -> Result<()>;
     // TODO(D2): list/filter (by target, by status, by actor, by date range), batch get.
 }
 
@@ -114,8 +119,8 @@ pub trait ViewRepo {
     // TODO(H0): filter by kind, delete, update params.
 }
 
-/// Multi-mode retrieval boundary. The SQLite/FTS implementation lives in
-/// `pkm-storage`; pure query-parsing/ranking helpers live in `pkm-search`.
+/// Multi-mode retrieval boundary. The in-memory / file-backed implementation
+/// lives in `pkm-fs`; pure query-parsing/ranking helpers live in `pkm-search`.
 /// Every hit must carry its [`crate::provenance::ContentStatus`] so callers can
 /// distinguish raw / reviewed / generated / unreviewed content.
 pub trait Retriever {

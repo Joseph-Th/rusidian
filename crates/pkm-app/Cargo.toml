@@ -12,8 +12,6 @@ rust-version.workspace = true
 pkm-core = { workspace = true }
 pkm-fs = { workspace = true }
 pkm-search = { workspace = true }
-pkm-agent = { workspace = true }
-pkm-ingestion = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

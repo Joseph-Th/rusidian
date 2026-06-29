@@ -4,9 +4,9 @@
 //! "Agent Editing Rules") instead of rewriting whole notes. Each block keeps a
 //! stable `BlockId` across edits.
 //!
-//! BLOCK ORDERING: blocks are ordered within a note using an `order` key (f32).
-//! This allows stable reordering without re-indexing: insert a new block at
-//! order 1.5 between blocks at 1.0 and 2.0. Clients maintain order invariant.
+//! BLOCK ORDERING: blocks are ordered implicitly by their position in the
+//! parent note's `blocks: Vec<BlockId>` array. Reordering is done by
+//! manipulating the vector (remove + insert at new index).
 
 use serde::{Deserialize, Serialize};
 

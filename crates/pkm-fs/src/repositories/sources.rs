@@ -16,15 +16,9 @@ impl SourceRepo for FsSourceRepo {
             let mut state = self.state.write().unwrap();
             state.sources.insert(source.id, source.clone());
         }
-        let file_name = format!("source-{}.txt", source.id);
+        let file_name = format!("{}.md", source.id);
         let file_path = self.vault_path.join("sources").join(file_name);
         std::fs::write(&file_path, &source.raw_content)
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        let state = self.state.read().unwrap();
-        let sources_path = self.vault_path.join(".pkm").join("sources.json");
-        let sources_json = serde_json::to_string_pretty(&state.sources)
-            .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
-        std::fs::write(sources_path, sources_json)
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
         Ok(())
     }

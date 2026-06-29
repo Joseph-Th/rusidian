@@ -163,41 +163,25 @@ fn ingest_bulk_links(
     commands::ingest_bulk_links(raw_text, service)
 }
 
-#[tauri::command]
-fn rollback_autonomous_ingestion(
-    minutes: i64,
-    state: tauri::State<'_, Arc<AppService>>,
-) -> Result<commands::RollbackResponse, String> {
-    let service = state.inner();
-    commands::rollback_autonomous_ingestion(minutes, service)
-}
-
 fn main() {
-    let db_path = {
-        // Use platform-standard data directory instead of hardcoded HOME/.pkm
-        // On Windows: %APPDATA%\Local\pkm or %LOCALAPPDATA%\pkm
-        // On macOS: ~/Library/Application Support/pkm
-        // On Linux: ~/.local/share/pkm (XDG_DATA_HOME)
+    // Use platform-standard data directory for the vault
+    let vault_path = {
         let data_dir = if cfg!(target_os = "windows") {
-            // On Windows, prefer LOCALAPPDATA (AppData\Local)
             std::env::var("LOCALAPPDATA")
                 .ok()
                 .and_then(|path| Some(std::path::PathBuf::from(path)))
                 .unwrap_or_else(|| {
-                    // Fallback to APPDATA if LOCALAPPDATA is not set
                     std::env::var("APPDATA")
                         .map(std::path::PathBuf::from)
                         .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 })
         } else if cfg!(target_os = "macos") {
-            // On macOS, use ~/Library/Application Support
             let home = std::env::var("HOME")
                 .unwrap_or_else(|_| ".".to_string());
             std::path::PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
         } else {
-            // On Linux, use XDG_DATA_HOME or ~/.local/share
             std::env::var("XDG_DATA_HOME")
                 .ok()
                 .map(std::path::PathBuf::from)
@@ -210,31 +194,21 @@ fn main() {
                 })
         };
 
-        let db_dir = data_dir.join("pkm");
-        let db_file = db_dir.join("pkm.db");
-
-        // Ensure the directory exists
-        let _ = std::fs::create_dir_all(&db_dir);
-
-        db_file
+        let vault_dir = data_dir.join("pkm").join("vault");
+        let _ = std::fs::create_dir_all(&vault_dir);
+        vault_dir
             .to_str()
-            .expect("invalid db path")
+            .expect("invalid vault path")
             .to_string()
     };
 
-    // Ensure the directory exists (redundant but safe)
-    if let Some(parent) = std::path::Path::new(&db_path).parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-
     let service = Arc::new(
-        AppService::new(&db_path, None).expect("failed to create AppService")
+        AppService::new(&vault_path).expect("failed to create AppService")
     );
 
-    // Start the vault file watcher to sync external markdown changes
-    service
-        .start_vault_watcher()
-        .expect("failed to start vault watcher");
+    // File watcher is disabled by default. To enable live external markdown sync,
+    // uncomment the start_vault_watcher() call below and add `pub mod watcher` in lib.rs.
+    // service.start_vault_watcher().expect("failed to start vault watcher");
 
     tauri::Builder::default()
         .menu(Menu::new)
@@ -255,8 +229,7 @@ fn main() {
             get_preview_card,
             get_link_network,
             get_neighbors,
-            ingest_bulk_links,
-            rollback_autonomous_ingestion
+            ingest_bulk_links
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

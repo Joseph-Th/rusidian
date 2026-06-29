@@ -4,18 +4,19 @@
 //! - Producer: URL extraction from pasted text
 //! - Queue: Pure in-memory unbounded mpsc channel (No SQLite!)
 //! - Fetcher: Rate-limited ticker (1 request / 3 seconds = 20 RPM)
-//! - Processor: Non-blocking tokio spawned tasks that write directly to Memory & Disk
+//! - Processor: Non-blocking tokio spawned tasks that write through repository traits
 
 use pkm_core::block::{Block, BlockContent};
 use pkm_core::id::{BlockId, NoteId, ObjectRef, SourceId, LinkId};
 use pkm_core::ingestion::IngestionState;
 use pkm_core::link::Link;
 use pkm_core::note::Note;
+use pkm_core::ports::{NoteRepo, SourceRepo, LinkRepo};
 use pkm_core::source::{Source, SourceOrigin};
 use pkm_core::{Actor, Timestamp};
 use pkm_fs::SharedVault;
+use pkm_fs::{FsNoteRepo, FsSourceRepo, FsLinkRepo};
 use regex::Regex;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use tokio::sync::mpsc;
@@ -51,11 +52,8 @@ pub fn start_ingestion_worker(
     vault_state: SharedVault,
     vault_path: PathBuf,
 ) -> mpsc::UnboundedSender<String> {
-    // Unbounded channel: users can paste 500 URLs, they just sit in RAM.
     let (tx, rx) = mpsc::unbounded_channel::<String>();
-
     tokio::spawn(run_rate_limited_fetcher(rx, vault_state, vault_path));
-
     tx
 }
 
@@ -70,12 +68,11 @@ async fn run_rate_limited_fetcher(
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-        
+
     // Enforce exactly 1 iteration per 3 seconds (20 RPM limit for Jina Free Tier)
     let mut ticker = interval(Duration::from_secs(3));
 
     while let Some(url) = rx.recv().await {
-        // Block until the 3-second window has passed
         ticker.tick().await;
 
         println!("[Jina Fetcher] Processing URL: {}", url);
@@ -85,11 +82,11 @@ async fn run_rate_limited_fetcher(
             Ok(resp) if resp.status().is_success() => resp.text().await.unwrap_or_default(),
             Ok(resp) => {
                 eprintln!("[Jina] HTTP {}: {} (Skipping)", resp.status(), url);
-                continue; // No database state to update, just drop it!
+                continue;
             }
             Err(e) => {
                 eprintln!("[Jina] Network error: {} (Skipping)", e);
-                continue; // Drop it!
+                continue;
             }
         };
 
@@ -100,7 +97,7 @@ async fn run_rate_limited_fetcher(
 
         println!("[Jina Fetcher] ✓ Fetched {} bytes", markdown.len());
 
-        // Spawn LLM and Disk I/O into a separate task so the ticker can proceed immediately
+        // Spawn processing into a separate task so the ticker can proceed immediately
         let vault_state_clone = vault_state.clone();
         let vault_path_clone = vault_path.clone();
         let url_clone = url.clone();
@@ -120,7 +117,7 @@ async fn run_rate_limited_fetcher(
     }
 }
 
-/// Process markdown: LLM reasoning + writing to Memory/Disk.
+/// Process markdown: LLM reasoning + writing through repository traits.
 async fn process_and_promote(
     url: String,
     markdown: String,
@@ -139,7 +136,7 @@ async fn process_and_promote(
         raw_content: markdown.clone(),
         captured_at: now,
         content_hash: compute_hash(&markdown),
-        ingestion_state: IngestionState::Promoted, // Straight to promoted!
+        ingestion_state: IngestionState::AwaitingReview,
         created_by: agent_actor.clone(),
         created_at: now,
         version: 1,
@@ -168,7 +165,7 @@ async fn process_and_promote(
         id: note_id,
         title: ai_results.title,
         blocks: vec![block_id],
-        metadata: BTreeMap::new(),
+        metadata: pkm_core::note::NoteMetadata::default(),
         created_by: agent_actor.clone(),
         created_at: now,
         version: 1,
@@ -189,48 +186,23 @@ async fn process_and_promote(
         updated_at: now,
     };
 
-    // 5. Update the In-Memory Database (Locks only for a few microseconds)
-    {
-        let mut state = vault_state.write().unwrap();
-        state.sources.insert(source_id, source.clone());
-        state.notes.insert(note_id, note.clone());
-        state.blocks.insert(block_id, block.clone());
-        state.links.insert(link.id, link.clone());
-        state.rebuild_indexes();
-    }
+    // 5. Persist through repository traits (handles both memory and disk I/O)
+    let source_repo = FsSourceRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
+    let note_repo = FsNoteRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
+    let link_repo = FsLinkRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
 
-    // Save JSON metadata outside the lock
-    {
-        let state = vault_state.read().unwrap();
-        let sources_path = vault_path.join(".pkm").join("sources.json");
-        if let Ok(sources_json) = serde_json::to_string_pretty(&state.sources) {
-            let _ = std::fs::write(sources_path, sources_json);
-        }
-        let links_path = vault_path.join(".pkm").join("links.json");
-        if let Ok(links_json) = serde_json::to_string_pretty(&state.links) {
-            let _ = std::fs::write(links_path, links_json);
-        }
-    }
-
-    // 6. Persist to Disk using tokio::fs
-    let sources_dir = vault_path.join("sources");
-    let notes_dir = vault_path.join("notes");
-    
-    tokio::fs::create_dir_all(&sources_dir).await.map_err(|e| e.to_string())?;
-    tokio::fs::create_dir_all(&notes_dir).await.map_err(|e| e.to_string())?;
-
-    // Save Source as raw markdown
-    tokio::fs::write(
-        sources_dir.join(format!("{}.md", source_id)),
-        &source.raw_content,
-    ).await.map_err(|e| e.to_string())?;
-
-    // Save Note as styled markdown
-    let note_md = pkm_core::markdown::note_to_markdown(&note, &[block]);
-    tokio::fs::write(
-        notes_dir.join(note.file_name()),
-        note_md,
-    ).await.map_err(|e| e.to_string())?;
+    source_repo
+        .create(&source)
+        .map_err(|e| format!("Failed to save source: {}", e))?;
+    note_repo
+        .create(&note)
+        .map_err(|e| format!("Failed to save note: {}", e))?;
+    note_repo
+        .create_block(&block)
+        .map_err(|e| format!("Failed to save block: {}", e))?;
+    link_repo
+        .create(&link)
+        .map_err(|e| format!("Failed to save link: {}", e))?;
 
     println!("[Processor] ✓ Successfully ingested & promoted: {}", url);
     Ok(())
@@ -238,7 +210,6 @@ async fn process_and_promote(
 
 /// Mock AI analysis. Replace with real API calls to Gemini/Claude.
 async fn analyze_content_mock(markdown: &str, url: &str) -> AiAnalysisResult {
-    // Simulate LLM latency
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let title = if let Some(line) = markdown.lines().find(|l| l.starts_with('#')) {

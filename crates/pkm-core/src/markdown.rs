@@ -14,10 +14,9 @@
 use crate::block::{Block, BlockContent};
 use crate::id::{BlockId, NoteId, ObjectRef};
 use crate::media::{EmbedProvider, MediaType};
-use crate::note::Note;
+use crate::note::{Note, NoteMetadata};
 use crate::{Actor, Timestamp};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// YAML frontmatter for notes. Serialized as the first block in markdown files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +24,8 @@ struct NoteFrontmatter {
     id: String,
     created_by: String,
     created_at: String,
-    metadata: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    metadata: NoteMetadata,
 }
 
 /// Extract YAML frontmatter from the beginning of markdown text.
@@ -550,7 +550,7 @@ pub fn markdown_to_note(
         note_id
     };
 
-    // Use frontmatter metadata if available, otherwise empty
+    // Use frontmatter metadata if available, otherwise default
     let metadata = frontmatter
         .as_ref()
         .map(|fm| fm.metadata.clone())
@@ -681,7 +681,7 @@ mod tests {
             id: note_id,
             title: "My Note".to_string(),
             blocks: vec![],
-            metadata: std::collections::BTreeMap::new(),
+            metadata: NoteMetadata::default(),
             created_by: Actor::User,
             created_at: now,
             version: 1,
@@ -730,9 +730,11 @@ mod tests {
     fn yaml_frontmatter_round_trip() {
         let note_id = NoteId::new();
         let now = Timestamp::now_utc();
-        let mut metadata = BTreeMap::new();
-        metadata.insert("project".to_string(), serde_json::json!("MyProject"));
-        metadata.insert("priority".to_string(), serde_json::json!(1));
+        let metadata = NoteMetadata {
+            project: Some("MyProject".to_string()),
+            priority: Some(1),
+            ..Default::default()
+        };
 
         let original_note = Note {
             id: note_id,

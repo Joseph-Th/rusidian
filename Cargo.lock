@@ -2422,26 +2422,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
-name = "pkm-agent"
-version = "0.0.0"
-dependencies = [
- "pkm-core",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
 name = "pkm-app"
 version = "0.0.0"
 dependencies = [
  "chrono",
  "notify",
- "pkm-agent",
  "pkm-core",
  "pkm-fs",
- "pkm-ingestion",
  "pkm-search",
  "regex",
  "reqwest 0.11.27",

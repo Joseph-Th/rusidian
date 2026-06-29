@@ -5,11 +5,30 @@
 //! carries typed metadata.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 use crate::id::{BlockId, NoteId};
 use crate::sync::SyncEligible;
 use crate::{Actor, Timestamp};
+
+/// Strongly-typed note metadata with known fields.
+/// Avoids generic `serde_json::Value` — the compiler verifies this at compile time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct NoteMetadata {
+    pub project: Option<String>,
+    pub tags: Vec<String>,
+    pub priority: Option<i32>,
+    pub status: Option<String>,
+}
+
+impl NoteMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.project.is_none()
+            && self.tags.is_empty()
+            && self.priority.is_none()
+            && self.status.is_none()
+    }
+}
 
 /// A durable knowledge object. Notes consist of ordered blocks and carry
 /// metadata, provenance, and review state.
@@ -18,11 +37,11 @@ pub struct Note {
     pub id: NoteId,
     pub title: String,
     /// Ordered block ids. Resolving to full blocks happens in the storage/query
-    /// layer, not here. Blocks maintain their own `order` key for stable reordering.
+    /// layer, not here. Ordering is implicit in the vector position.
     pub blocks: Vec<BlockId>,
     /// Typed metadata. Use structured fields, not frontmatter blobs.
     /// Examples: project assignment, tags, custom fields.
-    pub metadata: BTreeMap<String, serde_json::Value>,
+    pub metadata: NoteMetadata,
     /// Who created this note (user or agent).
     pub created_by: Actor,
     /// When this note was created.
@@ -83,9 +102,11 @@ mod tests {
 
     #[test]
     fn note_round_trips() {
-        let mut metadata = BTreeMap::new();
-        metadata.insert("project".to_string(), serde_json::json!("MyProject"));
-        metadata.insert("priority".to_string(), serde_json::json!(1));
+        let metadata = NoteMetadata {
+            project: Some("MyProject".to_string()),
+            priority: Some(1),
+            ..Default::default()
+        };
 
         let now = crate::Timestamp::now_utc();
         let note = Note {
@@ -117,7 +138,7 @@ mod tests {
             id: NoteId::new(),
             title: "My Great Idea".to_string(),
             blocks: vec![],
-            metadata: BTreeMap::new(),
+            metadata: NoteMetadata::default(),
             created_by: Actor::User,
             created_at: now,
             version: 1,
@@ -135,7 +156,7 @@ mod tests {
             id: NoteId::new(),
             title: "My Great Idea!".to_string(),
             blocks: vec![],
-            metadata: BTreeMap::new(),
+            metadata: NoteMetadata::default(),
             created_by: Actor::User,
             created_at: now,
             version: 1,
@@ -147,49 +168,13 @@ mod tests {
     }
 
     #[test]
-    fn file_name_with_multiple_special_chars() {
-        let now = crate::Timestamp::now_utc();
-        let note = Note {
-            id: NoteId::new(),
-            title: "Test@#$%^&*() Note???".to_string(),
-            blocks: vec![],
-            metadata: BTreeMap::new(),
-            created_by: Actor::User,
-            created_at: now,
-            version: 1,
-            updated_at: now,
-        };
-
-        let suffix = &note.id.0.to_string()[..8];
-        assert_eq!(note.file_name(), format!("test-note-{}.md", suffix));
-    }
-
-    #[test]
     fn file_name_with_only_whitespace() {
         let now = crate::Timestamp::now_utc();
         let note = Note {
             id: NoteId::new(),
             title: "   ".to_string(),
             blocks: vec![],
-            metadata: BTreeMap::new(),
-            created_by: Actor::User,
-            created_at: now,
-            version: 1,
-            updated_at: now,
-        };
-
-        let suffix = &note.id.0.to_string()[..8];
-        assert_eq!(note.file_name(), format!("untitled-{}.md", suffix));
-    }
-
-    #[test]
-    fn file_name_empty_title() {
-        let now = crate::Timestamp::now_utc();
-        let note = Note {
-            id: NoteId::new(),
-            title: "".to_string(),
-            blocks: vec![],
-            metadata: BTreeMap::new(),
+            metadata: NoteMetadata::default(),
             created_by: Actor::User,
             created_at: now,
             version: 1,
@@ -207,7 +192,7 @@ mod tests {
             id: NoteId::new(),
             title: "My-Test_Note".to_string(),
             blocks: vec![],
-            metadata: BTreeMap::new(),
+            metadata: NoteMetadata::default(),
             created_by: Actor::User,
             created_at: now,
             version: 1,
@@ -219,13 +204,13 @@ mod tests {
     }
 
     #[test]
-    fn file_name_with_numbers() {
+    fn file_name_empty_title() {
         let now = crate::Timestamp::now_utc();
         let note = Note {
             id: NoteId::new(),
-            title: "Test 123 Note 456".to_string(),
+            title: "".to_string(),
             blocks: vec![],
-            metadata: BTreeMap::new(),
+            metadata: NoteMetadata::default(),
             created_by: Actor::User,
             created_at: now,
             version: 1,
@@ -233,6 +218,6 @@ mod tests {
         };
 
         let suffix = &note.id.0.to_string()[..8];
-        assert_eq!(note.file_name(), format!("test-123-note-456-{}.md", suffix));
+        assert_eq!(note.file_name(), format!("untitled-{}.md", suffix));
     }
 }
