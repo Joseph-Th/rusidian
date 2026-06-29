@@ -18,7 +18,7 @@ const statusConfig = {
   RawSource: { label: 'Raw Source', color: 'bg-gray-50', borderColor: 'border-gray-200', textColor: 'text-gray-900' },
   AiSummary: { label: 'AI Summary', color: 'bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-900' },
   ExtractedMetadata: { label: 'Extracted', color: 'bg-purple-50', borderColor: 'border-purple-200', textColor: 'text-purple-900' },
-  InferredLink: { label: 'Inferred', color: 'bg-green-50', borderColor: 'border-green-200', textColor: 'text-green-900' },
+  InferredLink: { label: 'Inferred', color: 'bg-teal-50', borderColor: 'border-teal-200', textColor: 'text-teal-900' },
   Reviewed: { label: 'Reviewed', color: 'bg-green-50', borderColor: 'border-green-200', textColor: 'text-green-900' },
   UnreviewedSuggestion: { label: 'Unreviewed', color: 'bg-yellow-50', borderColor: 'border-yellow-200', textColor: 'text-yellow-900' },
 }
@@ -30,7 +30,7 @@ function getStatusIcon(status: Block['status']) {
     case 'RawSource': return <span className={`${iconProps} text-gray-600`}>📄</span>
     case 'AiSummary': return <span className={`${iconProps} text-amber-600`}>🤖</span>
     case 'ExtractedMetadata': return <span className={`${iconProps} text-purple-600`}>🏷️</span>
-    case 'InferredLink': return <span className={`${iconProps} text-green-600`}>🔗</span>
+    case 'InferredLink': return <span className={`${iconProps} text-teal-600`}>🔗</span>
     case 'Reviewed': return <CheckCircle className={`${iconProps} text-green-600`} aria-label="Reviewed" />
     case 'UnreviewedSuggestion': return <AlertCircle className={`${iconProps} text-yellow-600`} aria-label="Needs review" />
   }
@@ -110,7 +110,7 @@ export default function MarkdownWithStatus({ blocks, onReviewBlock }: MarkdownWi
                     </span>
                   )}
                   {isUnreviewed && hoveredBlockId === block.id && (
-                    <HelpCircle className="w-3 h-3 text-yellow-600 flex-shrink-0" title="This block needs review" />
+                    <HelpCircle className="w-3 h-3 text-yellow-600 flex-shrink-0" aria-label="This block needs review" />
                   )}
                 </div>
               </div>

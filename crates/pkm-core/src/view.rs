@@ -2,7 +2,7 @@ use std::result::Result as StdResult;
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::{ObjectRef, SourceId, ViewId};
+use crate::id::{ObjectRef, ViewId};
 use crate::ingestion::IngestionState;
 use crate::source::Source;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -363,40 +363,42 @@ pub struct View {
     pub title: String,
     pub params: ViewParams,
     pub created_by: crate::Actor,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: crate::Timestamp,
     pub version: u32,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: crate::Timestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewRenderResult {
-    pub source_ids: Vec<SourceId>,
+    pub object_refs: Vec<ObjectRef>,
 }
 
 pub trait ViewModel {
     fn render_reading_queue(
         params: &ReadingQueueParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String>;
 
     fn render_review_queue(
         params: &ReviewQueueParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String>;
 
     fn render_timeline(
         params: &TimelineParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String>;
 
     fn render_graph_view(
         params: &GraphViewParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String>;
 
     fn render_canvas_view(
         params: &CanvasViewParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String>;
 }
 
@@ -405,7 +407,7 @@ pub struct DefaultViewModel;
 impl ViewModel for DefaultViewModel {
     fn render_reading_queue(
         params: &ReadingQueueParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String> {
         let mut filtered: Vec<_> = sources
             .iter()
@@ -421,14 +423,14 @@ impl ViewModel for DefaultViewModel {
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(50);
-        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+        let object_refs: Vec<_> = filtered.into_iter().take(limit).map(|s| ObjectRef::Source(s.id)).collect();
 
-        Ok(ViewRenderResult { source_ids })
+        Ok(ViewRenderResult { object_refs })
     }
 
     fn render_review_queue(
         params: &ReviewQueueParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String> {
         let mut filtered: Vec<_> = sources
             .iter()
@@ -444,16 +446,16 @@ impl ViewModel for DefaultViewModel {
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(50);
-        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+        let object_refs: Vec<_> = filtered.into_iter().take(limit).map(|s| ObjectRef::Source(s.id)).collect();
 
-        Ok(ViewRenderResult { source_ids })
+        Ok(ViewRenderResult { object_refs })
     }
 
     fn render_timeline(
         params: &TimelineParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String> {
-        let mut filtered: Vec<_> = sources.iter().collect();
+        let mut filtered: Vec<_> = sources.iter().copied().collect();
 
         if params.reverse_chronological {
             filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
@@ -462,52 +464,47 @@ impl ViewModel for DefaultViewModel {
         }
 
         let limit = params.limit.unwrap_or(100);
-        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+        let object_refs: Vec<_> = filtered.into_iter().take(limit).map(|s| ObjectRef::Source(s.id)).collect();
 
-        Ok(ViewRenderResult { source_ids })
+        Ok(ViewRenderResult { object_refs })
     }
 
     fn render_graph_view(
         params: &GraphViewParams,
-        sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String> {
-        let mut filtered: Vec<_> = sources.iter().collect();
+        let mut filtered: Vec<_> = sources.iter().copied().collect();
         filtered.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
 
         let limit = params.limit.unwrap_or(100);
-        let source_ids: Vec<_> = filtered.into_iter().take(limit).map(|s| s.id).collect();
+        let object_refs: Vec<_> = filtered.into_iter().take(limit).map(|s| ObjectRef::Source(s.id)).collect();
 
-        Ok(ViewRenderResult { source_ids })
+        Ok(ViewRenderResult { object_refs })
     }
 
     fn render_canvas_view(
         params: &CanvasViewParams,
-        _sources: &[Source],
+        sources: &[&Source],
     ) -> StdResult<ViewRenderResult, String> {
         let limit = params.limit.unwrap_or(500);
 
-        let mut source_ids_set = std::collections::HashSet::new();
-        let mut source_ids_ordered = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut object_refs = Vec::new();
 
         for node in params.nodes.iter().take(limit) {
-            if let ObjectRef::Source(source_id) = node.target {
-                if !source_ids_set.contains(&source_id) {
-                    source_ids_set.insert(source_id);
-                    source_ids_ordered.push(source_id);
-                }
+            if seen.insert(node.target) {
+                object_refs.push(node.target);
             }
         }
 
-        if source_ids_ordered.is_empty() {
-            let mut sorted = _sources.to_vec();
+        if object_refs.is_empty() {
+            let mut sorted: Vec<&Source> = sources.iter().copied().collect();
             sorted.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
-            let source_ids: Vec<_> = sorted.into_iter().take(limit).map(|s| s.id).collect();
-            return Ok(ViewRenderResult { source_ids });
+            let object_refs: Vec<_> = sorted.into_iter().take(limit).map(|s| ObjectRef::Source(s.id)).collect();
+            return Ok(ViewRenderResult { object_refs });
         }
 
-        let source_ids: Vec<_> = source_ids_ordered.into_iter().collect();
-
-        Ok(ViewRenderResult { source_ids })
+        Ok(ViewRenderResult { object_refs })
     }
 }
 
@@ -597,10 +594,11 @@ mod tests {
         ];
 
         let params = ReadingQueueParams::default().with_state(IngestionState::Captured);
-        let result = DefaultViewModel::render_reading_queue(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_reading_queue(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 1);
-        assert_eq!(result.source_ids[0], sources[0].id);
+        assert_eq!(result.object_refs.len(), 1);
+        assert_eq!(result.object_refs[0], ObjectRef::Source(sources[0].id));
     }
 
     #[test]
@@ -623,9 +621,10 @@ mod tests {
             .collect();
 
         let params = ReadingQueueParams::default().with_limit(25);
-        let result = DefaultViewModel::render_reading_queue(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_reading_queue(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 25);
+        assert_eq!(result.object_refs.len(), 25);
     }
 
     #[test]
@@ -660,8 +659,9 @@ mod tests {
         assert_eq!(view.kind, ViewKind::ReadingQueue);
         match &view.params {
             ViewParams::ReadingQueue(params) => {
-                let result = DefaultViewModel::render_reading_queue(params, &sources).unwrap();
-                assert_eq!(result.source_ids.len(), 1);
+                let source_refs: Vec<&Source> = sources.iter().collect();
+                let result = DefaultViewModel::render_reading_queue(params, &source_refs).unwrap();
+                assert_eq!(result.object_refs.len(), 1);
             }
             _ => panic!("Expected ReadingQueue params"),
         }
@@ -724,12 +724,13 @@ mod tests {
         let sources = vec![source1.clone(), source2.clone(), source3.clone()];
 
         let params = TimelineParams::default();
-        let result = DefaultViewModel::render_timeline(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_timeline(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 3);
-        assert_eq!(result.source_ids[0], source3.id);
-        assert_eq!(result.source_ids[1], source2.id);
-        assert_eq!(result.source_ids[2], source1.id);
+        assert_eq!(result.object_refs.len(), 3);
+        assert_eq!(result.object_refs[0], ObjectRef::Source(source3.id));
+        assert_eq!(result.object_refs[1], ObjectRef::Source(source2.id));
+        assert_eq!(result.object_refs[2], ObjectRef::Source(source1.id));
     }
 
     #[test]
@@ -752,9 +753,10 @@ mod tests {
             .collect();
 
         let params = TimelineParams::default().with_limit(10);
-        let result = DefaultViewModel::render_timeline(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_timeline(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 10);
+        assert_eq!(result.object_refs.len(), 10);
     }
 
     #[test]
@@ -813,11 +815,12 @@ mod tests {
         ];
 
         let params = ReviewQueueParams::default().with_state(IngestionState::AwaitingReview);
-        let result = DefaultViewModel::render_review_queue(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_review_queue(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 2);
-        assert_eq!(result.source_ids[0], sources[0].id);
-        assert_eq!(result.source_ids[1], sources[2].id);
+        assert_eq!(result.object_refs.len(), 2);
+assert_eq!(result.object_refs[0], ObjectRef::Source(sources[0].id));
+assert_eq!(result.object_refs[1], ObjectRef::Source(sources[2].id));
     }
 
     #[test]
@@ -870,10 +873,11 @@ mod tests {
         let params = GraphViewParams::default()
             .with_layout(GraphLayoutType::ForceDirected)
             .with_limit(15);
-        let result = DefaultViewModel::render_graph_view(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_graph_view(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 15);
-        assert_eq!(result.source_ids[0], sources[0].id);
+        assert_eq!(result.object_refs.len(), 15);
+        assert_eq!(result.object_refs[0], ObjectRef::Source(sources[0].id));
     }
 
     #[test]
@@ -1051,10 +1055,11 @@ mod tests {
             .collect();
 
         let params = CanvasViewParams::default().with_limit(25);
-        let result = DefaultViewModel::render_canvas_view(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_canvas_view(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 25);
-        assert_eq!(result.source_ids[0], sources[0].id);
+        assert_eq!(result.object_refs.len(), 25);
+        assert_eq!(result.object_refs[0], ObjectRef::Source(sources[0].id));
     }
 
     #[test]
@@ -1128,8 +1133,9 @@ mod tests {
             .collect();
 
         let params = CanvasViewParams::default().with_limit(30);
-        let result = DefaultViewModel::render_canvas_view(&params, &sources).unwrap();
+        let source_refs: Vec<&Source> = sources.iter().collect();
+        let result = DefaultViewModel::render_canvas_view(&params, &source_refs).unwrap();
 
-        assert_eq!(result.source_ids.len(), 30);
+        assert_eq!(result.object_refs.len(), 30);
     }
 }

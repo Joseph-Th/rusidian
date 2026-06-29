@@ -14,6 +14,8 @@ thiserror = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
 sha2 = { workspace = true }
+walkdir = "2"
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 pkm-core = { workspace = true, features = ["fixtures"] }

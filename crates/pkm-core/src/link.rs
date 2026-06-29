@@ -37,6 +37,7 @@ pub struct Link {
     pub to: ObjectRef,
     pub link_type: LinkType,
     pub created_by: crate::Actor,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: crate::Timestamp,
     pub reviewed: crate::review::ReviewState,
     /// Optional confidence score (0.0-1.0) for inferred links.
@@ -44,6 +45,7 @@ pub struct Link {
     /// Current version number (increments on each update).
     pub version: u32,
     /// When this version was created.
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: crate::Timestamp,
 }
 

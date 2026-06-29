@@ -59,7 +59,9 @@ pub trait NoteRepo {
     ///
     /// Safely overwrites the existing note + blocks in both memory and on disk.
     /// Removes links that pointed to blocks no longer present.
-    fn upsert_from_external(&self, note: &Note, blocks: &[Block]) -> Result<()>;
+    /// `external_file_path` is the filesystem path that triggered the update,
+    /// used to clean up the original file if it doesn't follow naming conventions.
+    fn upsert_from_external(&self, note: &Note, blocks: &[Block], external_file_path: &std::path::Path) -> Result<()>;
     // TODO(B2): block CRUD, ordered block fetch, metadata, version history.
 }
 

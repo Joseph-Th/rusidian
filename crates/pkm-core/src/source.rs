@@ -35,13 +35,17 @@ pub struct Source {
     pub id: SourceId,
     pub origin: SourceOrigin,
     pub title: Option<String>,
+    #[serde(skip, default)]
     pub raw_content: String,
+    #[serde(with = "time::serde::rfc3339")]
     pub captured_at: Timestamp,
     pub content_hash: String,
     pub ingestion_state: IngestionState,
     pub created_by: Actor,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: Timestamp,
     pub version: u32,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: Timestamp,
     // TODO(D4): byte_attachment_ref for binary content.
 }
@@ -74,7 +78,8 @@ mod tests {
 
         assert_eq!(back.id, source.id);
         assert_eq!(back.title, source.title);
-        assert_eq!(back.raw_content, source.raw_content);
+        // raw_content is skipped in serde — rebuilt from .md files on load
+        assert_eq!(back.raw_content, "");
         assert_eq!(back.content_hash, source.content_hash);
         assert_eq!(back.ingestion_state, source.ingestion_state);
         assert_eq!(back.created_by, source.created_by);

@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::id::EntityId;
+use crate::id::{EntityId, LinkId, ObjectRef};
 use crate::{Actor, Timestamp};
 
 /// Entity classification. Product invariant set — extend via ADR only.
@@ -23,6 +23,15 @@ pub enum EntityKind {
     Decision,
 }
 
+/// Snapshot of a link's original from/to targets before an entity merge
+/// mutation, enabling rollback via clear_merged_into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkBackup {
+    pub link_id: LinkId,
+    pub original_from: ObjectRef,
+    pub original_to: ObjectRef,
+}
+
 /// A normalized object the system can recognize, link, and retrieve.
 ///
 /// Entities support non-lossy merges: when merging A into B, A is marked
@@ -37,16 +46,23 @@ pub struct Entity {
     /// If Some(entity_id), this entity was merged into that entity. Used to
     /// preserve history and enable rollback. The survivor keeps this as None.
     pub merged_into: Option<EntityId>,
+    /// Backup of original link targets before merge mutation, enabling rollback
+    /// via clear_merged_into without data loss.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub merged_link_backups: Vec<LinkBackup>,
     /// Who created this entity (user or agent).
     pub created_by: Actor,
     /// When this entity was created.
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: Timestamp,
     /// Semantic date (when the entity/event actually occurred), RFC3339 format.
     /// Used for timeline visualizations.
+    #[serde(default, with = "time::serde::rfc3339::option")]
     pub semantic_date: Option<Timestamp>,
     /// Current version number (increments on each update).
     pub version: u32,
     /// When this version was created.
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: Timestamp,
 }
 
@@ -84,6 +100,7 @@ mod tests {
             name: "John Doe".to_string(),
             aliases: vec!["J. Doe".to_string()],
             merged_into: None,
+            merged_link_backups: vec![],
             created_by: Actor::User,
             created_at: now,
             semantic_date: None,

@@ -11,39 +11,11 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import dagre from 'dagre'
-import { Lightbulb, FileText, BookOpen, Tag, AlertCircle } from 'lucide-react'
-import { LinkNetworkData, getEdgeColor, getEdgeStyle } from '../types/linkNetwork'
+import { AlertCircle } from 'lucide-react'
+import { LinkNetworkData, getEdgeStyle, getEdgeLabel } from '../types/linkNetwork'
+import GraphNode from './GraphNode'
 
-function getIconForKind(kind: string) {
-  const iconProps = { size: 16, className: 'flex-shrink-0' }
-  switch (kind.toLowerCase()) {
-    case 'claim':
-      return <Lightbulb {...iconProps} />
-    case 'decision':
-      return <Lightbulb {...iconProps} />
-    case 'paper':
-      return <FileText {...iconProps} />
-    case 'book':
-      return <BookOpen {...iconProps} />
-    default:
-      return <Tag {...iconProps} />
-  }
-}
-
-function CustomNode({ data }: { data: any }) {
-  const bgColor = data.kind === 'claim' || data.kind === 'decision' ? 'bg-blue-50' : 'bg-gray-50'
-  const borderColor = data.kind === 'claim' || data.kind === 'decision' ? 'border-blue-200' : 'border-gray-200'
-
-  return (
-    <div className={`px-3 py-2 rounded-lg border ${borderColor} ${bgColor} shadow-md max-w-xs`}>
-      <div className="flex items-center gap-2 mb-1">
-        <div className="text-gray-600">{getIconForKind(data.kind)}</div>
-        <span className="text-xs font-medium text-gray-500 uppercase">{data.kind}</span>
-      </div>
-      <div className="text-sm font-semibold text-gray-900 line-clamp-2">{data.title}</div>
-    </div>
-  )
-}
+const nodeTypes = { default: GraphNode }
 
 interface ArgumentTreeProps {
   rootEntityId: string
@@ -80,13 +52,11 @@ export default function ArgumentTree({ rootEntityId, rootEntityName }: ArgumentT
           source: edge.source,
           target: edge.target,
           style: getEdgeStyle(edge.link_type),
-          label: edge.link_type,
-          labelStyle: {
-            fontSize: '11px',
-            fill: '#666',
-            background: '#fff',
-            padding: '2px 4px',
-          },
+          label: getEdgeLabel(edge.link_type),
+          labelStyle: { fontSize: 10, fontWeight: 600, fill: '#475569' },
+          labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },
+          labelBgPadding: [4, 2] as [number, number],
+          labelBgBorderRadius: 4,
           animated: false,
         }))
 
@@ -165,12 +135,13 @@ export default function ArgumentTree({ rootEntityId, rootEntityName }: ArgumentT
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        nodeTypes={{ default: CustomNode }}
+        nodeTypes={nodeTypes}
         fitView
+        proOptions={{ hideAttribution: true }}
       >
-        <Background />
-        <Controls />
-        <MiniMap />
+        <Background gap={20} size={1} color="#e2e8f0" />
+        <Controls showInteractive={false} />
+        <MiniMap pannable zoomable nodeColor="#cbd5e1" maskColor="rgba(241,245,249,0.7)" />
       </ReactFlow>
     </div>
   )

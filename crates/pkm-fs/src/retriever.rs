@@ -4,6 +4,21 @@ use pkm_core::id::ObjectRef;
 use crate::state::SharedVault;
 use pkm_search::rank;
 
+/// Format a Timestamp as an RFC3339 string for consistent date comparison
+/// with query filters (which use T separators).
+fn fmt_rfc3339(ts: &pkm_core::Timestamp) -> String {
+    ts.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| ts.to_string())
+}
+
+fn infer_content_status(actor: &pkm_core::Actor) -> ContentStatus {
+    match actor {
+        pkm_core::Actor::User => ContentStatus::UserAuthored,
+        pkm_core::Actor::Agent { .. } => ContentStatus::AiSummary,
+        pkm_core::Actor::System => ContentStatus::ExtractedMetadata,
+    }
+}
+
 pub struct FsRetriever {
     pub state: SharedVault,
 }
@@ -16,101 +31,95 @@ impl Retriever for FsRetriever {
             return Ok(vec![]);
         }
 
-        // Extract search data under lock, then drop to avoid blocking writes
-        let (block_data, note_data, source_data, entity_data) = {
-            let state = self.state.read().unwrap();
-
-            let blocks: Vec<_> = state.blocks.values().map(|b| {
-                let text = match &b.content {
-                    pkm_core::block::BlockContent::Markdown { text } => text.clone(),
-                    pkm_core::block::BlockContent::Table { headers, rows } => {
-                        format!("{} {}", headers.join(" "), rows.iter().map(|r| r.join(" ")).collect::<Vec<_>>().join(" "))
-                    }
-                    pkm_core::block::BlockContent::Math { expression, .. } => expression.clone(),
-                    pkm_core::block::BlockContent::Media { alt_text, .. } => alt_text.clone(),
-                    _ => String::new(),
-                };
-                (b.id, text, b.created_at.to_string())
-            }).collect();
-
-            let notes: Vec<_> = state.notes.values().map(|n| {
-                let project = n.metadata.project.clone();
-                (n.id, n.title.clone(), n.created_at.to_string(), project)
-            }).collect();
-
-            let sources: Vec<_> = state.sources.values().map(|s| {
-                (s.id, s.title.clone(), s.raw_content.clone(), s.created_at.to_string())
-            }).collect();
-
-            let entities: Vec<_> = state.entities.values().map(|e| {
-                (e.id, e.name.clone(), e.aliases.clone(), e.created_at.to_string())
-            }).collect();
-
-            (blocks, notes, sources, entities)
-        };
-
         let mut results = Vec::new();
+        let state = self.state.read().unwrap();
 
         // 1. Search blocks
-        for (id, text, created_at) in &block_data {
-            let text_lower = text.to_lowercase();
-            if text_lower.contains(&search_term) {
+        for block in state.blocks.values() {
+            let block_status = infer_content_status(&block.created_by);
+            let text = match &block.content {
+                pkm_core::block::BlockContent::Markdown { text } => text.as_str(),
+                pkm_core::block::BlockContent::Table { headers, rows } => {
+                    let combined = format!("{} {}",
+                        headers.join(" "),
+                        rows.iter().map(|r| r.join(" ")).collect::<Vec<_>>().join(" ")
+                    );
+                    if combined.to_lowercase().contains(&search_term) {
+                        results.push(SearchHit {
+                            object: ObjectRef::Block(block.id),
+                            status: block_status,
+                            score: None,
+                            snippet: extract_snippet(&combined, &search_term, 150),
+                            created_at: Some(fmt_rfc3339(&block.created_at)),
+                            project: None,
+                        });
+                    }
+                    continue;
+                }
+                pkm_core::block::BlockContent::Math { expression, .. } => expression.as_str(),
+                pkm_core::block::BlockContent::Media { alt_text, .. } => alt_text.as_str(),
+                _ => "",
+            };
+            if text.to_lowercase().contains(&search_term) {
                 results.push(SearchHit {
-                    object: ObjectRef::Block(*id),
-                    status: ContentStatus::UserAuthored,
+                    object: ObjectRef::Block(block.id),
+                    status: block_status,
                     score: None,
                     snippet: extract_snippet(text, &search_term, 150),
-                    created_at: Some(created_at.clone()),
+                    created_at: Some(fmt_rfc3339(&block.created_at)),
                     project: None,
                 });
             }
         }
 
         // 2. Search notes
-        for (id, title, created_at, project) in &note_data {
-            if title.to_lowercase().contains(&search_term) {
+        for note in state.notes.values() {
+            let note_status = infer_content_status(&note.created_by);
+            if note.title.to_lowercase().contains(&search_term) {
                 results.push(SearchHit {
-                    object: ObjectRef::Note(*id),
-                    status: ContentStatus::UserAuthored,
+                    object: ObjectRef::Note(note.id),
+                    status: note_status,
                     score: None,
-                    snippet: Some(format!("Note: {}", title)),
-                    created_at: Some(created_at.clone()),
-                    project: project.clone(),
+                    snippet: Some(format!("Note: {}", note.title)),
+                    created_at: Some(fmt_rfc3339(&note.created_at)),
+                    project: note.metadata.project.clone(),
                 });
             }
         }
 
         // 3. Search sources
-        for (id, title, raw_content, created_at) in &source_data {
-            let title_match = title.as_ref().map(|t| t.to_lowercase().contains(&search_term)).unwrap_or(false);
-            let content_match = raw_content.to_lowercase().contains(&search_term);
+        for source in state.sources.values() {
+            let title_match = source.title.as_ref().map(|t| t.to_lowercase().contains(&search_term)).unwrap_or(false);
+            let content_match = source.raw_content.to_lowercase().contains(&search_term);
             if title_match || content_match {
                 results.push(SearchHit {
-                    object: ObjectRef::Source(*id),
+                    object: ObjectRef::Source(source.id),
                     status: ContentStatus::RawSource,
                     score: None,
-                    snippet: extract_snippet(raw_content, &search_term, 150),
-                    created_at: Some(created_at.clone()),
+                    snippet: extract_snippet(&source.raw_content, &search_term, 150),
+                    created_at: Some(fmt_rfc3339(&source.created_at)),
                     project: None,
                 });
             }
         }
 
         // 4. Search entities
-        for (id, name, aliases, created_at) in &entity_data {
-            let name_match = name.to_lowercase().contains(&search_term);
-            let alias_match = aliases.iter().any(|a| a.to_lowercase().contains(&search_term));
+        for entity in state.entities.values() {
+            let name_match = entity.name.to_lowercase().contains(&search_term);
+            let alias_match = entity.aliases.iter().any(|a| a.to_lowercase().contains(&search_term));
             if name_match || alias_match {
                 results.push(SearchHit {
-                    object: ObjectRef::Entity(*id),
+                    object: ObjectRef::Entity(entity.id),
                     status: ContentStatus::ExtractedMetadata,
                     score: None,
-                    snippet: Some(format!("Entity: {}", name)),
-                    created_at: Some(created_at.clone()),
+                    snippet: Some(format!("Entity: {}", entity.name)),
+                    created_at: Some(fmt_rfc3339(&entity.created_at)),
                     project: None,
                 });
             }
         }
+
+        // Lock is dropped here when state goes out of scope
 
         // Apply filters
         apply_filters(&mut results, query);
@@ -126,11 +135,28 @@ fn extract_snippet(text: &str, search_term: &str, max_len: usize) -> Option<Stri
     let text_lower = text.to_lowercase();
     let search_lower = search_term.to_lowercase();
 
-    if let Some(pos) = text_lower.find(&search_lower) {
-        let context_before = pos.saturating_sub(50);
-        let context_after = std::cmp::min(pos + search_term.len() + 50, text.len());
+    if let Some(lower_pos) = text_lower.find(&search_lower) {
+        // Map the byte position in lowercased text back to the original text
+        // by counting characters up to the match position
+        let char_count = text_lower[..lower_pos].chars().count();
+        let original_pos = text
+            .char_indices()
+            .nth(char_count)
+            .map(|(i, _)| i)
+            .unwrap_or(text.len());
 
-        let snippet = &text[context_before..context_after];
+        let start = text.floor_char_boundary(original_pos.saturating_sub(50));
+        let raw_end = std::cmp::min(original_pos + search_term.len() + 50, text.len());
+        let end = if raw_end >= text.len() {
+            text.len()
+        } else if text.is_char_boundary(raw_end) {
+            raw_end
+        } else {
+            let next_char_len = text[raw_end..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+            raw_end + next_char_len
+        };
+
+        let snippet = &text[start..end];
         if snippet.len() <= max_len {
             Some(format!("...{}...", snippet.trim()))
         } else {

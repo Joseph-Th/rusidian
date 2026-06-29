@@ -17,11 +17,12 @@ export default function EdgeLegend() {
           <div key={item.type} className="flex items-center gap-2">
             <div className="flex-1 flex items-center gap-2">
               <div
-                className={`w-6 h-0.5 ${item.type === 'contradicts' ? 'border-b-2 border-dashed' : ''}`}
-                style={{
-                  backgroundColor: item.type === 'contradicts' ? 'transparent' : item.color,
-                  borderColor: item.color,
-                }}
+                className="w-6 flex-shrink-0"
+                style={
+                  item.type === 'contradicts'
+                    ? { borderTop: `2px dashed ${item.color}` }
+                    : { height: 2, backgroundColor: item.color, borderRadius: 2 }
+                }
               />
               <span className="text-xs text-gray-600">{item.label}</span>
             </div>

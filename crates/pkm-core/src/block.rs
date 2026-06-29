@@ -75,12 +75,14 @@ pub struct Block {
     /// Who created this block (user or agent).
     pub created_by: Actor,
     /// When this block was created.
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: Timestamp,
     /// If this block was extracted/derived from a source, reference it here.
     pub source_provenance_ref: Option<ObjectRef>,
     /// Current version number (increments on each update).
     pub version: u32,
     /// When this version was created.
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: Timestamp,
 }
 

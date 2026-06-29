@@ -46,21 +46,63 @@ pub fn compute_hash(content: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// A URL queued for ingestion, with retry tracking.
+#[derive(Debug, Clone)]
+pub struct IngestPayload {
+    pub url: String,
+    pub retries: u8,
+}
+
 /// Start the in-memory, rate-limited background ingestion worker.
 /// Returns a sender for queuing individual URLs.
 pub fn start_ingestion_worker(
     vault_state: SharedVault,
     vault_path: PathBuf,
-) -> mpsc::UnboundedSender<String> {
-    let (tx, rx) = mpsc::unbounded_channel::<String>();
-    tokio::spawn(run_rate_limited_fetcher(rx, vault_state, vault_path));
+) -> mpsc::UnboundedSender<IngestPayload> {
+    let (tx, rx) = mpsc::unbounded_channel::<IngestPayload>();
+    let tx_clone = tx.clone();
+    tokio::spawn(run_rate_limited_fetcher(rx, tx_clone, vault_state, vault_path));
     tx
+}
+
+/// Create a Source in Captured state for a URL before the fetch begins.
+/// This ensures the URL is never lost — even if the fetch fails, the user can
+/// see the failure in the UI and retry.
+fn create_source_record(url: &str, vault_state: &SharedVault, vault_path: &PathBuf) -> Source {
+    let now = Timestamp::now_utc();
+    let source = Source {
+        id: SourceId::new(),
+        origin: SourceOrigin::WebArticle { url: url.to_string() },
+        title: None,
+        raw_content: String::new(),
+        captured_at: now,
+        content_hash: String::new(),
+        ingestion_state: IngestionState::Captured,
+        created_by: Actor::Agent { name: "Autonomous-Ingestor".into() },
+        created_at: now,
+        version: 1,
+        updated_at: now,
+    };
+
+    // Write source record to disk via repository
+    let source_repo = FsSourceRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
+    let _ = source_repo.create(&source);
+
+    source
+}
+
+/// Mark a source as Failed with an error message.
+fn mark_source_failed(source_id: SourceId, error_message: &str, vault_state: &SharedVault, vault_path: &PathBuf) {
+    let source_repo = FsSourceRepo { state: vault_state.clone(), vault_path: vault_path.clone() };
+    let _ = source_repo.update_ingestion_state(source_id, IngestionState::Failed);
+    eprintln!("[Jina] Source {} failed: {}", source_id, error_message);
 }
 
 /// The main worker loop. Pulls from the channel, waits for the rate limit tick,
 /// hits Jina, and then passes the markdown off to a spawned task.
 async fn run_rate_limited_fetcher(
-    mut rx: mpsc::UnboundedReceiver<String>,
+    mut rx: mpsc::UnboundedReceiver<IngestPayload>,
+    tx: mpsc::UnboundedSender<IngestPayload>,
     vault_state: SharedVault,
     vault_path: PathBuf,
 ) {
@@ -73,60 +115,86 @@ async fn run_rate_limited_fetcher(
     let mut ticker = interval(Duration::from_secs(3));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    while let Some(url) = rx.recv().await {
+    while let Some(payload) = rx.recv().await {
         ticker.tick().await;
 
-        println!("[Jina Fetcher] Processing URL: {}", url);
-        let jina_url = format!("https://r.jina.ai/{}", url);
+        let client = client.clone();
+        let tx = tx.clone();
+        let vault_state = vault_state.clone();
+        let vault_path = vault_path.clone();
 
-        let markdown = match client.get(&jina_url).send().await {
-            Ok(resp) if resp.status().is_success() => resp.text().await.unwrap_or_default(),
-            Ok(resp) => {
-                eprintln!("[Jina] HTTP {}: {} (Skipping)", resp.status(), url);
-                continue;
-            }
-            Err(e) => {
-                eprintln!("[Jina] Network error: {} (Skipping)", e);
-                continue;
-            }
-        };
-
-        if markdown.is_empty() {
-            eprintln!("[Jina] Empty response for {} (Skipping)", url);
-            continue;
-        }
-
-        println!("[Jina Fetcher] ✓ Fetched {} bytes", markdown.len());
-
-        // Spawn processing into a separate task so the ticker can proceed immediately
-        let vault_state_clone = vault_state.clone();
-        let vault_path_clone = vault_path.clone();
-        let url_clone = url.clone();
-
+        // Spawn the entire HTTP fetch + processing into a background task so
+        // the ticker can proceed with the next URL immediately. Without this,
+        // a 15-second Jina response would limit throughput to ~4 RPM.
         tokio::spawn(async move {
+            println!("[Jina Fetcher] Processing URL: {}", payload.url);
+
+            // Clone before moving into create_source_record
+            let vs = vault_state.clone();
+            let vp = vault_path.clone();
+            // Create source record BEFORE fetch so the URL is never lost
+            let source = create_source_record(&payload.url, &vs, &vp);
+            let source_id = source.id;
+
+            let jina_url = format!("https://r.jina.ai/{}", payload.url);
+
+            let markdown = match client.get(&jina_url).send().await {
+                Ok(resp) if resp.status().is_success() => resp.text().await.unwrap_or_default(),
+                Ok(resp) if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => {
+                    if payload.retries < 3 {
+                        eprintln!("[Jina] 429 Rate limited. Re-queuing {} (retry {}/3).", payload.url, payload.retries + 1);
+                        mark_source_failed(source_id, &format!("Rate limited (429), retry {}/3", payload.retries + 1), &vault_state, &vault_path);
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_secs(10)).await;
+                            let _ = tx.send(IngestPayload { url: payload.url, retries: payload.retries + 1 });
+                        });
+                    } else {
+                        mark_source_failed(source_id, "Max retries (3) reached — rate limited", &vault_state, &vault_path);
+                    }
+                    return;
+                }
+                Ok(resp) => {
+                    mark_source_failed(source_id, &format!("HTTP {} error", resp.status()), &vault_state, &vault_path);
+                    return;
+                }
+                Err(e) => {
+                    mark_source_failed(source_id, &format!("Network error: {}", e), &vault_state, &vault_path);
+                    return;
+                }
+            };
+
+            if markdown.is_empty() {
+                mark_source_failed(source_id, "Empty response from Jina", &vault_state, &vault_path);
+                return;
+            }
+
+            println!("[Jina Fetcher] ✓ Fetched {} bytes", markdown.len());
+
             if let Err(e) = process_and_promote(
-                url_clone.clone(),
+                source_id,
+                payload.url.clone(),
                 markdown,
-                vault_state_clone,
-                vault_path_clone,
+                vault_state.clone(),
+                vault_path.clone(),
             )
             .await
             {
-                eprintln!("[Processor] Error processing {}: {}", url_clone, e);
+                mark_source_failed(source_id, &format!("Processing error: {}", e), &vault_state, &vault_path);
             }
         });
     }
 }
 
 /// Process markdown: LLM reasoning + writing through repository traits.
+/// Uses the existing source_id from the placeholder record to avoid ghost records.
 async fn process_and_promote(
+    source_id: SourceId,
     url: String,
     markdown: String,
     vault_state: SharedVault,
     vault_path: PathBuf,
 ) -> Result<(), String> {
     let now = Timestamp::now_utc();
-    let source_id = SourceId::new();
     let agent_actor = Actor::Agent { name: "Autonomous-Ingestor".into() };
 
     // 1. Create the Source representation
@@ -157,7 +225,7 @@ async fn process_and_promote(
         content: BlockContent::Markdown { text: ai_results.summary },
         created_by: agent_actor.clone(),
         created_at: now,
-        source_provenance_ref: None,
+        source_provenance_ref: Some(ObjectRef::Source(source_id)),
         version: 1,
         updated_at: now,
     };
@@ -197,19 +265,26 @@ async fn process_and_promote(
     let block_clone = block.clone();
     let link_clone = link.clone();
 
+    let vault_path_captured = vault_path.clone();
     tokio::task::spawn_blocking(move || {
+        let note_file_path = vault_path_captured
+            .join("notes")
+            .join(note_clone.file_name());
+
         source_repo
             .create(&source_clone)
             .map_err(|e| format!("Failed to save source: {}", e))?;
         note_repo
-            .create(&note_clone)
+            .upsert_from_external(&note_clone, &[block_clone], &note_file_path)
             .map_err(|e| format!("Failed to save note: {}", e))?;
-        note_repo
-            .create_block(&block_clone)
-            .map_err(|e| format!("Failed to save block: {}", e))?;
         link_repo
             .create(&link_clone)
             .map_err(|e| format!("Failed to save link: {}", e))?;
+
+        // Skip watcher notification AFTER the writes complete to prevent race
+        if let Some(handle) = crate::service::get_watcher_ignore_handle() {
+            handle.skip_next(note_file_path);
+        }
         Ok::<_, String>(())
     })
     .await

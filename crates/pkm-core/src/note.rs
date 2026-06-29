@@ -44,21 +44,26 @@ pub struct Note {
     /// Who created this note (user or agent).
     pub created_by: Actor,
     /// When this note was created.
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: Timestamp,
     /// Current version number (increments on each update).
     pub version: u32,
     /// When this version was created.
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: Timestamp,
 }
 
 impl Note {
     /// Generate a safe filename from the note title.
-    /// Converts to lowercase, replaces spaces with hyphens, removes special characters,
+    /// Converts to lowercase, replaces spaces/graphic-punctuation with hyphens,
     /// appends UUID suffix for uniqueness, and adds .md extension.
     /// Example: "My Great Idea!" -> "my-great-idea-abc123de.md"
     pub fn file_name(&self) -> String {
+        let uuid_str = self.id.0.to_string();
+        let uuid_suffix = &uuid_str[uuid_str.len() - 8..];
+
         if self.title.is_empty() {
-            return format!("untitled-{}.md", &self.id.0.to_string()[..8]);
+            return format!("untitled-{}.md", uuid_suffix);
         }
 
         let mut filename = String::new();
@@ -68,19 +73,22 @@ impl Note {
             if c.is_alphanumeric() {
                 filename.push(c);
                 last_was_separator = false;
-            } else if (c.is_whitespace() || c == '_' || c == '-') && !last_was_separator {
+            } else if !last_was_separator {
+                // Treat any non-alphanumeric character (whitespace, punctuation,
+                // symbols) as a separator, collapsing adjacent separators into one.
                 filename.push('-');
                 last_was_separator = true;
             }
         }
 
         let filename = filename.trim_matches('-').to_string();
-        let uuid_suffix = &self.id.0.to_string()[..8];
+        // Truncate to prevent ENAMETOOLONG errors
+        let truncated: String = filename.chars().take(100).collect();
 
-        if filename.is_empty() {
+        if truncated.is_empty() {
             format!("untitled-{}.md", uuid_suffix)
         } else {
-            format!("{}-{}.md", filename, uuid_suffix)
+            format!("{}-{}.md", truncated, uuid_suffix)
         }
     }
 }
@@ -134,7 +142,8 @@ mod tests {
             updated_at: now,
         };
 
-        let suffix = &note.id.0.to_string()[..8];
+        let uuid_str = note.id.0.to_string();
+        let suffix = &uuid_str[uuid_str.len() - 8..];
         assert_eq!(note.file_name(), format!("my-great-idea-{}.md", suffix));
     }
 
@@ -152,7 +161,8 @@ mod tests {
             updated_at: now,
         };
 
-        let suffix = &note.id.0.to_string()[..8];
+        let uuid_str = note.id.0.to_string();
+        let suffix = &uuid_str[uuid_str.len() - 8..];
         assert_eq!(note.file_name(), format!("my-great-idea-{}.md", suffix));
     }
 
@@ -170,7 +180,8 @@ mod tests {
             updated_at: now,
         };
 
-        let suffix = &note.id.0.to_string()[..8];
+        let uuid_str = note.id.0.to_string();
+        let suffix = &uuid_str[uuid_str.len() - 8..];
         assert_eq!(note.file_name(), format!("untitled-{}.md", suffix));
     }
 
@@ -188,7 +199,8 @@ mod tests {
             updated_at: now,
         };
 
-        let suffix = &note.id.0.to_string()[..8];
+        let uuid_str = note.id.0.to_string();
+        let suffix = &uuid_str[uuid_str.len() - 8..];
         assert_eq!(note.file_name(), format!("my-test-note-{}.md", suffix));
     }
 
@@ -206,7 +218,8 @@ mod tests {
             updated_at: now,
         };
 
-        let suffix = &note.id.0.to_string()[..8];
+        let uuid_str = note.id.0.to_string();
+        let suffix = &uuid_str[uuid_str.len() - 8..];
         assert_eq!(note.file_name(), format!("untitled-{}.md", suffix));
     }
 }

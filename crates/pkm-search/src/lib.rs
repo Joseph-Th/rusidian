@@ -36,15 +36,22 @@ pub fn parse_query(mode: SearchMode, raw: &str) -> SearchQuery {
                     chars.next(); // consume ':'
                     is_filter = true;
                     let mut value = String::new();
-                    while let Some(&c) = chars.peek() {
-                        if c.is_whitespace() {
-                            break;
+
+                    if let Some(&quote) = chars.peek() {
+                        if quote == '"' || quote == '\'' {
+                            chars.next(); // consume opening quote
+                            while let Some(c) = chars.next() {
+                                if c == quote { break; }
+                                value.push(c);
+                            }
+                        } else {
+                            while let Some(&c) = chars.peek() {
+                                if c.is_whitespace() { break; }
+                                value.push(chars.next().unwrap());
+                            }
                         }
-                        if c == '"' || c == '\'' {
-                            break;
-                        }
-                        value.push(chars.next().unwrap());
                     }
+
                     apply_filter(&mut filters, &key, &value);
                     break;
                 } else {
@@ -111,8 +118,10 @@ fn apply_filter(filters: &mut SearchFilters, key: &str, value: &str) {
             if parts.len() == 2 {
                 filters.date_range = Some((parts[0].to_string(), parts[1].to_string()));
             } else if parts.len() == 1 {
-                // Single date becomes a range of that day
-                filters.date_range = Some((parts[0].to_string(), parts[0].to_string()));
+                // Single date becomes a range of that whole day.
+                // Append end-of-day so lexicographic comparison covers all times on that date.
+                let end_of_day = format!("{}T23:59:59Z", parts[0]);
+                filters.date_range = Some((parts[0].to_string(), end_of_day));
             }
         }
         "project" => {

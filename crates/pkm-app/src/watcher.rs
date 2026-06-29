@@ -33,28 +33,67 @@ pub enum NoteWatcherEvent {
     },
 }
 
-fn safe_canonicalize(path: &Path) -> PathBuf {
-    match path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => path.to_path_buf(),
-    }
+fn normalize_path(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    PathBuf::from(s.to_string())
+}
+
+/// Tracks file metadata (size + modified time) for files the app has written,
+/// so the watcher can distinguish app-initiated writes from external edits.
+#[derive(Debug, Clone)]
+struct FileMeta {
+    size: u64,
+    modified: std::time::SystemTime,
 }
 
 /// Handle to skip processing on file modification events.
-/// Uses a TTL (time-to-live) based cache to handle multiple OS events for a single write.
-/// When OS sends multiple events (e.g., Metadata + Data modify), they're all ignored within the TTL window.
+/// Combines a TTL-based cache with file metadata tracking to handle multiple OS events
+/// for a single write and to survive delayed OS notifications on slow disks.
 #[derive(Clone)]
 pub struct IgnoreNextEvent {
-    cache: Arc<Mutex<HashMap<PathBuf, Instant>>>,
+    cache: Arc<Mutex<HashMap<PathBuf, (Instant, Option<FileMeta>)>>>,
 }
 
 impl IgnoreNextEvent {
     /// Mark a file to be skipped until the TTL expires (default 1 second).
+    /// Also records the file's current metadata (size + mtime) so the watcher can
+    /// still match events that arrive after the TTL window on a slow disk.
     pub fn skip_next(&self, path: PathBuf) {
-        let path = safe_canonicalize(&path);
+        let path = normalize_path(&path);
+        let meta = std::fs::metadata(&path).ok().and_then(|m| {
+            m.modified().ok().map(|modified| FileMeta { size: m.len(), modified })
+        });
         if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(path, Instant::now() + Duration::from_secs(1));
+            cache.insert(path, (Instant::now() + Duration::from_secs(1), meta));
         }
+    }
+
+    /// Returns true if the event should be skipped because it matches an app-initiated write.
+    fn should_skip(&self, path: &Path) -> bool {
+        let normalized = normalize_path(path);
+        if let Ok(mut cache) = self.cache.lock() {
+            let now = Instant::now();
+            if let Some((expiry, meta)) = cache.get(&normalized) {
+                // Fast path: TTL still valid
+                if now < *expiry {
+                    return true;
+                }
+                // Slow path: TTL expired but metadata still matches
+                if let Some(ref recorded) = meta {
+                    if let Ok(current_meta) = std::fs::metadata(path) {
+                        if current_meta.len() == recorded.size
+                            && current_meta.modified().ok().as_ref() == Some(&recorded.modified)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            // Clean up expired entries
+            cache.retain(|_, &mut (exp, _)| now < exp);
+        }
+        false
     }
 }
 
@@ -68,12 +107,12 @@ impl IgnoreNextEvent {
 pub fn watch_vault(vault_path: &Path, vault_state: SharedVault) -> NotifyResult<(mpsc::UnboundedReceiver<NoteWatcherEvent>, IgnoreNextEvent)> {
     let (tx, rx) = mpsc::unbounded_channel();
     let vault_path = vault_path.to_path_buf();
-    let ignore_cache = Arc::new(Mutex::new(HashMap::new()));
-    let ignore_handle = IgnoreNextEvent { cache: Arc::clone(&ignore_cache) };
+    let ignore_state = IgnoreNextEvent { cache: Arc::new(Mutex::new(HashMap::new())) };
+    let ignore_handle = ignore_state.clone();
 
     // Create a watcher in a background tokio task
     tokio::spawn(async move {
-        if let Err(e) = watch_impl(&vault_path, vault_state, tx, ignore_cache).await {
+        if let Err(e) = watch_impl(&vault_path, vault_state, tx, ignore_state).await {
             eprintln!("File watcher error: {}", e);
         }
     });
@@ -85,7 +124,7 @@ async fn watch_impl(
     vault_path: &Path,
     vault_state: SharedVault,
     tx: mpsc::UnboundedSender<NoteWatcherEvent>,
-    ignore_cache: Arc<Mutex<HashMap<PathBuf, Instant>>>,
+    ignore_state: IgnoreNextEvent,
 ) -> NotifyResult<()> {
     let vault_path = vault_path.to_path_buf();
     let (watch_tx, mut watch_rx) = mpsc::unbounded_channel();
@@ -100,33 +139,41 @@ async fn watch_impl(
     let mut pending_files: HashMap<PathBuf, tokio::task::JoinHandle<()>> = HashMap::new();
     let debounce_duration = Duration::from_millis(200);
 
+    // Periodic cleanup interval to reclaim finished JoinHandles even when
+    // no new file modifications arrive (prevents memory leak from idle task).
+    let mut last_cleanup = tokio::time::Instant::now();
+    let cleanup_interval = Duration::from_secs(10);
+
     // Process watcher events
     while let Some(Ok(event)) = watch_rx.recv().await {
         use notify::EventKind;
 
+        // Periodic cleanup of finished handles
+        if last_cleanup.elapsed() >= cleanup_interval {
+            pending_files.retain(|_, handle| !handle.is_finished());
+            last_cleanup = tokio::time::Instant::now();
+        }
+
         match event.kind {
             EventKind::Create(_) | EventKind::Modify(_) => {
                 for path in event.paths {
-                    // Only process .md files
+                    // Only process .md files inside the notes/ directory (including subdirectories)
                     if path.extension().and_then(|s| s.to_str()) != Some("md") {
                         continue;
                     }
+                    let normalized_path = normalize_path(&path);
+                    let notes_path = normalize_path(&vault_path.join("notes"));
+                    if !normalized_path.starts_with(&notes_path) {
+                        continue;
+                    }
 
-                    // Check if this file is in the ignore cache and if TTL has not expired
-                    let canonical_path = safe_canonicalize(&path);
-                    let should_skip = {
-                        let mut cache = ignore_cache.lock().unwrap_or_else(|e| e.into_inner());
-                        let now = Instant::now();
-                        cache.retain(|_, &mut expiry| now < expiry);
-                        cache.contains_key(&canonical_path)
-                    };
-
-                    if should_skip {
+                    // Check if this file was written by the app (TTL + metadata match)
+                    if ignore_state.should_skip(&normalized_path) {
                         continue;
                     }
 
                     // Cancel any existing pending task for this file
-                    if let Some(handle) = pending_files.remove(&canonical_path) {
+                    if let Some(handle) = pending_files.remove(&normalized_path) {
                         handle.abort();
                     }
 
@@ -177,7 +224,7 @@ async fn watch_impl(
                     });
 
                     pending_files.retain(|_, handle| !handle.is_finished());
-                    pending_files.insert(canonical_path, task);
+                    pending_files.insert(normalized_path, task);
                 }
             }
             EventKind::Remove(_) => {
@@ -185,14 +232,12 @@ async fn watch_impl(
                     if path.extension().and_then(|s| s.to_str()) != Some("md") {
                         continue;
                     }
-                    let canonical_path = safe_canonicalize(&path);
-                    let should_skip = {
-                        let mut cache = ignore_cache.lock().unwrap_or_else(|e| e.into_inner());
-                        let now = Instant::now();
-                        cache.retain(|_, &mut expiry| now < expiry);
-                        cache.contains_key(&canonical_path)
-                    };
-                    if should_skip {
+                    let normalized_path = normalize_path(&path);
+                    let notes_path = normalize_path(&vault_path.join("notes"));
+                    if !normalized_path.starts_with(&notes_path) {
+                        continue;
+                    }
+                    if ignore_state.should_skip(&normalized_path) {
                         continue;
                     }
                     let _ = tx.send(NoteWatcherEvent::Deleted { file_path: path });
@@ -227,9 +272,11 @@ mod tests {
         // Give watcher time to start
         sleep(Duration::from_millis(100)).await;
 
-        // Create a markdown file
-        let note_path = vault_path.join("test-note.md");
-        let markdown_content = "---\nid: 123e4567-e89b-12d3-a456-426614174000\ncreated_by: User\ncreated_at: 2026-06-26T00:00:00Z\nmetadata: {}\n---\n\n# Test Note\n\nSome content";
+        // Create a notes/ directory and a markdown file inside it
+        let notes_dir = vault_path.join("notes");
+        fs::create_dir_all(&notes_dir).expect("failed to create notes dir");
+        let note_path = notes_dir.join("test-note.md");
+        let markdown_content = "---\nid: 123e4567-e89b-12d3-a456-426614174000\ncreated_by:\n  kind: user\ncreated_at: 2026-06-26T00:00:00Z\nmetadata: {}\n---\n\n# Test Note\n\nSome content";
         fs::write(&note_path, markdown_content).expect("failed to write test file");
 
         // Wait for watcher to detect and process the file (with timeout)

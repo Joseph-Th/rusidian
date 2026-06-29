@@ -10,11 +10,28 @@ pub struct FsSourceRepo {
     pub vault_path: PathBuf,
 }
 
+impl FsSourceRepo {
+    /// Update the ingestion state of a source in-memory and mark dirty.
+    /// Does not rewrite the source file on disk (state-only update).
+    pub fn update_ingestion_state(&self, id: SourceId, ingestion_state: pkm_core::ingestion::IngestionState) -> Result<()> {
+        let mut state = self.state.write().unwrap();
+        if let Some(source) = state.sources.get_mut(&id) {
+            source.ingestion_state = ingestion_state;
+            source.updated_at = pkm_core::Timestamp::now_utc();
+            state.mark_dirty();
+            Ok(())
+        } else {
+            Err(pkm_core::CoreError::NotFound(format!("Source not found: {}", id)))
+        }
+    }
+}
+
 impl SourceRepo for FsSourceRepo {
     fn create(&self, source: &Source) -> Result<()> {
         {
             let mut state = self.state.write().unwrap();
             state.sources.insert(source.id, source.clone());
+            state.mark_dirty();
         }
         let file_name = format!("{}.md", source.id);
         let file_path = self.vault_path.join("sources").join(file_name);

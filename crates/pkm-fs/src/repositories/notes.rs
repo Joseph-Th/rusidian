@@ -5,8 +5,8 @@ use pkm_core::id::{NoteId, BlockId};
 use pkm_core::id::ObjectRef;
 use pkm_core::link::Link;
 use pkm_core::Result;
-use std::path::PathBuf;
-use crate::state::{SharedVault, persist_metadata};
+use std::path::{Path, PathBuf};
+use crate::state::SharedVault;
 
 pub struct FsNoteRepo {
     pub state: SharedVault,
@@ -15,11 +15,10 @@ pub struct FsNoteRepo {
 
 impl FsNoteRepo {
     fn generate_markdown(&self, note: &Note, state: &crate::state::VaultState) -> String {
-        let mut blocks: Vec<Block> = state.blocks.values()
-            .filter(|b| b.note_id == note.id)
+        let blocks: Vec<Block> = note.blocks.iter()
+            .filter_map(|id| state.blocks.get(id))
             .cloned()
             .collect();
-        blocks.sort_by_key(|b| note.blocks.iter().position(|&id| id == b.id).unwrap_or(usize::MAX));
         pkm_core::markdown::note_to_markdown(note, &blocks)
     }
 
@@ -38,12 +37,11 @@ impl FsNoteRepo {
 
 impl NoteRepo for FsNoteRepo {
     fn create(&self, note: &Note) -> Result<()> {
-        let markdown_text = {
-            let mut state = self.state.write().unwrap();
-            state.notes.insert(note.id, note.clone());
-            self.generate_markdown(note, &state)
-        };
-        self.write_note_file(note, &markdown_text)?;
+        let mut state = self.state.write().unwrap();
+        state.notes.insert(note.id, note.clone());
+        let md = self.generate_markdown(note, &state);
+        self.write_note_file(note, &md)?;
+        state.mark_dirty();
         Ok(())
     }
 
@@ -63,18 +61,15 @@ impl NoteRepo for FsNoteRepo {
     }
 
     fn update(&self, note: &Note) -> Result<()> {
-        let (old_file_name, needs_cleanup, markdown_text) = {
-            let mut state = self.state.write().unwrap();
-            let old_note = state.notes.get(&note.id).cloned();
-            state.notes.insert(note.id, note.clone());
-            let old_fn = old_note.as_ref().map(|n| n.file_name());
-            let cleanup = old_fn.is_some() && old_fn.as_deref() != Some(&note.file_name());
-            let md = self.generate_markdown(note, &state);
-            (old_fn, cleanup, md)
-        };
-        self.write_note_file(note, &markdown_text)?;
+        let mut state = self.state.write().unwrap();
+        let old_note = state.notes.get(&note.id).cloned();
+        state.notes.insert(note.id, note.clone());
+        let needs_cleanup = old_note.as_ref().map(|n| n.file_name()) != Some(note.file_name());
+        let md = self.generate_markdown(note, &state);
+        self.write_note_file(note, &md)?;
+        state.mark_dirty();
         if needs_cleanup {
-            if let Some(old_name) = old_file_name {
+            if let Some(old_name) = old_note.map(|n| n.file_name()) {
                 let old_path = self.vault_path.join("notes").join(old_name);
                 let _ = std::fs::remove_file(old_path);
             }
@@ -83,50 +78,41 @@ impl NoteRepo for FsNoteRepo {
     }
 
     fn delete(&self, id: NoteId) -> Result<()> {
-        let result = {
-            let mut state = self.state.write().unwrap();
-            if let Some(note) = state.notes.remove(&id) {
-                let fp = self.vault_path.join("notes").join(note.file_name());
-                state.blocks.retain(|_, b| b.note_id != id);
+        let mut state = self.state.write().unwrap();
+        if let Some(note) = state.notes.remove(&id) {
+            let fp = self.vault_path.join("notes").join(note.file_name());
+            state.blocks.retain(|_, b| b.note_id != id);
 
-                // Collect links to remove before removing them
-                let links_to_remove: Vec<Link> = state.links.values()
-                    .filter(|link| {
-                        let from_match = match link.from {
-                            ObjectRef::Note(nid) => nid == id,
-                            ObjectRef::Block(bid) => note.blocks.contains(&bid),
-                            _ => false,
-                        };
-                        let to_match = match link.to {
-                            ObjectRef::Note(nid) => nid == id,
-                            ObjectRef::Block(bid) => note.blocks.contains(&bid),
-                            _ => false,
-                        };
-                        from_match || to_match
-                    })
-                    .cloned()
-                    .collect();
+            // Collect links to remove before removing them
+            let links_to_remove: Vec<Link> = state.links.values()
+                .filter(|link| {
+                    let from_match = match link.from {
+                        ObjectRef::Note(nid) => nid == id,
+                        ObjectRef::Block(bid) => note.blocks.contains(&bid),
+                        _ => false,
+                    };
+                    let to_match = match link.to {
+                        ObjectRef::Note(nid) => nid == id,
+                        ObjectRef::Block(bid) => note.blocks.contains(&bid),
+                        _ => false,
+                    };
+                    from_match || to_match
+                })
+                .cloned()
+                .collect();
 
-                // Remove links from map
-                for link in &links_to_remove {
-                    state.links.remove(&link.id);
-                }
-
-                // Remove from indexes individually (O(m) instead of O(n))
-                for link in &links_to_remove {
-                    state.index_link_remove(link);
-                }
-
-                let save_data = state.extract_save_data();
-                Some((fp, save_data))
-            } else {
-                return Ok(());
+            // Remove links from map
+            for link in &links_to_remove {
+                state.links.remove(&link.id);
             }
-        };
 
-        if let Some((fp, save_data)) = result {
+            // Remove from indexes individually (O(m) instead of O(n))
+            for link in &links_to_remove {
+                state.index_link_remove(link);
+            }
+
+            state.mark_dirty();
             let _ = std::fs::remove_file(fp);
-            let _ = persist_metadata(&self.vault_path, &save_data);
         }
         Ok(())
     }
@@ -137,34 +123,32 @@ impl NoteRepo for FsNoteRepo {
         block_id: BlockId,
         new_content: BlockContent,
     ) -> Result<Block> {
-        let (updated_block, markdown_text, note) = {
-            let mut state = self.state.write().unwrap();
-            let block = state.blocks.get_mut(&block_id).ok_or_else(|| {
-                pkm_core::CoreError::Invariant(format!("Block not found: {}", block_id))
-            })?;
-            block.content = new_content.clone();
-            block.version += 1;
-            block.updated_at = pkm_core::Timestamp::now_utc();
-            let updated = block.clone();
-            let note_clone = state.notes.get(&note_id).cloned();
-            let md = note_clone.as_ref().map(|n| self.generate_markdown(n, &state));
-            (updated, md, note_clone)
-        };
-        if let (Some(n), Some(md)) = (note, markdown_text) {
-            self.write_note_file(&n, &md)?;
+        let mut state = self.state.write().unwrap();
+        let block = state.blocks.get_mut(&block_id).ok_or_else(|| {
+            pkm_core::CoreError::Invariant(format!("Block not found: {}", block_id))
+        })?;
+        block.content = new_content.clone();
+        block.version += 1;
+        block.updated_at = pkm_core::Timestamp::now_utc();
+        let updated = block.clone();
+        if let Some(note) = state.notes.get(&note_id) {
+            let md = self.generate_markdown(note, &state);
+            self.write_note_file(note, &md)?;
+            state.mark_dirty();
         }
-        Ok(updated_block)
+        Ok(updated)
     }
 
     fn get_blocks(&self, note_id: NoteId) -> Result<Vec<Block>> {
         let state = self.state.read().unwrap();
-        let mut blocks: Vec<Block> = state.blocks.values()
-            .filter(|b| b.note_id == note_id)
-            .cloned()
-            .collect();
-        if let Some(note) = state.notes.get(&note_id) {
-            blocks.sort_by_key(|b| note.blocks.iter().position(|&id| id == b.id).unwrap_or(usize::MAX));
-        }
+        let blocks: Vec<Block> = state.notes.get(&note_id)
+            .map(|note| {
+                note.blocks.iter()
+                    .filter_map(|id| state.blocks.get(id))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(blocks)
     }
 
@@ -175,114 +159,133 @@ impl NoteRepo for FsNoteRepo {
 
     fn create_block(&self, block: &Block) -> Result<()> {
         let note_id = block.note_id;
-        let (markdown_text, note) = {
-            let mut state = self.state.write().unwrap();
-            state.blocks.insert(block.id, block.clone());
-            let note = state.notes.get_mut(&note_id);
-            if let Some(n) = note {
-                if !n.blocks.contains(&block.id) {
-                    n.blocks.push(block.id);
-                }
-                let note_clone = n.clone();
-                let md = self.generate_markdown(&note_clone, &state);
-                (Some(md), note_clone)
-            } else {
-                return Err(pkm_core::CoreError::Invariant(format!("Note not found: {}", note_id)));
+        let mut state = self.state.write().unwrap();
+        state.blocks.insert(block.id, block.clone());
+        if let Some(note) = state.notes.get_mut(&note_id) {
+            if !note.blocks.contains(&block.id) {
+                note.blocks.push(block.id);
             }
-        };
-        if let Some(md) = markdown_text {
-            self.write_note_file(&note, &md)?;
+            let note_clone = note.clone();
+            let md = self.generate_markdown(&note_clone, &state);
+            self.write_note_file(&note_clone, &md)?;
+            state.mark_dirty();
+            Ok(())
+        } else {
+            Err(pkm_core::CoreError::Invariant(format!("Note not found: {}", note_id)))
         }
-        Ok(())
     }
 
     fn delete_block(&self, note_id: NoteId, block_id: BlockId) -> Result<()> {
-        let (markdown_text, note) = {
-            let mut state = self.state.write().unwrap();
-            state.blocks.remove(&block_id);
-            let note = state.notes.get_mut(&note_id);
-            if let Some(n) = note {
-                n.blocks.retain(|id| *id != block_id);
-                let note_clone = n.clone();
-                let md = self.generate_markdown(&note_clone, &state);
-                (Some(md), note_clone)
-            } else {
-                return Err(pkm_core::CoreError::Invariant(format!("Note not found: {}", note_id)));
-            }
-        };
-        if let Some(md) = markdown_text {
-            self.write_note_file(&note, &md)?;
+        let mut state = self.state.write().unwrap();
+
+        // Remove dangling links targeting or originating from this block
+        let block_ref = ObjectRef::Block(block_id);
+        let links_to_remove: Vec<Link> = state.links.values()
+            .filter(|l| l.from == block_ref || l.to == block_ref)
+            .cloned()
+            .collect();
+        for link in &links_to_remove {
+            state.index_link_remove(link);
+            state.links.remove(&link.id);
         }
-        Ok(())
+        if !links_to_remove.is_empty() {
+            state.mark_dirty();
+        }
+
+        state.blocks.remove(&block_id);
+        if let Some(note) = state.notes.get_mut(&note_id) {
+            note.blocks.retain(|id| *id != block_id);
+            let note_clone = note.clone();
+            let md = self.generate_markdown(&note_clone, &state);
+            self.write_note_file(&note_clone, &md)?;
+            state.mark_dirty();
+            Ok(())
+        } else {
+            Err(pkm_core::CoreError::Invariant(format!("Note not found: {}", note_id)))
+        }
     }
 
-    fn upsert_from_external(&self, note: &Note, blocks: &[Block]) -> Result<()> {
+    fn upsert_from_external(&self, note: &Note, blocks: &[Block], external_file_path: &Path) -> Result<()> {
         use std::collections::HashSet;
 
-        // Phase 1: all in-memory mutation under a single write lock
-        let markdown_text = {
-            let mut state = self.state.write().unwrap();
+        // Hold the write lock across both memory mutation AND disk I/O
+        // to prevent write-after-write races between concurrent threads.
+        let mut state = self.state.write().unwrap();
 
-            // Collect IDs of blocks currently owned by this note
-            let old_block_ids: Vec<BlockId> = state
-                .blocks
-                .values()
-                .filter(|b| b.note_id == note.id)
-                .map(|b| b.id)
-                .collect();
+        let old_file_name = state.notes.get(&note.id).map(|n| n.file_name());
 
-            let new_block_ids: HashSet<BlockId> = blocks.iter().map(|b| b.id).collect();
+        // Collect IDs of blocks currently owned by this note
+        let old_block_ids: Vec<BlockId> = state
+            .blocks
+            .values()
+            .filter(|b| b.note_id == note.id)
+            .map(|b| b.id)
+            .collect();
 
-            // Collect links to remove that pointed to removed blocks
-            let links_to_remove: Vec<Link> = state.links.values()
-                .filter(|link| {
-                    let from_removed = match link.from {
-                        ObjectRef::Block(bid) => old_block_ids.contains(&bid) && !new_block_ids.contains(&bid),
-                        _ => false,
-                    };
-                    let to_removed = match link.to {
-                        ObjectRef::Block(bid) => old_block_ids.contains(&bid) && !new_block_ids.contains(&bid),
-                        _ => false,
-                    };
-                    from_removed || to_removed
-                })
-                .cloned()
-                .collect();
+        let new_block_ids: HashSet<BlockId> = blocks.iter().map(|b| b.id).collect();
 
-            // Remove from indexes individually
-            for link in &links_to_remove {
-                state.index_link_remove(link);
-                state.links.remove(&link.id);
-            }
+        // Collect links to remove that pointed to removed blocks
+        let links_to_remove: Vec<Link> = state.links.values()
+            .filter(|link| {
+                let from_removed = match link.from {
+                    ObjectRef::Block(bid) => old_block_ids.contains(&bid) && !new_block_ids.contains(&bid),
+                    _ => false,
+                };
+                let to_removed = match link.to {
+                    ObjectRef::Block(bid) => old_block_ids.contains(&bid) && !new_block_ids.contains(&bid),
+                    _ => false,
+                };
+                from_removed || to_removed
+            })
+            .cloned()
+            .collect();
 
-            // Remove old blocks
-            for bid in &old_block_ids {
-                state.blocks.remove(bid);
-            }
+        // Remove from indexes individually
+        for link in &links_to_remove {
+            state.index_link_remove(link);
+            state.links.remove(&link.id);
+        }
 
-            // Insert new blocks
-            for block in blocks {
-                state.blocks.insert(block.id, block.clone());
-            }
+        // Remove old blocks
+        for bid in &old_block_ids {
+            state.blocks.remove(bid);
+        }
 
-            // Update note
-            state.notes.insert(note.id, note.clone());
+        // Insert new blocks
+        for block in blocks {
+            state.blocks.insert(block.id, block.clone());
+        }
 
-            pkm_core::markdown::note_to_markdown(note, blocks)
-        };
+        // Update note
+        state.notes.insert(note.id, note.clone());
 
-        // Phase 2: persist to disk (no locks held)
-        let save_data = {
-            let state = self.state.read().unwrap();
-            state.extract_save_data()
-        };
-        let _ = persist_metadata(&self.vault_path, &save_data);
+        // Generate markdown and persist to disk under the same lock
+        let markdown_text = pkm_core::markdown::note_to_markdown(note, blocks);
 
         let file_path = self.vault_path.join("notes").join(note.file_name());
         std::fs::create_dir_all(file_path.parent().unwrap())
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
         std::fs::write(&file_path, markdown_text)
             .map_err(|e| pkm_core::CoreError::Invariant(e.to_string()))?;
+
+        state.mark_dirty();
+
+        // Clean up old canonical file if the note was renamed (title changed)
+        if let Some(old_name) = old_file_name {
+            if old_name != note.file_name() {
+                let old_path = self.vault_path.join("notes").join(old_name);
+                let _ = std::fs::remove_file(old_path);
+            }
+        }
+
+        // Always clean up the external file that triggered this update if it
+        // differs from the canonical file path. This handles the case where a
+        // user renames a file externally (e.g., my-note-123.md -> new-name.md)
+        // but the internal title hasn't changed — without this, the external
+        // file would duplicate on every save.
+        if external_file_path != file_path && external_file_path.exists() {
+            let _ = std::fs::remove_file(external_file_path);
+        }
 
         Ok(())
     }

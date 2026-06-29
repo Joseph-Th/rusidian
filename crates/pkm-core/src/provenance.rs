@@ -40,15 +40,15 @@ pub struct ExtractionSpan {
 }
 
 impl ExtractionSpan {
-    /// Create a new extraction span. Panics if start > end.
-    pub fn new(start: u64, end: u64) -> Self {
-        assert!(
-            start <= end,
-            "extraction span start {} > end {}",
-            start,
-            end
-        );
-        Self { start, end }
+    /// Create a new extraction span. Returns Err if start > end.
+    pub fn new(start: u64, end: u64) -> Result<Self, crate::CoreError> {
+        if start > end {
+            return Err(crate::CoreError::Invariant(format!(
+                "extraction span start {} > end {}",
+                start, end
+            )));
+        }
+        Ok(Self { start, end })
     }
 
     /// Length of the extraction span in bytes.
@@ -106,34 +106,35 @@ mod tests {
 
     #[test]
     fn extraction_span_len() {
-        let span = ExtractionSpan::new(10, 20);
+        let span = ExtractionSpan::new(10, 20).unwrap();
         assert_eq!(span.len(), 10);
         assert!(!span.is_empty());
 
-        let empty = ExtractionSpan::new(5, 5);
+        let empty = ExtractionSpan::new(5, 5).unwrap();
         assert_eq!(empty.len(), 0);
         assert!(empty.is_empty());
     }
 
     #[test]
     fn extraction_span_round_trips() {
-        let span = ExtractionSpan::new(100, 150);
+        let span = ExtractionSpan::new(100, 150).unwrap();
         let json = serde_json::to_string(&span).unwrap();
         let back: ExtractionSpan = serde_json::from_str(&json).unwrap();
         assert_eq!(back, span);
     }
 
     #[test]
-    #[should_panic]
-    fn extraction_span_panics_on_invalid_range() {
-        ExtractionSpan::new(20, 10);
+    fn extraction_span_returns_error_on_invalid_range() {
+        let result = ExtractionSpan::new(20, 10);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("start 20 > end 10"));
     }
 
     #[test]
     fn provenance_with_all_fields_round_trips() {
         let source_id = SourceId::new();
         let action_id = "some-uuid".to_string();
-        let span = ExtractionSpan::new(0, 42);
+        let span = ExtractionSpan::new(0, 42).unwrap();
         let now = Timestamp::now_utc();
 
         let prov = Provenance {

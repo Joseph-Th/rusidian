@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { AlertCircle } from 'lucide-react'
-import { EDGE_COLORS } from '../types/linkNetwork'
+import { getEdgeColor, getEdgeLabel } from '../types/linkNetwork'
 
 interface MatrixCellLink {
   link_type: string
@@ -56,10 +56,33 @@ export default function EntityMatrix({
   }, [rowKind, colKind, minConfidence])
 
   const stats = useMemo(() => {
-    if (!data) return { rows: 0, cols: 0, links: 0 }
-    const linkCount = data.matrix.flat().filter((cell) => cell !== null).length
-    return { rows: data.row_entities.length, cols: data.col_entities.length, links: linkCount }
+    if (!data) return { rows: 0, cols: 0, links: 0, linkTypes: [] as string[] }
+    const links = data.matrix.flat().filter((cell): cell is MatrixCellLink => cell !== null)
+    const linkTypes = Array.from(new Set(links.map((l) => l.link_type))).sort()
+    return { rows: data.row_entities.length, cols: data.col_entities.length, links: links.length, linkTypes }
   }, [data])
+
+  const exportCsv = () => {
+    if (!data) return
+    const esc = (s: string) => `"${s.replace(/"/g, '""')}"`
+    const header = ['', ...data.col_entities.map((c) => esc(c[1]))].join(',')
+    const rows = data.row_entities.map((row, rowIdx) =>
+      [
+        esc(row[1]),
+        ...data.col_entities.map((_, colIdx) => {
+          const link = data.matrix[rowIdx]?.[colIdx]
+          return link ? esc(`${link.link_type} (${(link.confidence * 100).toFixed(0)}%)`) : ''
+        }),
+      ].join(',')
+    )
+    const csv = [header, ...rows].join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${rowKind}-x-${colKind}-matrix.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   if (loading) {
     return (
@@ -96,7 +119,7 @@ export default function EntityMatrix({
         <div className="text-center text-gray-600 max-w-md">
           <p className="font-medium text-lg">No entities found</p>
           <p className="text-sm mt-2">
-            The knowledge base doesn't contain any <strong>{rowKind}</strong> {data.row_entities.length === 0 ? 'or' : 'and'} <strong>{colKind}</strong> entities yet.
+            The knowledge base doesn't contain any <strong>{rowKind}</strong> {!data || data.row_entities.length === 0 ? 'or' : 'and'} <strong>{colKind}</strong> entities yet.
           </p>
           <p className="text-xs text-gray-500 mt-3">Create some entities first, then the matrix will populate automatically.</p>
         </div>
@@ -105,11 +128,6 @@ export default function EntityMatrix({
   }
 
   const cellLink = (row: number, col: number) => data?.matrix[row]?.[col] ?? null
-  const getCellColor = (link: MatrixCellLink | null) => {
-    if (!link) return 'bg-white'
-    const color = EDGE_COLORS[link.link_type as keyof typeof EDGE_COLORS]
-    return color ? `hover:bg-opacity-80 cursor-pointer relative` : 'bg-gray-100'
-  }
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -135,13 +153,26 @@ export default function EntityMatrix({
             </div>
           </div>
           <button
-            onClick={() => console.log('Export as CSV')}
+            onClick={exportCsv}
             className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors duration-150 shadow-sm flex-shrink-0"
             aria-label="Export matrix as CSV file"
           >
             ⬇ Export CSV
           </button>
         </div>
+
+        {/* Link-type legend */}
+        {stats.linkTypes.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {stats.linkTypes.map((type) => (
+              <span key={type} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: getEdgeColor(type) }} />
+                {getEdgeLabel(type)}
+              </span>
+            ))}
+            <span className="text-xs text-gray-400 ml-auto">Circle size & number = confidence</span>
+          </div>
+        )}
       </header>
 
       {/* Table */}
@@ -197,18 +228,32 @@ export default function EntityMatrix({
                       aria-pressed={isSelected}
                       aria-label={link ? `${row[1]} → ${col[1]}: ${link.link_type} (${(link.confidence * 100).toFixed(0)}% confidence)` : 'No connection'}
                     >
-                      {link && (
-                        <div className="relative inline-flex items-center justify-center">
-                          <div
-                            className={`w-7 h-7 rounded-full border-2 font-bold text-xs text-white flex items-center justify-center transition-all duration-150 ${
-                              EDGE_COLORS[link.link_type as keyof typeof EDGE_COLORS] || 'border-gray-400 bg-gray-300'
-                            } ${isHovered ? 'scale-125 shadow-lg' : 'scale-100'}`}
-                            title={`${link.link_type} (${(link.confidence * 100).toFixed(0)}%)`}
-                          >
-                            {(link.confidence * 100).toFixed(0) === '100' ? '✓' : (link.confidence * 100).toFixed(0)}
+                      {link && (() => {
+                        const color = getEdgeColor(link.link_type)
+                        const pct = Math.round(link.confidence * 100)
+                        // Confidence drives diameter (20–34px) so stronger links read as larger.
+                        const size = 20 + Math.round(link.confidence * 14)
+                        return (
+                          <div className="relative inline-flex items-center justify-center">
+                            <div
+                              className={`rounded-full border-2 font-bold text-[11px] text-white flex items-center justify-center transition-transform duration-150 ${
+                                isHovered ? 'scale-125 shadow-lg' : 'scale-100'
+                              }`}
+                              style={{
+                                width: size,
+                                height: size,
+                                background: color,
+                                borderColor: color,
+                                // Lower-confidence links are slightly translucent.
+                                opacity: 0.55 + link.confidence * 0.45,
+                              }}
+                              title={`${getEdgeLabel(link.link_type)} · ${pct}% confidence`}
+                            >
+                              {pct === 100 ? '✓' : pct}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )
+                      })()}
                     </td>
                   )
                 })}

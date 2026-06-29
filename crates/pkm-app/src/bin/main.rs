@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tauri::menu::Menu;
 
 #[tauri::command]
-async fn create_note(
+fn create_note(
     title: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::CreateNoteResponse, String> {
@@ -22,7 +22,7 @@ async fn create_note(
 }
 
 #[tauri::command]
-async fn list_notes(
+fn list_notes(
     limit: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Vec<commands::NoteInfo>, String> {
@@ -31,7 +31,7 @@ async fn list_notes(
 }
 
 #[tauri::command]
-async fn get_note(
+fn get_note(
     note_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::GetNoteResponse, String> {
@@ -40,7 +40,7 @@ async fn get_note(
 }
 
 #[tauri::command]
-async fn update_note(
+fn update_note(
     note_id: String,
     title: String,
     metadata: BTreeMap<String, serde_json::Value>,
@@ -51,7 +51,7 @@ async fn update_note(
 }
 
 #[tauri::command]
-async fn delete_note(
+fn delete_note(
     note_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<(), String> {
@@ -65,12 +65,16 @@ async fn search_notes(
     limit: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Vec<commands::SearchResult>, String> {
-    let service = state.inner();
-    commands::search_notes(query, limit, service)
+    let service = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        commands::search_notes(query, limit, &service)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-async fn get_graph_view_data(
+fn get_graph_view_data(
     view_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Option<commands::GraphViewData>, String> {
@@ -79,7 +83,7 @@ async fn get_graph_view_data(
 }
 
 #[tauri::command]
-async fn create_view(
+fn create_view(
     kind: String,
     title: String,
     params: ViewParams,
@@ -90,7 +94,7 @@ async fn create_view(
 }
 
 #[tauri::command]
-async fn list_views(
+fn list_views(
     limit: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Vec<commands::ViewInfo>, String> {
@@ -99,7 +103,7 @@ async fn list_views(
 }
 
 #[tauri::command]
-async fn get_view(
+fn get_view(
     view_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<Option<commands::ViewInfo>, String> {
@@ -108,7 +112,7 @@ async fn get_view(
 }
 
 #[tauri::command]
-async fn render_view(
+fn render_view(
     view_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::RenderViewResponse, String> {
@@ -117,7 +121,7 @@ async fn render_view(
 }
 
 #[tauri::command]
-async fn create_graph_view(
+fn create_graph_view(
     title: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::CreateViewResponse, String> {
@@ -126,7 +130,7 @@ async fn create_graph_view(
 }
 
 #[tauri::command]
-async fn get_preview_card(
+fn get_preview_card(
     entity_id: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::PreviewCard, String> {
@@ -135,7 +139,7 @@ async fn get_preview_card(
 }
 
 #[tauri::command]
-async fn get_link_network(
+fn get_link_network(
     root_id: String,
     depth: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
@@ -145,7 +149,7 @@ async fn get_link_network(
 }
 
 #[tauri::command]
-async fn get_neighbors(
+fn get_neighbors(
     target_id: String,
     depth: Option<usize>,
     state: tauri::State<'_, Arc<AppService>>,
@@ -155,7 +159,7 @@ async fn get_neighbors(
 }
 
 #[tauri::command]
-async fn ingest_bulk_links(
+fn ingest_bulk_links(
     raw_text: String,
     state: tauri::State<'_, Arc<AppService>>,
 ) -> Result<commands::BulkIngestionResponse, String> {
@@ -208,8 +212,13 @@ fn main() {
 
     service.start_vault_watcher().expect("failed to start vault watcher");
 
+    let service_clone = service.clone();
     tauri::Builder::default()
-        .menu(Menu::new)
+        .setup(|app| {
+            // In Tauri v2, Menu::new requires an AppHandle parameter
+            let _menu = Menu::new(app.handle())?;
+            Ok(())
+        })
         .manage(service)
         .invoke_handler(tauri::generate_handler![
             create_note,
@@ -231,5 +240,11 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_, _| {})
+        .run(move |_app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Err(e) = service_clone.flush_metadata() {
+                    eprintln!("Failed to flush metadata on shutdown: {}", e);
+                }
+            }
+        })
 }

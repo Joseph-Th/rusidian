@@ -22,31 +22,59 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct NoteFrontmatter {
     id: String,
-    created_by: String,
-    created_at: String,
+    created_by: Actor,
+    #[serde(with = "time::serde::rfc3339")]
+    created_at: Timestamp,
     #[serde(default)]
     metadata: NoteMetadata,
 }
 
 /// Extract YAML frontmatter from the beginning of markdown text.
-/// Returns (frontmatter, remaining_text). If no frontmatter, returns None for frontmatter.
+/// Returns Ok((frontmatter, remaining_text)).
+/// - If frontmatter exists and parses: Ok(Some(fm), remaining)
+/// - If no frontmatter delimiters: Ok(None, text)
+/// - If frontmatter exists but is invalid YAML: Err("...parse error...")
 /// Supports both Unix (\n) and Windows (\r\n) line endings.
-fn extract_frontmatter(text: &str) -> (Option<NoteFrontmatter>, String) {
-    let text = text.replace("\r\n", "\n");
-    if !text.starts_with("---\n") {
-        return (None, text.to_string());
+fn extract_frontmatter(text: &str) -> Result<(Option<NoteFrontmatter>, String), String> {
+    if !text.starts_with("---\n") && !text.starts_with("---\r\n") {
+        return Ok((None, text.to_string()));
     }
 
-    if let Some(end_pos) = text[4..].find("\n---\n") {
-        let frontmatter_str = &text[4..4 + end_pos];
-        let remaining = &text[4 + end_pos + 5..].to_string();
+    // Skip past the opening ---\n or ---\r\n
+    let after_opener = if text.starts_with("---\r\n") {
+        &text[5..]
+    } else {
+        &text[4..]
+    };
 
-        match serde_yaml::from_str::<NoteFrontmatter>(frontmatter_str) {
-            Ok(fm) => (Some(fm), remaining.to_string()),
-            Err(_) => (None, text.to_string()),
+    // Find the closing ---\n or ---\r\n.
+    // Search for \n---\n or \n---\r\n; avoid matching the \n inside \r\n.
+    let close_pos = after_opener
+        .find("\n---\n")
+        .or_else(|| after_opener.find("\n---\r\n"));
+
+    if let Some(pos) = close_pos {
+        let frontmatter_raw = &after_opener[..pos];
+
+        let close_len = if after_opener[pos..].starts_with("\n---\r\n") {
+            6
+        } else {
+            5
+        };
+        let remaining = &after_opener[pos + close_len..];
+
+        // Normalize line endings only for the YAML block, not the whole doc
+        let frontmatter_str = frontmatter_raw.replace("\r\n", "\n");
+
+        match serde_yaml::from_str::<NoteFrontmatter>(&frontmatter_str) {
+            Ok(fm) => Ok((Some(fm), remaining.to_string())),
+            Err(e) => Err(format!(
+                "Invalid YAML frontmatter: {}. Content:\n{}",
+                e, frontmatter_raw
+            )),
         }
     } else {
-        (None, text.to_string())
+        Err("Unclosed YAML frontmatter: started with --- but no closing --- found".to_string())
     }
 }
 
@@ -54,8 +82,8 @@ fn extract_frontmatter(text: &str) -> (Option<NoteFrontmatter>, String) {
 fn create_frontmatter(note: &Note) -> NoteFrontmatter {
     NoteFrontmatter {
         id: note.id.0.to_string(),
-        created_by: format!("{:?}", note.created_by),
-        created_at: note.created_at.to_string(),
+        created_by: note.created_by.clone(),
+        created_at: note.created_at,
         metadata: note.metadata.clone(),
     }
 }
@@ -81,8 +109,14 @@ fn block_content_to_markdown(content: &BlockContent) -> String {
         BlockContent::Media {
             hash_or_url,
             alt_text,
-            media_type: _,
-        } => format!("![{alt_text}]({hash_or_url})"),
+            media_type,
+        } => {
+            let image_md = format!("![{alt_text}]({hash_or_url})");
+            match media_type {
+                MediaType::Image => image_md,
+                non_image => format!("<!-- media:{:?} -->\n{}", non_image, image_md),
+            }
+        }
 
         BlockContent::Table { headers, rows } => serialize_table(headers, rows),
 
@@ -119,17 +153,24 @@ fn block_content_to_markdown(content: &BlockContent) -> String {
 }
 
 /// Serialize a table as GitHub-flavored markdown.
-/// Note: This function pads shorter rows with empty cells to match header length.
+/// Pads shorter rows with empty cells and preserves extra cells in longer rows
+/// (padding headers with empty strings as needed) to prevent data loss.
 fn serialize_table(headers: &[String], rows: &[Vec<String>]) -> String {
     let mut result = String::new();
 
-    if headers.is_empty() {
+    if headers.is_empty() && rows.iter().all(|r| r.is_empty()) {
         return result;
     }
 
+    // Determine the maximum column count across headers and all rows
+    let max_cols = rows.iter().fold(headers.len(), |max, row| max.max(row.len()));
+
+    // Pad headers to max_cols if rows have more columns
+    let padded_headers: Vec<&str> = headers.iter().map(|s| s.as_str()).chain(std::iter::repeat("")).take(max_cols).collect();
+
     // Header row
     result.push('|');
-    for header in headers {
+    for header in &padded_headers {
         result.push(' ');
         result.push_str(header);
         result.push_str(" |");
@@ -138,7 +179,7 @@ fn serialize_table(headers: &[String], rows: &[Vec<String>]) -> String {
 
     // Separator row
     result.push('|');
-    for _ in headers {
+    for _ in &padded_headers {
         result.push_str(" --- |");
     }
     result.push('\n');
@@ -146,12 +187,11 @@ fn serialize_table(headers: &[String], rows: &[Vec<String>]) -> String {
     // Data rows
     for row in rows {
         result.push('|');
-        for i in 0..headers.len() {
+        for i in 0..max_cols {
             result.push(' ');
-            // Get cell value, use empty string if row is shorter than headers
             let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
-            // Escape pipes in cell content
-            result.push_str(&cell.replace('|', "\\|"));
+            let sanitized = cell.replace('|', "\\|").replace('\n', "<br>");
+            result.push_str(&sanitized);
             result.push_str(" |");
         }
         result.push('\n');
@@ -206,39 +246,57 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
 /// Deserialize a table from markdown-like content.
 /// This is a best-effort parser for GFM tables found in markdown.
 /// Properly handles escaped pipes: \| is treated as literal content, not a separator.
+/// Tolerates missing leading/trailing pipes and varying separator styles.
 fn deserialize_table(text: &str) -> Option<(Vec<String>, Vec<Vec<String>>)> {
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.len() < 3 {
+    let raw_lines: Vec<&str> = text.lines().collect();
+    if raw_lines.len() < 3 {
         return None;
     }
 
-    // Try to parse first line as header row
-    let header_line = lines[0];
-    if !header_line.starts_with('|') || !header_line.ends_with('|') {
-        return None;
-    }
+    // Trim each line and normalize: add leading/trailing pipe if missing so
+    // split_table_row works uniformly.
+    let normalize_row = |line: &str| -> String {
+        let t = line.trim();
+        let mut s = if t.starts_with('|') {
+            t.to_string()
+        } else {
+            format!("|{}", t)
+        };
+        if !s.ends_with('|') {
+            s.push('|');
+        }
+        s
+    };
 
-    let headers: Vec<String> = split_table_row(header_line)
+    let header_line = normalize_row(raw_lines[0]);
+
+    let headers: Vec<String> = split_table_row(&header_line)
         .into_iter()
         .map(|s| s.trim().to_string())
         .collect();
 
-    // Check for separator line (line 2)
-    let sep_line = lines[1];
-    if !sep_line.contains("---") {
+    if headers.is_empty() {
+        return None;
+    }
+
+    // Check for separator line (line 2) — must contain at least one dash segment
+    let sep_line = raw_lines[1].trim();
+    if !sep_line.contains('-') {
         return None;
     }
 
     // Parse data rows
     let mut rows = Vec::new();
-    for line in &lines[2..] {
-        if !line.starts_with('|') || !line.ends_with('|') {
+    for line in &raw_lines[2..] {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !trimmed.contains('|') {
             break;
         }
 
-        let mut row: Vec<String> = split_table_row(line)
+        let normal = normalize_row(trimmed);
+        let mut row: Vec<String> = split_table_row(&normal)
             .into_iter()
-            .map(|s| s.trim().replace("\\|", "|"))
+            .map(|s| s.trim().replace("\\|", "|").replace("<br>", "\n"))
             .collect();
 
         row.resize(headers.len(), String::new());
@@ -308,8 +366,10 @@ fn markdown_to_blocks_internal(
             // Split on space to extract id (we ignore any extra legacy order info)
             let parts: Vec<&str> = comment_content.split_whitespace().collect();
 
-            if let Ok(uuid) = uuid::Uuid::parse_str(parts[0]) {
-                pending_block_id = Some(BlockId(uuid));
+            if let Some(id_str) = parts.first() {
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    pending_block_id = Some(BlockId(uuid));
+                }
             }
             i += 1;
             continue;
@@ -359,7 +419,20 @@ fn markdown_to_blocks_internal(
         }
 
         // Try to parse the block content as a rich type; fall back to Markdown
-        let content = if let Some((headers, rows)) = deserialize_table(&block_text) {
+        let content = if let Some((media_type, image_text)) = try_extract_media_type_comment(&block_text) {
+            if let Some((url, alt)) = try_parse_image(&image_text) {
+                BlockContent::Media {
+                    hash_or_url: url,
+                    alt_text: alt,
+                    media_type,
+                }
+            } else {
+                // Media type comment present but no image follows — treat as markdown
+                BlockContent::Markdown {
+                    text: block_text.trim().to_string(),
+                }
+            }
+        } else if let Some((headers, rows)) = deserialize_table(&block_text) {
             BlockContent::Table { headers, rows }
         } else if block_text.starts_with("$$") && block_text.ends_with("$$") {
             let expr = block_text
@@ -429,7 +502,29 @@ fn try_parse_internal_embed(text: &str) -> Option<(ObjectRef, String)> {
     
     let obj_type = parts[0];
     let obj_id = parts[1..].join(":");
-    let fallback = trimmed[end_comment + 4..].trim().to_string(); // Capture everything after comment
+    let fallback_raw = trimmed[end_comment + 4..].trim().to_string();
+    // Strip generated > blockquote prefixes and boilerplate to prevent
+    // exponential corruption on re-serialization
+    let fallback = fallback_raw
+        .lines()
+        .map(|l| {
+            let s = l.trim_start();
+            if s.starts_with("> ") {
+                &s[2..]
+            } else if s == ">" {
+                ""
+            } else {
+                s
+            }
+        })
+        .filter(|l| {
+            !l.trim_start().starts_with("**[Embedded:")
+            && !l.trim_start().starts_with("*[This is a dynamic view")
+        })
+        .collect::<Vec<&str>>()
+        .join("\n")
+        .trim()
+        .to_string();
     
     if let Ok(uuid) = uuid::Uuid::parse_str(&obj_id) {
         let target = match obj_type {
@@ -471,6 +566,28 @@ fn try_parse_inline_math(text: &str) -> Option<String> {
     }
 }
 
+/// Try to extract a media type comment from the start of block text.
+/// Returns (media_type, remaining_text) if a comment like `<!-- media:video -->` is found.
+fn try_extract_media_type_comment(text: &str) -> Option<(MediaType, String)> {
+    let trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("<!-- media:") {
+        if let Some(end) = rest.find("-->") {
+            let type_str = rest[..end].trim();
+            let media_type = match type_str.to_lowercase().as_str() {
+                "audio" => MediaType::Audio,
+                "video" => MediaType::Video,
+                "pdf" => MediaType::Pdf,
+                _ => return None,
+            };
+            let remaining = rest[end + 3..].trim().to_string();
+            if !remaining.is_empty() {
+                return Some((media_type, remaining));
+            }
+        }
+    }
+    None
+}
+
 /// Try to parse image markdown (e.g., ![alt](url)).
 fn try_parse_image(text: &str) -> Option<(String, String)> {
     if !text.starts_with("![") {
@@ -489,11 +606,11 @@ fn try_parse_image(text: &str) -> Option<(String, String)> {
 }
 
 /// Extract title from markdown text (first line that looks like a heading).
-/// Returns the heading text without the # prefix.
-pub fn extract_title(text: &str) -> Option<String> {
+/// Returns (cleaned_title, exact_heading_line) so the caller can remove the exact line.
+pub fn extract_title(text: &str) -> Option<(String, String)> {
     if let Some(first_line) = text.lines().find(|l| !l.trim().is_empty()) {
         if let Some(heading) = first_line.strip_prefix("# ") {
-            return Some(heading.trim().to_string());
+            return Some((heading.trim().to_string(), first_line.to_string()));
         }
     }
     None
@@ -536,42 +653,37 @@ pub fn markdown_to_note(
     created_at: Timestamp,
 ) -> Result<(Note, Vec<Block>), String> {
     // Extract frontmatter if present
-    let (frontmatter, remaining_text) = extract_frontmatter(text);
+    // If frontmatter exists but is invalid YAML, propagate the error
+    // to prevent silent metadata deletion
+    let (frontmatter, remaining_text) = extract_frontmatter(text)?;
 
-    // Use frontmatter id if available, otherwise use provided note_id
-    let final_note_id = if let Some(ref fm) = frontmatter {
-        uuid::Uuid::parse_str(&fm.id)
-            .map(NoteId)
-            .unwrap_or(note_id)
+    // Use frontmatter values if available, otherwise use provided parameters
+    let (final_note_id, final_actor, final_created_at, metadata) = if let Some(ref fm) = frontmatter {
+        (
+            uuid::Uuid::parse_str(&fm.id).map(NoteId).unwrap_or(note_id),
+            fm.created_by.clone(),
+            fm.created_at,
+            fm.metadata.clone(),
+        )
     } else {
-        note_id
+        (note_id, actor, created_at, NoteMetadata::default())
     };
 
-    // Use frontmatter metadata if available, otherwise default
-    let metadata = frontmatter
-        .as_ref()
-        .map(|fm| fm.metadata.clone())
-        .unwrap_or_default();
-
     // Extract title from remaining markdown
-    let title = extract_title(&remaining_text).unwrap_or_default();
+    let (title, heading_line) = extract_title(&remaining_text).unwrap_or_default();
 
-    // BUG FIX: Properly strip ONLY the title line (including preceding blank lines)
+    // Strip the title heading so it is not duplicated as a block
     let mut blocks_text = remaining_text.trim_start().to_string();
-    if blocks_text.starts_with("# ") {
-        if let Some(newline_pos) = blocks_text.find('\n') {
-            blocks_text = blocks_text[newline_pos + 1..].to_string();
-        } else {
-            blocks_text = String::new();
-        }
+    if !title.is_empty() && !heading_line.is_empty() {
+        blocks_text = blocks_text.replacen(&heading_line, "", 1).trim_start().to_string();
     }
 
     let mut parsed_blocks = markdown_to_blocks(&blocks_text, final_note_id)?;
 
-    // Update blocks to use the provided actor and timestamp
+    // Update blocks to use the historical actor and timestamp from frontmatter
     for block in &mut parsed_blocks {
-        block.created_by = actor.clone();
-        block.created_at = created_at;
+        block.created_by = final_actor.clone();
+        block.created_at = final_created_at;
     }
 
     let block_ids: Vec<BlockId> = parsed_blocks.iter().map(|b| b.id).collect();
@@ -581,10 +693,10 @@ pub fn markdown_to_note(
         title,
         blocks: block_ids,
         metadata,
-        created_by: actor,
-        created_at,
+        created_by: final_actor,
+        created_at: final_created_at,
         version: 1,
-        updated_at: created_at,
+        updated_at: final_created_at,
     };
 
     Ok((note, parsed_blocks))
@@ -658,8 +770,9 @@ mod tests {
     #[test]
     fn extract_title_from_heading() {
         let text = "# My Note Title\n\nSome content here.";
-        let title = extract_title(text);
-        assert_eq!(title, Some("My Note Title".to_string()));
+        let (title, line) = extract_title(text).unwrap();
+        assert_eq!(title, "My Note Title");
+        assert_eq!(line, "# My Note Title");
     }
 
     #[test]

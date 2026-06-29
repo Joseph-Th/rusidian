@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use pkm_core::id::ObjectRef;
@@ -10,18 +10,52 @@ use crate::commands;
 
 type GraphNode = (String, String, f64, f64, String, String, String);
 
+fn fmt_rfc3339(ts: &pkm_core::Timestamp) -> String {
+    ts.format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| ts.to_string())
+}
+
+/// Combined result of graph view data: nodes and edges.
+pub struct GraphViewResult {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<commands::LinkNetworkEdge>,
+}
+
 pub fn get_graph_view_data(
     vault: SharedVault,
-    vault_path: PathBuf,
+    _vault_path: PathBuf,
     view: &View,
-) -> Option<Vec<GraphNode>> {
+) -> Option<GraphViewResult> {
     if let ViewParams::GraphView(params) = &view.params {
-        let source_repo = FsSourceRepo { state: vault, vault_path };
-        let sources = source_repo.list(None).ok()?;
+        let state = vault.read().unwrap();
 
-        let mut source_map = HashMap::new();
-        for source in &sources {
-            source_map.insert(source.id.to_string(), source);
+        // Collect all link IDs from the vault
+        let mut edges = Vec::new();
+        let mut referenced_ids = HashSet::new();
+        for link in state.links().values() {
+            let source_id = match link.from {
+                ObjectRef::Source(id) => id.to_string(),
+                ObjectRef::Note(id) => id.to_string(),
+                ObjectRef::Entity(id) => id.to_string(),
+                ObjectRef::Block(id) => id.to_string(),
+                _ => continue,
+            };
+            let target_id = match link.to {
+                ObjectRef::Source(id) => id.to_string(),
+                ObjectRef::Note(id) => id.to_string(),
+                ObjectRef::Entity(id) => id.to_string(),
+                ObjectRef::Block(id) => id.to_string(),
+                _ => continue,
+            };
+            referenced_ids.insert(source_id.clone());
+            referenced_ids.insert(target_id.clone());
+            edges.push(commands::LinkNetworkEdge {
+                id: link.id.to_string(),
+                source: source_id,
+                target: target_id,
+                link_type: format!("{:?}", link.link_type).to_lowercase(),
+                confidence: link.confidence,
+            });
         }
 
         if !params.node_positions.is_empty() {
@@ -29,37 +63,119 @@ pub fn get_graph_view_data(
                 .node_positions
                 .iter()
                 .filter_map(|pos| {
-                    source_map.get(&pos.id).map(|source| {
-                        (
-                            pos.id.clone(),
-                            source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
-                            pos.x,
-                            pos.y,
-                            format!("{:?}", source.origin),
-                            format!("{:?}", source.ingestion_state),
-                            "source".to_string(),
-                        )
-                    })
+                    if let Ok(source_id) = uuid::Uuid::parse_str(&pos.id) {
+                        if let Some(source) = state.sources().get(&pkm_core::id::SourceId(source_id)) {
+                            return Some((
+                                pos.id.clone(),
+                                source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
+                                pos.x, pos.y,
+                                format!("{:?}", source.origin),
+                                format!("{:?}", source.ingestion_state),
+                                "source".to_string(),
+                            ));
+                        }
+                        if let Some(note) = state.notes().get(&pkm_core::id::NoteId(source_id)) {
+                            return Some((
+                                pos.id.clone(),
+                                note.title.clone(),
+                                pos.x, pos.y,
+                                String::new(), String::new(),
+                                "note".to_string(),
+                            ));
+                        }
+                        if let Some(entity) = state.entities().get(&pkm_core::id::EntityId(source_id)) {
+                            return Some((
+                                pos.id.clone(),
+                                entity.name.clone(),
+                                pos.x, pos.y,
+                                String::new(), String::new(),
+                                "entity".to_string(),
+                            ));
+                        }
+                    }
+                    None
                 })
                 .collect();
-            Some(nodes)
+            Some(GraphViewResult { nodes, edges })
         } else {
-            let nodes: Vec<_> = sources
-                .iter()
-                .map(|source| {
-                    (
-                        source.id.to_string(),
+            let mut nodes = Vec::new();
+            let mut seen_ids = HashSet::new();
+
+            // Only include nodes that have links or are in referenced_ids
+            for source in state.sources().values() {
+                let id = source.id.to_string();
+                if referenced_ids.contains(&id) || !edges.is_empty() {
+                    seen_ids.insert(id.clone());
+                    nodes.push((
+                        id,
                         source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
-                        0.0,
-                        0.0,
+                        0.0, 0.0,
                         format!("{:?}", source.origin),
                         format!("{:?}", source.ingestion_state),
                         "source".to_string(),
-                    )
-                })
-                .collect();
+                    ));
+                }
+            }
+            for note in state.notes().values() {
+                let id = note.id.to_string();
+                if referenced_ids.contains(&id) || !edges.is_empty() {
+                    seen_ids.insert(id.clone());
+                    nodes.push((
+                        id,
+                        note.title.clone(),
+                        0.0, 0.0,
+                        String::new(), String::new(),
+                        "note".to_string(),
+                    ));
+                }
+            }
+            for entity in state.entities().values() {
+                let id = entity.id.to_string();
+                if referenced_ids.contains(&id) || !edges.is_empty() {
+                    seen_ids.insert(id.clone());
+                    nodes.push((
+                        id,
+                        entity.name.clone(),
+                        0.0, 0.0,
+                        String::new(), String::new(),
+                        "entity".to_string(),
+                    ));
+                }
+            }
 
-            Some(nodes)
+            // If no links exist, include all nodes (scatter plot fallback)
+            if nodes.is_empty() {
+                for source in state.sources().values() {
+                    nodes.push((
+                        source.id.to_string(),
+                        source.title.clone().unwrap_or_else(|| "[untitled]".to_string()),
+                        0.0, 0.0,
+                        format!("{:?}", source.origin),
+                        format!("{:?}", source.ingestion_state),
+                        "source".to_string(),
+                    ));
+                }
+                for note in state.notes().values() {
+                    nodes.push((
+                        note.id.to_string(),
+                        note.title.clone(),
+                        0.0, 0.0,
+                        String::new(), String::new(),
+                        "note".to_string(),
+                    ));
+                }
+                for entity in state.entities().values() {
+                    nodes.push((
+                        entity.id.to_string(),
+                        entity.name.clone(),
+                        0.0, 0.0,
+                        String::new(), String::new(),
+                        "entity".to_string(),
+                    ));
+                }
+            }
+
+            Some(GraphViewResult { nodes, edges })
         }
     } else {
         None
@@ -135,6 +251,7 @@ pub fn get_link_network(
     let mut nodes = HashMap::new();
     let mut edges = Vec::new();
     let mut visited = std::collections::HashSet::new();
+    let mut processed_links = std::collections::HashSet::new();
     let mut queue = VecDeque::new();
     let mut node_depth = HashMap::new();
 
@@ -152,8 +269,10 @@ pub fn get_link_network(
         },
     );
 
+    let max_nodes = 300;
+
     while let Some((current_ref, current_depth)) = queue.pop_front() {
-        if current_depth >= depth {
+        if current_depth >= depth || nodes.len() >= max_nodes {
             continue;
         }
 
@@ -223,16 +342,34 @@ pub fn get_link_network(
                                 );
                             }
                         }
+                    } else if to_type == "block" {
+                        if let Ok(block_uuid) = uuid::Uuid::parse_str(&to_id) {
+                            let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                            if let Ok(Some(note_id)) = note_repo.get_note_id_for_block(pkm_core::id::BlockId(block_uuid)) {
+                                if let Ok(Some(note)) = note_repo.get(note_id) {
+                                    nodes.insert(
+                                        to_id.clone(),
+                                        commands::LinkNetworkNode {
+                                            id: to_id.clone(),
+                                            title: format!("[block] {}", note.title),
+                                            kind: "block".to_string(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
 
-                edges.push(commands::LinkNetworkEdge {
-                    id: link.id.to_string(),
-                    source: from_id_str.clone(),
-                    target: to_id.clone(),
-                    link_type: format!("{:?}", link.link_type).to_lowercase(),
-                    confidence: link.confidence,
-                });
+                if processed_links.insert(link.id) {
+                    edges.push(commands::LinkNetworkEdge {
+                        id: link.id.to_string(),
+                        source: from_id_str.clone(),
+                        target: to_id.clone(),
+                        link_type: format!("{:?}", link.link_type).to_lowercase(),
+                        confidence: link.confidence,
+                    });
+                }
             }
         }
 
@@ -294,16 +431,34 @@ pub fn get_link_network(
                                 );
                             }
                         }
+                    } else if from_type == "block" {
+                        if let Ok(block_uuid) = uuid::Uuid::parse_str(&from_id) {
+                            let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                            if let Ok(Some(note_id)) = note_repo.get_note_id_for_block(pkm_core::id::BlockId(block_uuid)) {
+                                if let Ok(Some(note)) = note_repo.get(note_id) {
+                                    nodes.insert(
+                                        from_id.clone(),
+                                        commands::LinkNetworkNode {
+                                            id: from_id.clone(),
+                                            title: format!("[block] {}", note.title),
+                                            kind: "block".to_string(),
+                                        },
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
 
-                edges.push(commands::LinkNetworkEdge {
-                    id: link.id.to_string(),
-                    source: from_id,
-                    target: from_id_str.clone(),
-                    link_type: format!("{:?}", link.link_type).to_lowercase(),
-                    confidence: link.confidence,
-                });
+                if processed_links.insert(link.id) {
+                    edges.push(commands::LinkNetworkEdge {
+                        id: link.id.to_string(),
+                        source: from_id,
+                        target: from_id_str.clone(),
+                        link_type: format!("{:?}", link.link_type).to_lowercase(),
+                        confidence: link.confidence,
+                    });
+                }
             }
         }
     }
@@ -327,6 +482,7 @@ pub fn get_neighbors(
 
     let mut nodes = HashMap::new();
     let mut edges = Vec::new();
+    let mut processed_links = std::collections::HashSet::new();
 
     let target_ref = if let Ok(entity) = entity_repo.get(pkm_core::id::EntityId(uuid)) {
         if let Some(ent) = entity {
@@ -397,15 +553,33 @@ pub fn get_neighbors(
                         );
                     }
                 }
+            } else if to_type == "block" {
+                if let Ok(block_uuid) = uuid::Uuid::parse_str(&to_id) {
+                    let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                    if let Ok(Some(note_id)) = note_repo.get_note_id_for_block(pkm_core::id::BlockId(block_uuid)) {
+                        if let Ok(Some(note)) = note_repo.get(note_id) {
+                            nodes.insert(
+                                to_id.clone(),
+                                commands::LinkNetworkNode {
+                                    id: to_id.clone(),
+                                    title: format!("[block] {}", note.title),
+                                    kind: "block".to_string(),
+                                },
+                            );
+                        }
+                    }
+                }
             }
 
-            edges.push(commands::LinkNetworkEdge {
-                id: link.id.to_string(),
-                source: target_id.to_string(),
-                target: to_id,
-                link_type: format!("{:?}", link.link_type).to_lowercase(),
-                confidence: link.confidence,
-            });
+            if processed_links.insert(link.id) {
+                edges.push(commands::LinkNetworkEdge {
+                    id: link.id.to_string(),
+                    source: target_id.to_string(),
+                    target: to_id,
+                    link_type: format!("{:?}", link.link_type).to_lowercase(),
+                    confidence: link.confidence,
+                });
+            }
         }
     }
 
@@ -460,15 +634,33 @@ pub fn get_neighbors(
                         );
                     }
                 }
+            } else if from_type == "block" {
+                if let Ok(block_uuid) = uuid::Uuid::parse_str(&from_id) {
+                    let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                    if let Ok(Some(note_id)) = note_repo.get_note_id_for_block(pkm_core::id::BlockId(block_uuid)) {
+                        if let Ok(Some(note)) = note_repo.get(note_id) {
+                            nodes.insert(
+                                from_id.clone(),
+                                commands::LinkNetworkNode {
+                                    id: from_id.clone(),
+                                    title: format!("[block] {}", note.title),
+                                    kind: "block".to_string(),
+                                },
+                            );
+                        }
+                    }
+                }
             }
 
-            edges.push(commands::LinkNetworkEdge {
-                id: link.id.to_string(),
-                source: from_id,
-                target: target_id.to_string(),
-                link_type: format!("{:?}", link.link_type).to_lowercase(),
-                confidence: link.confidence,
-            });
+            if processed_links.insert(link.id) {
+                edges.push(commands::LinkNetworkEdge {
+                    id: link.id.to_string(),
+                    source: from_id,
+                    target: target_id.to_string(),
+                    link_type: format!("{:?}", link.link_type).to_lowercase(),
+                    confidence: link.confidence,
+                });
+            }
         }
     }
 
@@ -535,7 +727,38 @@ pub fn get_canvas_view_data(
                         });
                     }
                 }
-                _ => {}
+                ObjectRef::Block(block_id) => {
+                    let note_repo = FsNoteRepo { state: vault.clone(), vault_path: vault_path.clone() };
+                    if let Ok(Some(note_id)) = note_repo.get_note_id_for_block(*block_id) {
+                        if let Ok(Some(note)) = note_repo.get(note_id) {
+                            nodes.push(commands::CanvasNodeData {
+                                id: block_id.to_string(),
+                                title: format!("[block] {}", note.title),
+                                x: node.x, y: node.y, width: node.width, height: node.height,
+                                color_theme: node.color_theme.clone(),
+                                kind: "block".to_string(),
+                            });
+                        }
+                    }
+                }
+                ObjectRef::Link(link_id) => {
+                    nodes.push(commands::CanvasNodeData {
+                        id: link_id.to_string(),
+                        title: format!("[link] {}", link_id),
+                        x: node.x, y: node.y, width: node.width, height: node.height,
+                        color_theme: node.color_theme.clone(),
+                        kind: "link".to_string(),
+                    });
+                }
+                ObjectRef::View(view_id) => {
+                    nodes.push(commands::CanvasNodeData {
+                        id: view_id.to_string(),
+                        title: format!("[view] {}", view_id),
+                        x: node.x, y: node.y, width: node.width, height: node.height,
+                        color_theme: node.color_theme.clone(),
+                        kind: "view".to_string(),
+                    });
+                }
             }
         }
 
@@ -551,9 +774,38 @@ pub fn get_canvas_view_data(
             }
         }).collect();
 
+        let edges = params.edge_visuals.iter().map(|e| {
+            let (from_type, from_id) = match &e.from {
+                ObjectRef::Source(id) => ("source", id.to_string()),
+                ObjectRef::Note(id) => ("note", id.to_string()),
+                ObjectRef::Block(id) => ("block", id.to_string()),
+                ObjectRef::Entity(id) => ("entity", id.to_string()),
+                ObjectRef::Link(id) => ("link", id.to_string()),
+                ObjectRef::View(id) => ("view", id.to_string()),
+            };
+            let (to_type, to_id) = match &e.to {
+                ObjectRef::Source(id) => ("source", id.to_string()),
+                ObjectRef::Note(id) => ("note", id.to_string()),
+                ObjectRef::Block(id) => ("block", id.to_string()),
+                ObjectRef::Entity(id) => ("entity", id.to_string()),
+                ObjectRef::Link(id) => ("link", id.to_string()),
+                ObjectRef::View(id) => ("view", id.to_string()),
+            };
+            commands::CanvasEdgeData {
+                id: format!("{}->{}", from_id, to_id),
+                from_type: from_type.to_string(),
+                from_id,
+                to_type: to_type.to_string(),
+                to_id,
+                routing_style: e.routing_style.clone(),
+                color: e.color.clone(),
+            }
+        }).collect();
+
         Some(commands::CanvasViewRenderData {
             title: view.title.clone(),
             nodes,
+            edges,
             frames,
         })
     } else {
@@ -603,10 +855,10 @@ pub fn get_timeline_view_data(
         let limit = params.limit.unwrap_or(100);
         let per_type_limit = limit;
 
-        let mut grouped: BTreeMap<String, BTreeMap<String, Vec<commands::TimelineEventData>>> = BTreeMap::new();
+        let mut year_map: std::collections::HashMap<String, std::collections::HashMap<String, Vec<commands::TimelineEventData>>> = std::collections::HashMap::new();
 
         for source in sources.iter().take(per_type_limit) {
-            let date_str = source.captured_at.to_string();
+            let date_str = fmt_rfc3339(&source.captured_at);
             let year = date_str.split('-').next().unwrap_or("unknown").to_string();
 
             let month_key = if date_str.len() >= 7 {
@@ -618,7 +870,15 @@ pub fn get_timeline_view_data(
                             date_str[0..7].to_string()
                         }
                     }
-                    TimelineGrouping::Week |
+                    TimelineGrouping::Week => {
+                        if let Ok(dt) = time::OffsetDateTime::parse(&date_str, &time::format_description::well_known::Rfc3339) {
+                            let date = dt.date();
+                            let iso_week = date.iso_week();
+                            format!("{}-W{:02}", date.year(), iso_week)
+                        } else {
+                            date_str[0..7].to_string()
+                        }
+                    }
                     TimelineGrouping::Month => date_str[0..7].to_string(),
                     TimelineGrouping::Year => year.clone(),
                 }
@@ -632,9 +892,9 @@ pub fn get_timeline_view_data(
                 date: date_str,
             };
 
-            grouped
+            year_map
                 .entry(year)
-                .or_insert_with(BTreeMap::new)
+                .or_insert_with(std::collections::HashMap::new)
                 .entry(month_key)
                 .or_insert_with(Vec::new)
                 .push(event);
@@ -642,7 +902,7 @@ pub fn get_timeline_view_data(
 
         for entity in timeline_entities.iter().take(per_type_limit) {
             let date = entity.semantic_date.unwrap_or(entity.created_at);
-            let date_str = date.to_string();
+            let date_str = fmt_rfc3339(&date);
             let year = date_str.split('-').next().unwrap_or("unknown").to_string();
 
             let month_key = if date_str.len() >= 7 {
@@ -654,7 +914,15 @@ pub fn get_timeline_view_data(
                             date_str[0..7].to_string()
                         }
                     }
-                    TimelineGrouping::Week |
+                    TimelineGrouping::Week => {
+                        if let Ok(dt) = time::OffsetDateTime::parse(&date_str, &time::format_description::well_known::Rfc3339) {
+                            let date = dt.date();
+                            let iso_week = date.iso_week();
+                            format!("{}-W{:02}", date.year(), iso_week)
+                        } else {
+                            date_str[0..7].to_string()
+                        }
+                    }
                     TimelineGrouping::Month => date_str[0..7].to_string(),
                     TimelineGrouping::Year => year.clone(),
                 }
@@ -668,17 +936,49 @@ pub fn get_timeline_view_data(
                 date: date_str,
             };
 
-            grouped
+            year_map
                 .entry(year)
-                .or_insert_with(BTreeMap::new)
+                .or_insert_with(std::collections::HashMap::new)
                 .entry(month_key)
                 .or_insert_with(Vec::new)
                 .push(event);
         }
 
+        // Convert HashMap to ordered Vec preserving the intended sort direction
+        let mut years: Vec<(&str, &std::collections::HashMap<String, Vec<commands::TimelineEventData>>)> = year_map.iter().map(|(k, v)| (k.as_str(), v)).collect();
+        if params.reverse_chronological {
+            years.sort_by(|a, b| b.0.cmp(a.0));
+        } else {
+            years.sort_by(|a, b| a.0.cmp(b.0));
+        }
+
+        let groups: Vec<commands::TimelineGroup> = years.iter().map(|(year, month_map)| {
+            let mut months: Vec<(&str, &Vec<commands::TimelineEventData>)> = month_map.iter().map(|(k, v)| (k.as_str(), v)).collect();
+            if params.reverse_chronological {
+                months.sort_by(|a, b| b.0.cmp(a.0));
+            } else {
+                months.sort_by(|a, b| a.0.cmp(b.0));
+            }
+            commands::TimelineGroup {
+                year: year.to_string(),
+                months: months.iter().map(|(key, events)| {
+                    let mut sorted_events = (*events).clone();
+                    if params.reverse_chronological {
+                        sorted_events.sort_by(|a, b| b.date.cmp(&a.date));
+                    } else {
+                        sorted_events.sort_by(|a, b| a.date.cmp(&b.date));
+                    }
+                    commands::TimelineMonthGroup {
+                        key: key.to_string(),
+                        events: sorted_events,
+                    }
+                }).collect(),
+            }
+        }).collect();
+
         Some(commands::TimelineRenderData {
             title: view.title.clone(),
-            events: grouped,
+            groups,
         })
     } else {
         None

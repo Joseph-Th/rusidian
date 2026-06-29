@@ -75,6 +75,19 @@ pub enum ObjectRef {
     View(ViewId),
 }
 
+impl std::fmt::Display for ObjectRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectRef::Source(id) => write!(f, "source:{}", id),
+            ObjectRef::Note(id) => write!(f, "note:{}", id),
+            ObjectRef::Block(id) => write!(f, "block:{}", id),
+            ObjectRef::Entity(id) => write!(f, "entity:{}", id),
+            ObjectRef::Link(id) => write!(f, "link:{}", id),
+            ObjectRef::View(id) => write!(f, "view:{}", id),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -123,6 +123,7 @@ pub struct ViewInfo {
     pub id: String,
     pub kind: String,
     pub title: String,
+    pub params: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -138,9 +139,21 @@ pub struct TimelineEventData {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct TimelineMonthGroup {
+    pub key: String,
+    pub events: Vec<TimelineEventData>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineGroup {
+    pub year: String,
+    pub months: Vec<TimelineMonthGroup>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct TimelineRenderData {
     pub title: String,
-    pub events: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<TimelineEventData>>>,
+    pub groups: Vec<TimelineGroup>,
 }
 
 pub fn create_view(
@@ -182,6 +195,7 @@ pub fn list_views(
                 .and_then(|v| v.as_str().map(String::from))
                 .unwrap_or_else(|| format!("{:?}", v.kind).to_lowercase()),
             title: v.title,
+            params: serde_json::to_value(&v.params).unwrap_or_default(),
         })
         .collect())
 }
@@ -196,6 +210,7 @@ pub fn get_view(
         id: v.id.to_string(),
         kind: format!("{:?}", v.kind).to_lowercase(),
         title: v.title,
+        params: serde_json::to_value(&v.params).unwrap_or_default(),
     }))
 }
 
@@ -234,6 +249,7 @@ pub struct PreviewCard {
 pub struct SearchResult {
     pub id: String,
     pub title: String,
+    pub object_type: String,
 }
 
 pub fn search_notes(
@@ -245,7 +261,7 @@ pub fn search_notes(
 
     Ok(results
         .into_iter()
-        .map(|(id, title)| SearchResult { id, title })
+        .map(|(id, object_type, title)| SearchResult { id, object_type, title })
         .collect())
 }
 
@@ -271,6 +287,7 @@ pub struct GraphNode {
 pub struct GraphViewData {
     pub title: String,
     pub nodes: Vec<GraphNode>,
+    pub edges: Vec<LinkNetworkEdge>,
 }
 
 pub fn get_graph_view_data(
@@ -282,9 +299,10 @@ pub fn get_graph_view_data(
         .ok_or_else(|| format!("View not found: {}", view_id))?;
 
     match graph::get_graph_view_data(service.vault.clone(), service.vault_path.clone(), &view) {
-        Some(nodes) => Ok(Some(GraphViewData {
+        Some(result) => Ok(Some(GraphViewData {
             title: view.title,
-            nodes: nodes
+            nodes: result
+                .nodes
                 .into_iter()
                 .map(|(id, title, x, y, provenance, ingestion_state, node_type)| GraphNode {
                     id,
@@ -296,6 +314,7 @@ pub fn get_graph_view_data(
                     node_type,
                 })
                 .collect(),
+            edges: result.edges,
         })),
         None => Ok(None),
     }
@@ -347,9 +366,21 @@ pub struct CanvasFrameData {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CanvasEdgeData {
+    pub id: String,
+    pub from_type: String,
+    pub from_id: String,
+    pub to_type: String,
+    pub to_id: String,
+    pub routing_style: String,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CanvasViewRenderData {
     pub title: String,
     pub nodes: Vec<CanvasNodeData>,
+    pub edges: Vec<CanvasEdgeData>,
     pub frames: Vec<CanvasFrameData>,
 }
 
